@@ -2,10 +2,13 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type { ClientMessage, ServerMessage } from '@iotconnector/shared';
-import type { AlarmRule, Channel, Tag } from '@iotconnector/shared';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { AlarmEvent, AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
 import { Engine } from './engine/engine';
 import { loadConfig, saveConfig } from './config';
 import { AlarmEngine } from './alarms';
+import { WebhookNotifier } from './notify';
 import { TDengineWriter } from './storage/tdengine';
 
 /** ws 连接的最小接口（@fastify/websocket v11 传入 ws.WebSocket） */
@@ -27,6 +30,42 @@ async function main(): Promise<void> {
   const getTag = (id: string): Tag | undefined => tags.find((t) => t.id === id);
 
   const alarmEngine = new AlarmEngine(config.alarms ?? []);
+  const notifications: NotificationConfig = config.notifications ?? { enabled: false, webhookUrl: '' };
+  const notifier = new WebhookNotifier(() => notifications);
+
+  // 告警事件持久化：JSONL 追加（启动恢复）+ TDengine 审计表（可查询，best-effort）
+  const ALARM_FILE = path.resolve(process.cwd(), 'data', 'alarms.jsonl');
+  const persistAlarmEvent = (event: AlarmEvent): void => {
+    try {
+      fs.mkdirSync(path.dirname(ALARM_FILE), { recursive: true });
+      fs.appendFileSync(ALARM_FILE, JSON.stringify(event) + '\n');
+    } catch (e) {
+      console.error('[alarms] jsonl append failed:', String(e));
+    }
+    void storage
+      .query(
+        `INSERT INTO ${process.env.TDENGINE_DB ?? 'factory_bridge'}.alarm_events ` +
+          `(ts, event_id, rule_id, tag_id, tag_name, channel, status, kind, threshold, val, message) VALUES ` +
+          `(${event.ts}, '${event.id}', '${event.ruleId}', '${event.tagId}', '${event.tagName.replace(/'/g, "''")}', ` +
+          `'${event.channel}', '${event.state}', '${event.kind}', ${event.threshold}, ${event.value}, ` +
+          `'${(event.message ?? '').replace(/'/g, "''")}')`,
+      )
+      .catch(() => {});
+  };
+  try {
+    if (fs.existsSync(ALARM_FILE)) {
+      const events = fs
+        .readFileSync(ALARM_FILE, 'utf-8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as AlarmEvent);
+      alarmEngine.loadHistory(events);
+      console.log(`[alarms] restored ${events.length} events from ${ALARM_FILE}`);
+    }
+  } catch (e) {
+    console.error('[alarms] history restore failed:', String(e));
+  }
+  alarmEngine.onPersist = persistAlarmEvent;
 
   const storage = new TDengineWriter({
     url: process.env.TDENGINE_URL, // 未设置 → 管道禁用（状态 disabled）
@@ -39,6 +78,14 @@ async function main(): Promise<void> {
   const engine = new Engine(channels, tags);
   engine.start();
   storage.start();
+  // 告警审计表（事件持久化到 TDengine，best-effort）
+  void storage
+    .query(
+      `CREATE TABLE IF NOT EXISTS ${process.env.TDENGINE_DB ?? 'factory_bridge'}.alarm_events ` +
+        `(ts TIMESTAMP, event_id VARCHAR(64), rule_id VARCHAR(64), tag_id VARCHAR(32), tag_name VARCHAR(128), ` +
+        `channel VARCHAR(64), state VARCHAR(8), kind VARCHAR(8), threshold DOUBLE, value DOUBLE, message VARCHAR(200))`,
+    )
+    .catch(() => {});
 
   engine.onEvaluate = (tag, value, quality) => alarmEngine.evaluate(tag, value, quality);
 
@@ -66,7 +113,10 @@ async function main(): Promise<void> {
     }
   };
   engine.onStatus = (status) => broadcast({ type: 'channel-status', status });
-  alarmEngine.onEvent = (event) => broadcast({ type: 'alarm', event });
+  alarmEngine.onEvent = (event) => {
+    broadcast({ type: 'alarm', event });
+    void notifier.send(event);
+  };
 
   app.get('/ws', { websocket: true }, (socket: WsLike) => {
     clients.add(socket);
@@ -352,6 +402,24 @@ async function main(): Promise<void> {
     persist();
     broadcastConfigChanged();
     return { ok: true };
+  });
+
+  // ===== 完整配置与通知（PRD FR-M9 / M2）=====
+  app.get('/api/config', async () => ({
+    channels,
+    tags,
+    alarms: alarmEngine.getRules(),
+    notifications,
+  }));
+
+  app.get('/api/notifications', async () => notifications);
+
+  app.put('/api/notifications', async (req, reply) => {
+    const b = (req.body ?? {}) as Partial<NotificationConfig>;
+    if (b.enabled !== undefined) notifications.enabled = Boolean(b.enabled);
+    if (b.webhookUrl !== undefined) notifications.webhookUrl = String(b.webhookUrl);
+    persist();
+    return notifications;
   });
 
   await app.listen({ port: PORT, host: '0.0.0.0' });

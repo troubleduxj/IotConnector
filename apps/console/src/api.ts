@@ -151,3 +151,77 @@ export async function writeTagValue(
   });
   return (await res.json()) as { ok: boolean; error?: string };
 }
+
+// ===== 通道 / 位号 配置 CRUD（PRD FR-M2-01）=====
+
+export interface GatewayChannel {
+  id: string;
+  name: string;
+  protocol: string;
+  host: string;
+  port: number;
+  enabled: boolean;
+  pollIntervalMs: number;
+  params: Record<string, string | number | boolean>;
+}
+
+export interface GatewayConfigFull {
+  channels: GatewayChannel[];
+  tags: GatewayTag[];
+  alarms: AlarmRule[];
+  notifications: { enabled: boolean; webhookUrl: string };
+}
+
+export async function fetchConfig(): Promise<GatewayConfigFull> {
+  const res = await fetch('/api/config');
+  return (await res.json()) as GatewayConfigFull;
+}
+
+export async function createChannel(channel: Omit<GatewayChannel, 'id'>): Promise<GatewayChannel> {
+  const res = await fetch('/api/channels', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(channel),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? 'create channel failed');
+  return (await res.json()) as GatewayChannel;
+}
+
+export async function updateChannel(id: string, patch: Partial<GatewayChannel>): Promise<GatewayChannel> {
+  const res = await fetch(`/api/channels/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('update channel failed');
+  return (await res.json()) as GatewayChannel;
+}
+
+export async function deleteChannel(id: string): Promise<void> {
+  await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+}
+
+export async function createTag(tag: Omit<GatewayTag, 'id'>): Promise<GatewayTag> {
+  const res = await fetch('/api/tags', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(tag),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? 'create tag failed');
+  return (await res.json()) as GatewayTag;
+}
+
+export async function updateTag(id: string, patch: Partial<GatewayTag>): Promise<GatewayTag> {
+  const res = await fetch(`/api/tags/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('update tag failed');
+  return (await res.json()) as GatewayTag;
+}
+
+export async function deleteTag(id: string): Promise<void> {
+  await fetch(`/api/tags/${id}`, { method: 'DELETE' });
+}
+

@@ -13,6 +13,8 @@ export class AlarmEngine {
 
   /** 告警事件回调（WS 广播用） */
   onEvent?: (event: AlarmEvent) => void;
+  /** 事件持久化钩子（JSONL 追加 / TDengine 审计表） */
+  onPersist?: (event: AlarmEvent) => void;
 
   static readonly MAX_HISTORY = 200;
 
@@ -104,5 +106,11 @@ export class AlarmEngine {
   private pushHistory(event: AlarmEvent): void {
     this.history.unshift(event);
     if (this.history.length > AlarmEngine.MAX_HISTORY) this.history.length = AlarmEngine.MAX_HISTORY;
+    this.onPersist?.(event);
+  }
+
+  /** 启动时从持久层恢复历史（文件按时间正序存储，读入后倒序为最新在前） */
+  loadHistory(events: AlarmEvent[]): void {
+    this.history = [...events].reverse().slice(0, AlarmEngine.MAX_HISTORY);
   }
 }

@@ -115,3 +115,10 @@ export interface AlarmEvent {
   ts: number;
   message?: string;
 }
+
+/** 告警通知配置（MVP：通用 Webhook，兼容钉钉/企微机器人格式化由网关适配） */
+export interface NotificationConfig {
+  enabled: boolean;
+  /** Webhook 地址（POST JSON：{ event, tagName, kind, value, threshold, ts }） */
+  webhookUrl: string;
+}

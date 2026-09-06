@@ -3,8 +3,7 @@ import {
   LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
   Legend, ResponsiveContainer, Area, ComposedChart, ReferenceLine
 } from 'recharts';
-import { mockTags } from '../data';
-import { fetchHistory, type HistorySeries } from '../api';
+import { fetchHistory, fetchGatewayTags, type GatewayTag, type HistorySeries } from '../api';
 import { useRuntime } from '../store/runtime';
 import {
   Calendar, Download, Search, RefreshCw, Layers, CheckSquare, Square,
@@ -102,63 +101,45 @@ export default function Historian() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Channels list for filtering
-  const channels = useMemo(() => {
-    const set = new Set(mockTags.map(t => t.channel));
-    return ['All', ...Array.from(set)];
+  // ===== 真实位号列表（网关 /api/tags，单一数据源）=====
+  const [gatewayTags, setGatewayTags] = useState<GatewayTag[]>([]);
+  useEffect(() => {
+    fetchGatewayTags().then(setGatewayTags).catch(() => setGatewayTags([]));
   }, []);
 
-  // Filtered available tags based on search & channel
+  const channels = useMemo(() => {
+    const set = new Set(gatewayTags.map(t => t.channelId));
+    return ['All', ...Array.from(set)];
+  }, [gatewayTags]);
+
   const filteredAvailableTags = useMemo(() => {
-    return mockTags.filter(tag => {
-      const matchSearch = 
+    return gatewayTags.filter(tag => {
+      const matchSearch =
         tag.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tag.channel.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        tag.type.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchChannel = selectedChannelFilter === 'All' || tag.channel === selectedChannelFilter;
+        tag.channelId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tag.dataType.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchChannel = selectedChannelFilter === 'All' || tag.channelId === selectedChannelFilter;
       return matchSearch && matchChannel;
     });
-  }, [searchQuery, selectedChannelFilter]);
+  }, [gatewayTags, searchQuery, selectedChannelFilter]);
 
-  // Selected tags metadata
+  // 选中位号元数据：单位直接取位号模型（不再按名字猜测），颜色按选择顺序分配
   const activeTags = useMemo(() => {
-    return selectedTagIds.map((id, index) => {
-      const tag = mockTags.find(t => t.id === id) || {
-        id,
-        name: `Tag_${id}`,
-        channel: 'Unknown',
-        value: 0,
-        type: 'number',
-        quality: 'Good',
-        lastUpdated: new Date().toISOString()
-      };
-      const unit = tag.name.includes('pH') 
-        ? 'pH' 
-        : tag.name.includes('Temp') 
-        ? '°C' 
-        : tag.name.includes('Speed') 
-        ? 'RPM' 
-        : tag.name.includes('Current') 
-        ? 'A' 
-        : tag.name.includes('Voltage') 
-        ? 'V' 
-        : tag.name.includes('Pressure') 
-        ? 'bar' 
-        : tag.name.includes('Flow') 
-        ? 'L/min' 
-        : tag.name.includes('Torque') 
-        ? 'Nm' 
-        : tag.name.includes('Count') 
-        ? 'pcs' 
-        : '';
-
-      return {
-        ...tag,
-        unit,
-        color: TAG_COLORS[index % TAG_COLORS.length]
-      };
-    });
-  }, [selectedTagIds]);
+    return selectedTagIds
+      .map((id, index) => {
+        const tag = gatewayTags.find(t => t.id === id);
+        if (!tag) return null;
+        return {
+          id: tag.id,
+          name: tag.name,
+          channel: tag.channelId,
+          dataType: tag.dataType,
+          unit: tag.unit,
+          color: TAG_COLORS[index % TAG_COLORS.length],
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+  }, [selectedTagIds, gatewayTags]);
 
   // Toggle tag selection
   const handleToggleTag = (id: string) => {
@@ -286,19 +267,17 @@ export default function Historian() {
   // Quick Preset Selection presets
   const handleSelectQuickGroup = (type: 'all' | 'reactors' | 'drives' | 'clear') => {
     if (type === 'all') {
-      setSelectedTagIds(mockTags.slice(0, 6).map(t => t.id));
-      showToast('Loaded Top 6 Process Tags.');
+      setSelectedTagIds(gatewayTags.slice(0, 6).map(t => t.id));
+      showToast('已载入前 6 个工艺位号。');
     } else if (type === 'reactors') {
-      const reactorIds = mockTags.filter(t => t.channel.includes('R0021')).map(t => t.id);
-      setSelectedTagIds(reactorIds);
-      showToast('Selected Reactor R0021 Parameters.');
+      setSelectedTagIds(gatewayTags.filter(t => t.channelId.includes('s7-01')).map(t => t.id));
+      showToast('已选择反应釜 R0021 参数。');
     } else if (type === 'drives') {
-      const driveIds = mockTags.filter(t => t.channel.includes('Drive') || t.channel.includes('Line1')).map(t => t.id);
-      setSelectedTagIds(driveIds);
-      showToast('Selected Drive & Motion Tags.');
+      setSelectedTagIds(gatewayTags.filter(t => t.channelId.includes('mb-01')).map(t => t.id));
+      showToast('已选择传动与电机位号。');
     } else {
-      setSelectedTagIds([mockTags[0].id]);
-      showToast('Reset to single tag.');
+      setSelectedTagIds(gatewayTags.length ? [gatewayTags[0].id] : []);
+      showToast('已重置为单个位号。');
     }
   };
 
@@ -671,7 +650,7 @@ export default function Historian() {
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm">
                 <Search className="w-4 h-4 text-indigo-600" />
-                <span>Tag Selector ({selectedTagIds.length} / {mockTags.length})</span>
+                <span>Tag Selector ({selectedTagIds.length} / {gatewayTags.length})</span>
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
                 Max 8 Tags
@@ -754,14 +733,14 @@ export default function Historian() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-xs text-slate-800 truncate">{tag.name}</span>
-                          {tag.type === 'number' && (
-                            <span className="text-[10px] font-mono text-slate-500 font-semibold">
-                              ({tag.value})
+                          {liveValues[tag.id] !== undefined && (
+                            <span className="text-[10px] font-mono text-indigo-600 font-semibold">
+                              ({typeof liveValues[tag.id].value === 'number' ? (liveValues[tag.id].value as number).toFixed(2) : String(liveValues[tag.id].value)})
                             </span>
                           )}
                         </div>
                         <div className="text-[10px] text-slate-400 truncate">
-                          {tag.channel}
+                          {tag.channelId} · {tag.dataType}
                         </div>
                       </div>
                     </div>
@@ -986,7 +965,7 @@ export default function Historian() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {tagStatistics.map(stat => {
-                const tagMeta = mockTags.find(t => t.id === stat.tagId);
+                const tagMeta = activeTags.find(t => t.id === stat.tagId);
                 const delta = Number((stat.max - stat.min).toFixed(2));
 
                 return (

@@ -102,6 +102,12 @@ export class TDengineWriter {
           `TAGS (channel VARCHAR(64), tag_name VARCHAR(128), data_type VARCHAR(16))`,
       );
       if (stb.code !== 0) throw new Error(`create stable ${stb.code}: ${stb.msg ?? ''}`);
+      // 告警事件审计表（PRD FR-M10-01 持久化）
+      await this.query(
+        `CREATE TABLE IF NOT EXISTS ${this.cfg.database}.alarm_events ` +
+          `(ts TIMESTAMP, event_id VARCHAR(64), rule_id VARCHAR(64), tag_id VARCHAR(32), tag_name VARCHAR(128), ` +
+          `channel VARCHAR(64), status VARCHAR(8), kind VARCHAR(8), threshold DOUBLE, val DOUBLE, message VARCHAR(200))`,
+      );
       this.inited = true;
     } catch (e) {
       this.error = `init: ${String(e)}`;

@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AlarmRule, Channel, Tag } from '@iotconnector/shared';
+import type { AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
 
 export interface GatewayConfig {
   channels: Channel[];
   tags: Tag[];
   alarms: AlarmRule[];
+  notifications?: NotificationConfig;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -78,6 +79,7 @@ function seedConfig(): GatewayConfig {
       { id: 'alm-2', tagId: '7', kind: 'high', threshold: 25.8, hysteresis: 0.4, enabled: true, message: 'Inverter current high' },
       { id: 'alm-3', tagId: '1', kind: 'low', threshold: 6.9, hysteresis: 0.1, enabled: true, message: 'Reactor pH low' },
     ],
+    notifications: { enabled: false, webhookUrl: '' },
   };
 }
 
@@ -86,6 +88,7 @@ export function loadConfig(): GatewayConfig {
     if (fs.existsSync(CONFIG_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig;
       parsed.alarms = parsed.alarms ?? []; // 旧版本配置迁移
+      parsed.notifications = parsed.notifications ?? { enabled: false, webhookUrl: '' };
       return parsed;
     }
   } catch (e) {

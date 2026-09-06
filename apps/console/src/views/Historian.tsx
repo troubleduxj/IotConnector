@@ -9,7 +9,7 @@ import {
   Calendar, Download, Search, RefreshCw, Layers, CheckSquare, Square,
   X, Filter, Eye, EyeOff, BarChart2, TrendingUp, Sliders, Image, FileSpreadsheet,
   FileText, Clock, Sparkles, Activity, Check, CheckCircle2, ChevronDown, ChevronRight,
-  Maximize2, ArrowUpDown, HelpCircle, AlertTriangle
+  Maximize2, ArrowUpDown, HelpCircle, AlertTriangle, ChevronLeft
 } from 'lucide-react';
 import { Tag } from '../types';
 
@@ -122,6 +122,19 @@ export default function Historian() {
       return matchSearch && matchChannel;
     });
   }, [gatewayTags, searchQuery, selectedChannelFilter]);
+
+  // 位号选择器分页（PRD FR-M7-01）
+  const TAG_PAGE_SIZE = 8;
+  const [tagPage, setTagPage] = useState(0);
+  const tagTotalPages = Math.max(1, Math.ceil(filteredAvailableTags.length / TAG_PAGE_SIZE));
+  const safeTagPage = Math.min(tagPage, tagTotalPages - 1);
+  const pagedTags = useMemo(
+    () => filteredAvailableTags.slice(safeTagPage * TAG_PAGE_SIZE, (safeTagPage + 1) * TAG_PAGE_SIZE),
+    [filteredAvailableTags, safeTagPage],
+  );
+  useEffect(() => {
+    setTagPage(0);
+  }, [searchQuery, selectedChannelFilter]);
 
   // 选中位号元数据：单位直接取位号模型（不再按名字猜测），颜色按选择顺序分配
   const activeTags = useMemo(() => {
@@ -702,7 +715,7 @@ export default function Historian() {
                 No matching tags found.
               </div>
             ) : (
-              filteredAvailableTags.map(tag => {
+              pagedTags.map(tag => {
                 const isSelected = selectedTagIds.includes(tag.id);
                 const tagColor = activeTags.find(t => t.id === tag.id)?.color;
                 const isVisible = tagVisibility[tag.id] !== false;
@@ -759,6 +772,29 @@ export default function Historian() {
                 );
               })
             )}
+          </div>
+
+          {/* 分页控件 */}
+          <div className="px-3 py-2 border-t border-slate-100 bg-white flex items-center justify-between text-[11px]">
+            <span className="font-mono text-slate-400">
+              {filteredAvailableTags.length} 个位号 · 第 {safeTagPage + 1} / {tagTotalPages} 页
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setTagPage(safeTagPage - 1)}
+                disabled={safeTagPage === 0}
+                className="p-1 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setTagPage(safeTagPage + 1)}
+                disabled={safeTagPage >= tagTotalPages - 1}
+                className="p-1 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           {/* Active tags badges summary */}

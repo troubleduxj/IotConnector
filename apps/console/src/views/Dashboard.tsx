@@ -18,13 +18,17 @@ export default function Dashboard() {
     connect();
   }, [connect]);
 
-  // 告警轮询：5s（活动告警 + 最近事件，PRD FR-M1-04）
+  // 告警刷新：WS 实时推送触发即时刷新 + 5s 轮询兜底（PRD FR-M1-04）
+  const alarmSeq = useRuntime((s) => s.alarmSeq);
   useEffect(() => {
     const load = (): void => { fetchAlarms().then(setAlarms).catch(() => {}); };
     load();
     const timer = setInterval(load, 5000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (alarmSeq > 0) fetchAlarms().then(setAlarms).catch(() => {});
+  }, [alarmSeq]);
 
   const activeAlarms = alarms?.active ?? [];
   const recentAlarms = (alarms?.history ?? []).slice(0, 6);

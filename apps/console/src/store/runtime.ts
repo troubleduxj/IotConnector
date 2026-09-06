@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  AlarmEvent,
   ChannelStatus,
   ClientMessage,
   ServerMessage,
@@ -20,6 +21,9 @@ interface RuntimeState {
   channels: Record<string, ChannelStatus>;
   storage: StorageStatus | null;
   lastUpdateTs: number | null;
+  /** WS 实时推送的最新告警事件（Dashboard/告警中心订阅后即时刷新） */
+  lastAlarmEvent: AlarmEvent | null;
+  alarmSeq: number;
   connect: () => void;
   write: (tagId: string, value: number | string | boolean) => Promise<{ ok: boolean; error?: string }>;
 }
@@ -33,6 +37,8 @@ export const useRuntime = create<RuntimeState>((set) => ({
   channels: {},
   storage: null,
   lastUpdateTs: null,
+  lastAlarmEvent: null,
+  alarmSeq: 0,
 
   connect: () => {
     if (socket) return;
@@ -93,6 +99,9 @@ function openSocket(): void {
         break;
       case 'storage-status':
         useRuntime.setState({ storage: msg.status });
+        break;
+      case 'alarm':
+        useRuntime.setState((s) => ({ lastAlarmEvent: msg.event, alarmSeq: s.alarmSeq + 1 }));
         break;
       default:
         break;

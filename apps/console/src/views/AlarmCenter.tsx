@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { fetchAlarmHistory, fetchAlarms, fetchGatewayTags, type AlarmEvent, type AlarmHistoryEvent, type AlarmRule, type GatewayTag } from '../api';
+import { useRuntime } from '../store/runtime';
 import { useI18n } from '../i18n';
 
 /**
@@ -13,6 +14,7 @@ type RangeFilter = '' | '1h' | '24h' | '7d';
 
 export default function AlarmCenter() {
   const { t } = useI18n();
+  const alarmSeq = useRuntime((s) => s.alarmSeq);
   const [tags, setTags] = useState<GatewayTag[]>([]);
   const [rules, setRules] = useState<AlarmRule[]>([]);
   const [active, setActive] = useState<AlarmEvent[]>([]);
@@ -66,6 +68,17 @@ export default function AlarmCenter() {
     query(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tagId, stateFilter, range]);
+
+  // WS 告警推送 → 即时刷新规则/活动/第一页历史
+  useEffect(() => {
+    if (alarmSeq === 0) return;
+    fetchAlarms().then((d) => {
+      setRules(d.rules);
+      setActive(d.active);
+    }).catch(() => {});
+    if (page === 0) query(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alarmSeq]);
 
   const tagName = (id: string): string => tags.find((t) => t.id === id)?.name ?? id;
 

@@ -5,8 +5,8 @@ import {
 } from 'lucide-react';
 import { PROTOCOL_CONFIGS, getParamSchema, type Protocol } from '@iotconnector/shared';
 import {
-  createChannel, createTag, deleteChannel, deleteTag, fetchConfig,
-  updateChannel, updateTag, type GatewayChannel, type GatewayTag,
+  createChannel, createTag, deleteChannel, deleteTag, fetchConfig, testChannelConnection,
+  updateChannel, updateTag, type ChannelTestResult, type GatewayChannel, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
 
@@ -32,7 +32,7 @@ export default function DeviceManagement() {
   const [newChannel, setNewChannel] = useState({ name: '', protocol: 'Modbus TCP' as Protocol, host: '192.168.1.100', port: 502 });
   const [tagModal, setTagModal] = useState<{ mode: 'add' | 'edit'; draft: GatewayTag } | null>(null);
   const [tagSearch, setTagSearch] = useState('');
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<ChannelTestResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string): void => {
@@ -141,11 +141,20 @@ export default function DeviceManagement() {
   };
 
   // ===== 连接测试（模拟握手摘要，驱动级真实测试在后续阶段）=====
-  const runConnectionTest = (): void => {
+  const [testBusy, setTestBusy] = useState(false);
+  const runConnectionTest = async (): Promise<void> => {
     if (!draft) return;
-    const meta = PROTOCOL_CONFIGS[draft.protocol as Protocol];
-    setTestResult(`${meta.standard} 握手序列（模拟）—— TCP 连通 ${draft.host}:${draft.port} → 协议协商成功 → 会话建立。RTT 3ms。`);
-    showToast('连接测试完成（模拟输出）。');
+    setTestBusy(true);
+    setTestResult(null);
+    try {
+      const result = await testChannelConnection(draft.id);
+      setTestResult(result);
+      showToast(result.ok ? '连接测试通过。' : '连接测试失败。');
+    } catch (e) {
+      showToast(`测试失败：${String(e)}`);
+    } finally {
+      setTestBusy(false);
+    }
   };
 
   // ===== 位号 CRUD =====
@@ -426,10 +435,12 @@ export default function DeviceManagement() {
                         {draft.protocol} 驱动选项
                       </h4>
                       <button
-                        onClick={runConnectionTest}
-                        className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                        onClick={() => void runConnectionTest()}
+                        disabled={testBusy}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-60"
                       >
-                        <Play className="w-3 h-3 text-emerald-600" /> 测试连接（模拟）
+                        {testBusy ? <Loader2 className="w-3 h-3 animate-spin text-indigo-600" /> : <Play className="w-3 h-3 text-emerald-600" />}
+                        {testBusy ? '测试中…' : '测试连接'}
                       </button>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -482,8 +493,24 @@ export default function DeviceManagement() {
                   </div>
 
                   {testResult && (
-                    <div className="px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-mono flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" /> {testResult}
+                    <div
+                      className={`rounded-lg border text-xs overflow-hidden ${
+                        testResult.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'
+                      }`}
+                    >
+                      <div className={`px-4 py-2 font-bold flex items-center gap-2 ${testResult.ok ? 'text-emerald-800' : 'text-rose-800'}`}>
+                        {testResult.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                        连接测试{testResult.ok ? '通过' : '失败'}
+                      </div>
+                      <div className="divide-y divide-white/60">
+                        {testResult.steps.map((step, i) => (
+                          <div key={i} className="px-4 py-1.5 flex items-center gap-2 font-mono text-[11px]">
+                            <span className={step.ok ? 'text-emerald-600' : 'text-rose-600'}>{step.ok ? '✓' : '✗'}</span>
+                            <span className="font-bold text-slate-700 w-44 shrink-0">{step.label}</span>
+                            <span className="text-slate-500 truncate">{step.detail ?? ''}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

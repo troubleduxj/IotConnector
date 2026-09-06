@@ -3,6 +3,8 @@
  * 认证：令牌存 localStorage，全部请求自动附带 Authorization；401 触发全局登出事件。
  */
 
+import type { NotificationConfig } from '@iotconnector/shared';
+
 const TOKEN_KEY = 'fb_token';
 export type ConsoleRole = 'admin' | 'engineer' | 'operator';
 export interface ConsoleUser {
@@ -379,4 +381,44 @@ export async function fetchAlarmHistory(
   params.set('offset', String(filters.offset ?? 0));
   const res = await apiFetch(`/api/alarms/history?${params.toString()}`);
   return (await res.json()) as AlarmHistoryResponse;
+}
+
+// ===== 通道连接测试（FR-M2-04 真实握手）=====
+
+export interface TestStep {
+  label: string;
+  ok: boolean;
+  detail?: string;
+}
+
+export interface ChannelTestResult {
+  ok: boolean;
+  rttMs: number;
+  steps: TestStep[];
+  error?: string;
+}
+
+export async function testChannelConnection(id: string): Promise<ChannelTestResult> {
+  const res = await apiFetch(`/api/channels/${id}/test`, { method: 'POST' });
+  return (await res.json()) as ChannelTestResult;
+}
+
+// ===== 通知渠道（钉钉/企微/邮件/Webhook）=====
+
+export async function saveNotifications(cfg: NotificationConfig): Promise<NotificationConfig> {
+  const res = await apiFetch('/api/notifications/v2', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(cfg),
+  });
+  return (await res.json()) as NotificationConfig;
+}
+
+export async function testNotificationChannel(channel: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await apiFetch('/api/notifications/test', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ channel }),
+  });
+  return (await res.json()) as { ok: boolean; error?: string };
 }

@@ -19,10 +19,12 @@
     "fastify": "^5.0.0",
     "modbus-serial": "^8.0.25",
     "node-opcua": "^2.134.0",
+    "nodemailer": "^10.0.0",
     "nodes7": "^0.3.18"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2"
   }

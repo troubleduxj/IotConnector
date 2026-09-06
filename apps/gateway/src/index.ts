@@ -8,7 +8,9 @@ import type { AlarmEvent, AlarmRule, Channel, NotificationConfig, Tag } from '@i
 import { Engine } from './engine/engine';
 import { loadConfig, saveConfig } from './config';
 import { AlarmEngine } from './alarms';
-import { WebhookNotifier } from './notify';
+import { dispatchAlarm, sendTestMessage } from './notify';
+import { testChannel } from './engine/testers';
+import { toNodes7Address } from './engine/drivers/s7';
 import { AuthStore, hashPassword, type Role, type SessionUser } from './auth';
 import { TDengineWriter } from './storage/tdengine';
 
@@ -49,8 +51,7 @@ async function main(): Promise<void> {
       /* 审计失败不阻塞业务 */
     }
   };
-  const notifications: NotificationConfig = config.notifications ?? { enabled: false, webhookUrl: '' };
-  const notifier = new WebhookNotifier(() => notifications);
+  const notifications: NotificationConfig = config.notifications;
 
   // 告警事件持久化：JSONL 追加（启动恢复）+ TDengine 审计表（可查询，best-effort）
   const ALARM_FILE = path.resolve(process.cwd(), 'data', 'alarms.jsonl');
@@ -153,7 +154,7 @@ async function main(): Promise<void> {
   };
   alarmEngine.onEvent = (event) => {
     broadcast({ type: 'alarm', event });
-    void notifier.send(event);
+    void dispatchAlarm(notifications, event);
   };
 
   app.get('/ws', { websocket: true }, (socket: WsLike) => {
@@ -322,6 +323,26 @@ async function main(): Promise<void> {
     return channel;
   });
 
+  // 真实连接测试（FR-M2-04）：临时连接执行协议握手序列，不干扰采集驱动
+  app.post('/api/channels/:id/test', async (req, reply) => {
+    if (!requireAuth(req, reply, 'engineer')) return;
+    const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
+    if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
+    const channelTagList = tags.filter((t) => t.channelId === channel.id);
+    let s7Probe: { nodes7Addr: string; addrLabel: string } | undefined;
+    let opcProbe: string | undefined;
+    if (channel.protocol === 'Siemens Profinet' && channelTagList[0]) {
+      try {
+        s7Probe = { nodes7Addr: toNodes7Address(channelTagList[0].address), addrLabel: `${channelTagList[0].address}` };
+      } catch {
+        /* 地址不可解析则跳过探针 */
+      }
+    }
+    if (channel.protocol === 'OPC UA' && channelTagList[0]) opcProbe = channelTagList[0].address;
+    const result = await testChannel(channel, s7Probe, opcProbe);
+    return result;
+  });
+
   app.delete('/api/channels/:id', async (req, reply) => {
     const actor = requireAuth(req, reply, 'admin');
     if (!actor) return;
@@ -479,6 +500,33 @@ async function main(): Promise<void> {
     if (b.webhookUrl !== undefined) notifications.webhookUrl = String(b.webhookUrl);
     persist();
     return notifications;
+  });
+
+  // 整体保存通知配置（四渠道）
+  app.put('/api/notifications/v2', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as NotificationConfig;
+    notifications.enabled = Boolean(b.enabled);
+    notifications.webhookUrl = String(b.webhookUrl ?? '');
+    if (b.dingtalk) notifications.dingtalk = b.dingtalk;
+    if (b.wecom) notifications.wecom = b.wecom;
+    if (b.email) notifications.email = b.email;
+    persist();
+    return notifications;
+  });
+
+  // 渠道测试消息
+  app.post('/api/notifications/test', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const { channel } = (req.body ?? {}) as { channel?: string };
+    try {
+      const via = await sendTestMessage(notifications, channel ?? 'webhook');
+      return { ok: true, via };
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: String((e as Error).message ?? e) });
+    }
   });
 
   // ===== 认证与用户管理（PRD FR-M10-02）=====

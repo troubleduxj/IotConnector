@@ -81,7 +81,13 @@ function seedConfig(): GatewayConfig {
       { id: 'alm-2', tagId: '7', kind: 'high', threshold: 25.8, hysteresis: 0.4, enabled: true, message: 'Inverter current high' },
       { id: 'alm-3', tagId: '1', kind: 'low', threshold: 6.9, hysteresis: 0.1, enabled: true, message: 'Reactor pH low' },
     ],
-    notifications: { enabled: false, webhookUrl: '' },
+    notifications: {
+      enabled: false,
+      webhookUrl: '',
+      dingtalk: { enabled: false, webhookUrl: '', secret: '' },
+      wecom: { enabled: false, webhookUrl: '' },
+      email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
+    },
     // 种子账号（首次启动生成；正式交付时首登强制改密为后续任务）
     users: [
       { id: 'u_admin', username: 'admin', passwordHash: hashPassword('admin123'), role: 'admin', createdAt: Date.now() },
@@ -96,7 +102,14 @@ export function loadConfig(): GatewayConfig {
     if (fs.existsSync(CONFIG_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig;
       parsed.alarms = parsed.alarms ?? []; // 旧版本配置迁移
-      parsed.notifications = parsed.notifications ?? { enabled: false, webhookUrl: '' };
+      parsed.notifications = {
+        enabled: false,
+        webhookUrl: '',
+        dingtalk: { enabled: false, webhookUrl: '', secret: '' },
+        wecom: { enabled: false, webhookUrl: '' },
+        email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
+        ...(parsed.notifications ?? {}),
+      } as NotificationConfig;
       parsed.users = parsed.users ?? [];
       return parsed;
     }

@@ -116,9 +116,37 @@ export interface AlarmEvent {
   message?: string;
 }
 
-/** 告警通知配置（MVP：通用 Webhook，兼容钉钉/企微机器人格式化由网关适配） */
+/** 告警通知配置：通用 Webhook + 钉钉机器人（支持加签）+ 企业微信机器人 + SMTP 邮件 */
 export interface NotificationConfig {
+  /** 总开关（停用时全部渠道不推送） */
   enabled: boolean;
-  /** Webhook 地址（POST JSON：{ event, tagName, kind, value, threshold, ts }） */
+  /** 通用 Webhook：POST JSON { event, tagName, kind, value, threshold, ts, message } */
   webhookUrl: string;
+  dingtalk: DingTalkConfig;
+  wecom: WecomConfig;
+  email: EmailConfig;
+}
+
+export interface DingTalkConfig {
+  enabled: boolean;
+  webhookUrl: string;
+  /** 加签密钥（安全设置选"加签"时必填） */
+  secret: string;
+}
+
+export interface WecomConfig {
+  enabled: boolean;
+  webhookUrl: string;
+}
+
+export interface EmailConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  /** 收件人（逗号分隔多个） */
+  to: string;
+  /** 465 端口通常为 true（隐式 TLS），587 为 false（STARTTLS） */
+  secure: boolean;
 }

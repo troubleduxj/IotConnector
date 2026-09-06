@@ -171,3 +171,10 @@ OPN（打开安全通道）帧后会直接断开连接——node-opcua 客户端
 仅 gopcua 自家客户端与 HTTP API 可用。PoC 期间已用 node-opcua v0.9.1 重新构建验证，行为一致，
 属 gopcua server 包的互操作缺陷。当前使用 `scripts/opcua-sim-node.ts`（node-opcua 服务器，
 节点命名与 gopcua 版兼容）联调；修复 gopcua 后仅需把通道 `endpointUrl` 切回即可，驱动零改动。
+
+### S7 驱动选型说明
+
+PRD 原定 node-snap7（native snap7 绑定），但其在 pnpm 下需要放行构建脚本且 Windows 编译依赖
+MSVC 工具链，不利交付。已改用 **nodes7**（同作者的纯 JS S7comm 实现，零原生依赖），
+天然满足 Linux/Windows 双平台要求；若后续需要 native 性能，可在驱动接口内替换，
+引擎代码无需改动。地址语法转换：`DB301.Real10 → DB301,REAL10`、`DB301.DBX20.0 → DB301,X20.0`。

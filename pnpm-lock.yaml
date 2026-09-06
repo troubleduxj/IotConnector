@@ -78,6 +78,9 @@ importers:
       node-opcua:
         specifier: ^2.134.0
         version: 2.181.1
+      nodes7:
+        specifier: ^0.3.18
+        version: 0.3.18
     devDependencies:
       '@types/node':
         specifier: ^22.14.0
@@ -1715,6 +1718,9 @@ packages:
   node-releases@2.0.54:
     resolution: {integrity: sha512-YHs7BmmcsdAI5Ozuf8JZo6PT0mv2GIWC9vMfvUC3dp65M8hn7Ux8CPL+2oBI7juNuj9d0ndhTcznq2ODBps9cQ==}
     engines: {node: '>=18'}
+
+  nodes7@0.3.18:
+    resolution: {integrity: sha512-o5nnekjzX5tisE0oKxhddu4dbhhMVXcmYd0AqA3zDSBJFQ8iZYQAePehe/jL5VLE0lYJb+El8WrpVzgzxSQq7w==}
 
   obliterator@2.0.5:
     resolution: {integrity: sha512-42CPE9AhahZRsMNslczq0ctAEtqk8Eka26QofnqC346BZdHDySk3LWka23LI7ULIw11NmltpiLagIq8gBozxTw==}
@@ -4172,6 +4178,8 @@ snapshots:
       - proper-lockfile
 
   node-releases@2.0.54: {}
+
+  nodes7@0.3.18: {}
 
   obliterator@2.0.5: {}
 

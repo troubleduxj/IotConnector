@@ -11,22 +11,23 @@ const DATA_DIR = path.resolve(process.cwd(), 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 /**
- * PoC 种子配置：位号 id 与控制台原型 mockTags 的 id 对齐（'1'..'7'），
+ * PoC 种子配置：位号 id 与控制台原型 mockTags 的 id 对齐（'1'..'20' 中的活跃子集），
  * 便于 Dashboard 直接用实时值覆盖 mock 展示。
- * 通道 sim-01 为内置模拟驱动；mb-01 指向本地 Modbus 模拟器（pnpm dev:modbus-sim）。
+ * 三条通道均为真实协议栈：S7comm（s7-sim.ts:10102）、Modbus TCP（modbus-sim.ts:15020）、
+ * OPC UA 订阅（opcua-sim-node.ts:4840）。真机交付时仅需改 host/端口与 rack/slot。
  */
 function seedConfig(): GatewayConfig {
   return {
     channels: [
       {
-        id: 'sim-01',
-        name: 'SIM_R0021_Reactor',
+        id: 's7-01',
+        name: 'R0021_S7_1500',
         protocol: 'Siemens Profinet',
         host: '127.0.0.1',
-        port: 102,
+        port: 10102, // 本地模拟器端口（scripts/s7-sim.ts），真机时改为 102
         enabled: true,
         pollIntervalMs: 500,
-        params: { driver: 'simulation', s7Model: 'S7-1500', rack: 0, slot: 1, pduSize: 480 },
+        params: { s7Model: 'S7-1500', rack: 0, slot: 1, pduSize: 480 },
       },
       {
         id: 'mb-01',
@@ -59,10 +60,10 @@ function seedConfig(): GatewayConfig {
       },
     ],
     tags: [
-      { id: '1', channelId: 'sim-01', name: 'R0021.pH', address: 'DB301.Real10', dataType: 'Float', unit: 'pH', scale: 1, offset: 0, engMin: 0, engMax: 14, description: 'Reactor pH level' },
-      { id: '2', channelId: 'sim-01', name: 'R0021.Temperature', address: 'DB301.Real14', dataType: 'Float', unit: '°C', scale: 1, offset: 0, engMin: 20, engMax: 50, description: 'Reactor Temp' },
-      { id: '3', channelId: 'sim-01', name: 'R0021.Pressure', address: 'DB301.Real18', dataType: 'Float', unit: 'bar', scale: 1, offset: 0, engMin: 0, engMax: 3, description: 'Reactor Pressure' },
-      { id: '4', channelId: 'sim-01', name: 'R0021.alm1', address: 'DB301.DBX20.0', dataType: 'Bool', unit: '', scale: 1, offset: 0, description: 'Alarm 1 Status' },
+      { id: '1', channelId: 's7-01', name: 'R0021.pH', address: 'DB301.Real10', dataType: 'Float', unit: 'pH', scale: 1, offset: 0, engMin: 0, engMax: 14, description: 'Reactor pH level' },
+      { id: '2', channelId: 's7-01', name: 'R0021.Temperature', address: 'DB301.Real14', dataType: 'Float', unit: '°C', scale: 1, offset: 0, engMin: 20, engMax: 50, description: 'Reactor Temp' },
+      { id: '3', channelId: 's7-01', name: 'R0021.Pressure', address: 'DB301.Real18', dataType: 'Float', unit: 'bar', scale: 1, offset: 0, engMin: 0, engMax: 3, description: 'Reactor Pressure' },
+      { id: '4', channelId: 's7-01', name: 'R0021.alm1', address: 'DB301.DBX20.0', dataType: 'Bool', unit: '', scale: 1, offset: 0, description: 'Alarm 1 Status' },
       { id: '5', channelId: 'mb-01', name: 'R0022.Speed', address: '40001', dataType: 'Int16', unit: 'RPM', scale: 1, offset: 0, engMin: 0, engMax: 1500, description: 'Motor Speed' },
       { id: '6', channelId: 'mb-01', name: 'R0022.Status', address: '40002', dataType: 'Int16', unit: '', scale: 1, offset: 0, description: 'Running Status' },
       { id: '7', channelId: 'mb-01', name: 'R0022.Current', address: '40003', dataType: 'Float', unit: 'A', scale: 0.1, offset: 0, engMin: 0, engMax: 40, description: 'Inverter output current' },

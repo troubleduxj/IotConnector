@@ -4,6 +4,16 @@ import type { AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/
 import { hashPassword, type User } from './auth';
 import type { Recipe, Script, StorageTask } from '@iotconnector/shared';
 
+export interface NorthboundConfig {
+  enabled: boolean;
+  url: string;
+  username?: string;
+  password?: string;
+  groupId: string;
+  edgeNodeId: string;
+  dataFlushMs: number;
+}
+
 export interface GatewayConfig {
   channels: Channel[];
   tags: Tag[];
@@ -13,6 +23,7 @@ export interface GatewayConfig {
   storageTasks: StorageTask[];
   recipes: Recipe[];
   scripts: Script[];
+  northbound?: NorthboundConfig;
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -125,6 +136,7 @@ function seedConfig(): GatewayConfig {
       wecom: { enabled: false, webhookUrl: '' },
       email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
     },
+    northbound: { enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000 },
     storageTasks: [
       {
         id: 'stk_1',
@@ -200,6 +212,7 @@ export function loadConfig(): GatewayConfig {
       parsed.storageTasks = parsed.storageTasks ?? seed.storageTasks;
       parsed.recipes = parsed.recipes ?? seed.recipes;
       parsed.scripts = parsed.scripts ?? seed.scripts;
+      parsed.northbound = { enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000, ...parsed.northbound };
       return parsed;
     }
   } catch (e) {

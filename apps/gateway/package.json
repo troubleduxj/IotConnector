@@ -11,14 +11,17 @@
     "opcua-sim": "tsx scripts/opcua-sim-node.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
-    "melsec-sim": "tsx scripts/melsec-sim.ts"
+    "melsec-sim": "tsx scripts/melsec-sim.ts",
+    "mqtt-broker": "node scripts/mqtt-broker.cjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
     "@fastify/websocket": "^11.0.1",
     "@iotconnector/shared": "workspace:*",
+    "aedes": "^1.1.2",
     "fastify": "^5.0.0",
     "modbus-serial": "^8.0.25",
+    "mqtt": "^5.15.2",
     "node-opcua": "^2.134.0",
     "nodemailer": "^10.0.0",
     "nodes7": "^0.3.18",

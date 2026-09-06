@@ -190,6 +190,15 @@ OPN（打开安全通道）帧后会直接断开连接——node-opcua 客户端
 属 gopcua server 包的互操作缺陷。当前使用 `scripts/opcua-sim-node.ts`（node-opcua 服务器，
 节点命名与 gopcua 版兼容）联调；修复 gopcua 后仅需把通道 `endpointUrl` 切回即可，驱动零改动。
 
+### 北向 MQTT/Sparkplug B + Reliable Outbox（决策 D7，已实现）
+
+- 发布器：NBIRTH/DBIRTH/DDATA/NDEATH（Will）+ seq 单调 + REBIRTH 响应；
+  手写 Sparkplug B protobuf 编码器（无第三方依赖，vitest 覆盖）。
+- Reliable Outbox：断线期间 DDATA 入持久队列（outbox.jsonl，上限 1 万条），
+  broker 恢复后按序补传；报文内保留原始采样时间戳。
+- 状态/配置：`GET|PUT /api/northbound`、`POST /api/northbound/rebirth`；System Config 页有配置卡片。
+- 验证 broker：`pnpm --filter @iotconnector/gateway mqtt-broker`（最小 MQTT broker，打印收到的发布）。
+
 ### S7 驱动选型说明
 
 PRD 原定 node-snap7（native snap7 绑定），但其在 pnpm 下需要放行构建脚本且 Windows 编译依赖

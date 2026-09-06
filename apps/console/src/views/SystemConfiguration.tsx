@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell } from 'lucide-react';
-import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, type AuditEntry, type ConsoleUser, type ManagedUser } from '../api';
+import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2 } from 'lucide-react';
+import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus } from '../api';
 
 interface NotificationConfig {
   enabled: boolean;
@@ -17,6 +17,12 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'operator' as ConsoleUser['role'] });
+  const [northbound, setNorthbound] = useState<NorthboundConfig | null>(null);
+  const [nbStatus, setNbStatus] = useState<NorthboundStatus | null>(null);
+  const [nbBusy, setNbBusy] = useState(false);
+  const showToastMsg = (msg: string): void => {
+    window.dispatchEvent(new CustomEvent('fb-toast', { detail: { message: msg, ok: true } }));
+  };
 
   useEffect(() => {
     fetch('/api/notifications')
@@ -29,7 +35,26 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
       setUsers(await fetchUsers().catch(() => []));
       setAudit(await fetchAudit().catch(() => []));
     });
+    const loadNb = (): void => {
+      fetchNorthbound().then((d) => { setNorthbound(d.config); setNbStatus(d.status); }).catch(() => {});
+    };
+    loadNb();
+    const timer = setInterval(loadNb, 5000);
+    return () => clearInterval(timer);
   }, []);
+
+  const saveNorthboundCfg = async (): Promise<void> => {
+    if (!northbound) return;
+    setNbBusy(true);
+    try {
+      const d = await saveNorthbound(northbound);
+      setNorthbound(d.config);
+      setNbStatus(d.status);
+      showToastMsg('北向 MQTT 配置已保存并生效。');
+    } finally {
+      setNbBusy(false);
+    }
+  };
 
   const saveNotify = async (): Promise<void> => {
     await fetch('/api/notifications', {
@@ -288,6 +313,81 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
               </button>
             </div>
           </div>
+        </div>
+
+        {/* 北向 MQTT/Sparkplug B（决策 D7） */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-teal-100 text-teal-600 rounded-lg"><Wifi className="w-5 h-5" /></div>
+              <div>
+                <h3 className="font-bold text-slate-800">北向 MQTT（Sparkplug B）</h3>
+                <p className="text-[11px] text-slate-400">
+                  spBv1.0 发布：NBIRTH/DBIRTH/DDATA/NDEATH + Reliable Outbox
+                  {nbStatus && ` · 队列 ${nbStatus.queued} · 已发布 ${nbStatus.published}`}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setNorthbound((n) => (n ? { ...n, enabled: !n.enabled } : n))}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold border ${
+                northbound?.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}
+            >
+              {northbound?.enabled ? '已启用' : '已停用'}
+            </button>
+          </div>
+          {northbound && (
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Broker URL</label>
+                  <input
+                    value={northbound.url}
+                    onChange={(e) => setNorthbound({ ...northbound, url: e.target.value })}
+                    placeholder="mqtt://broker.local:1883"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Group ID</label>
+                  <input
+                    value={northbound.groupId}
+                    onChange={(e) => setNorthbound({ ...northbound, groupId: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Edge Node ID</label>
+                  <input
+                    value={northbound.edgeNodeId}
+                    onChange={(e) => setNorthbound({ ...northbound, edgeNodeId: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {nbStatus?.connected ? '已连接 Broker' : nbStatus?.lastError ? `错误：${nbStatus.lastError}` : '未连接'}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => void rebirthNorthbound().then(() => showToastMsg('已触发 REBIRTH（重新广播 BIRTH）。'))}
+                    className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                  >
+                    REBIRTH
+                  </button>
+                  <button
+                    onClick={() => void saveNorthboundCfg()}
+                    disabled={nbBusy}
+                    className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    {nbBusy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存并生效
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Real-time Data Pipeline (Redis) */}

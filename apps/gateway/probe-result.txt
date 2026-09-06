@@ -1,0 +1,2 @@
+TCP OK, sent 16B
+RX 20020000

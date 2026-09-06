@@ -15,6 +15,8 @@ import { toNodes7Address } from './engine/drivers/s7';
 import { StorageTaskEngine } from './storage-tasks';
 import { ScriptEngine } from './scripts';
 import type { Recipe, Script, StorageTask } from '@iotconnector/shared';
+import type { NorthboundConfig } from './northbound/publisher';
+import { NorthboundPublisher } from './northbound/publisher';
 import { AuthStore, hashPassword, type Role, type SessionUser } from './auth';
 import { TDengineWriter } from './storage/tdengine';
 
@@ -90,6 +92,28 @@ async function main(): Promise<void> {
     console.error('[alarms] history restore failed:', String(e));
   }
   alarmEngine.onPersist = persistAlarmEvent;
+
+  // ===== 北向 Sparkplug B 发布器（决策 D7）=====
+  const northbound: NorthboundConfig = config.northbound ?? {
+    enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000,
+  };
+  const STATE_DIR = path.resolve(process.cwd(), 'data');
+  const northboundPublisher = new NorthboundPublisher(
+    () => northbound,
+    {
+      statePath: path.join(STATE_DIR, 'northbound.json'),
+      outboxPath: path.join(STATE_DIR, 'outbox.jsonl'),
+      read: (p) => fs.readFileSync(p, 'utf-8'),
+      write: (p, data) => {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, JSON.stringify(data, null, 2));
+      },
+    },
+    () => channels,
+    () => tags,
+  );
+  northboundPublisher.loadPersisted();
+  northboundPublisher.start();
 
   // 会话持久化：重启不掉线
   const SESSION_FILE = path.resolve(process.cwd(), 'data', 'sessions.json');
@@ -175,6 +199,16 @@ async function main(): Promise<void> {
       const tag = getTag(v.id);
       if (tag) storage.enqueue(v, tag);
     }
+    // 北向 Sparkplug DDATA（按通道聚合，flush 节奏合并发布）
+    const byChannel = new Map<string, typeof values>();
+    for (const v of values) {
+      const tag = getTag(v.id);
+      if (!tag) continue;
+      const list = byChannel.get(tag.channelId) ?? [];
+      list.push(v);
+      byChannel.set(tag.channelId, list);
+    }
+    for (const [channelId, list] of byChannel) northboundPublisher.enqueueChannelData(channelId, list);
   };
   engine.onStatus = (status) => broadcast({ type: 'channel-status', status });
 
@@ -324,7 +358,10 @@ async function main(): Promise<void> {
   });
 
   // ===== 配置 CRUD：持久化 + 通道热重载（PRD FR-M2-01 / FR-M2-06）=====
-  const broadcastConfigChanged = (): void => broadcast({ type: 'config-changed' });
+  const broadcastConfigChanged = (): void => {
+    broadcast({ type: 'config-changed' });
+    northboundPublisher.applyConfig(); // 通道/位号变更 → DBIRTH 刷新
+  };
 
   app.post('/api/channels', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');
@@ -571,6 +608,31 @@ async function main(): Promise<void> {
     } catch (e) {
       return reply.code(400).send({ ok: false, error: String((e as Error).message ?? e) });
     }
+  });
+
+  // ===== 北向 MQTT/Sparkplug B（决策 D7）=====
+  app.get('/api/northbound', async () => ({ config: northbound, status: northboundPublisher.status }));
+
+  app.put('/api/northbound', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as Partial<NorthboundConfig>;
+    if (b.enabled !== undefined) northbound.enabled = Boolean(b.enabled);
+    if (b.url !== undefined) northbound.url = String(b.url);
+    if (b.username !== undefined) northbound.username = String(b.username);
+    if (b.password !== undefined) northbound.password = String(b.password);
+    if (b.groupId !== undefined) northbound.groupId = String(b.groupId);
+    if (b.edgeNodeId !== undefined) northbound.edgeNodeId = String(b.edgeNodeId);
+    if (b.dataFlushMs !== undefined) northbound.dataFlushMs = Math.max(500, Number(b.dataFlushMs));
+    persist();
+    northboundPublisher.applyConfig();
+    return { config: northbound, status: northboundPublisher.status };
+  });
+
+  app.post('/api/northbound/rebirth', async (req, reply) => {
+    if (!requireAuth(req, reply, 'engineer')) return;
+    northboundPublisher.applyConfig(); // 触发 BIRTH 重发
+    return { ok: true };
   });
 
   // ===== 认证与用户管理（PRD FR-M10-02）=====
@@ -936,6 +998,7 @@ async function main(): Promise<void> {
   console.log(`[gateway] channels: ${config.channels.length}, tags: ${config.tags.length}, storage: ${storage.status.state}`);
 
   const shutdown = async (): Promise<void> => {
+    northboundPublisher.stop();
     await engine.stop();
     storage.stop();
     await app.close();

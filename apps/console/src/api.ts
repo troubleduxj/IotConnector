@@ -569,3 +569,37 @@ export interface CapturedFrame {
 export async function fetchChannelFrames(channelId: string): Promise<{ ok: boolean; frames: CapturedFrame[] }> {
   return (await apiFetch(`/api/channels/${channelId}/frames?limit=200`)).json() as Promise<{ ok: boolean; frames: CapturedFrame[] }>;
 }
+
+// ===== 北向 MQTT/Sparkplug B（决策 D7）=====
+
+export interface NorthboundConfig {
+  enabled: boolean;
+  url: string;
+  username?: string;
+  password?: string;
+  groupId: string;
+  edgeNodeId: string;
+  dataFlushMs: number;
+}
+
+export interface NorthboundStatus {
+  connected: boolean;
+  bdSeq: number;
+  seq: number;
+  queued: number;
+  dropped: number;
+  published: number;
+  lastError?: string;
+}
+
+export const fetchNorthbound = async (): Promise<{ config: NorthboundConfig; status: NorthboundStatus }> =>
+  (await apiFetch('/api/northbound')).json() as Promise<{ config: NorthboundConfig; status: NorthboundStatus }>;
+
+export const saveNorthbound = async (config: NorthboundConfig): Promise<{ config: NorthboundConfig; status: NorthboundStatus }> => {
+  const res = await apiFetch('/api/northbound', jsonPut(config));
+  return (await res.json()) as { config: NorthboundConfig; status: NorthboundStatus };
+};
+
+export const rebirthNorthbound = async (): Promise<void> => {
+  await apiFetch('/api/northbound/rebirth', { method: 'POST' });
+};

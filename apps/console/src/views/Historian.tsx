@@ -4,11 +4,13 @@ import {
   Legend, ResponsiveContainer, Area, ComposedChart, ReferenceLine
 } from 'recharts';
 import { mockTags } from '../data';
-import { 
-  Calendar, Download, Search, RefreshCw, Layers, CheckSquare, Square, 
-  X, Filter, Eye, EyeOff, BarChart2, TrendingUp, Sliders, Image, FileSpreadsheet, 
+import { fetchHistory, type HistorySeries } from '../api';
+import { useRuntime } from '../store/runtime';
+import {
+  Calendar, Download, Search, RefreshCw, Layers, CheckSquare, Square,
+  X, Filter, Eye, EyeOff, BarChart2, TrendingUp, Sliders, Image, FileSpreadsheet,
   FileText, Clock, Sparkles, Activity, Check, CheckCircle2, ChevronDown, ChevronRight,
-  Maximize2, ArrowUpDown, HelpCircle
+  Maximize2, ArrowUpDown, HelpCircle, AlertTriangle
 } from 'lucide-react';
 import { Tag } from '../types';
 
@@ -45,6 +47,20 @@ interface TagStat {
   current: number;
   stdDev: number;
   count: number;
+  quality: 'Good' | 'Uncertain' | 'Bad' | 'NoData';
+}
+
+/** 时间窗预设 → 毫秒跨度 */
+function presetSpanMs(preset: TimePreset, customStart: string, customEnd: string): { start: number; end: number } {
+  const end = Date.now();
+  if (preset === 'custom') {
+    return { start: Date.parse(customStart) || end - 3600_000, end: Date.parse(customEnd) || end };
+  }
+  const spans: Record<string, number> = {
+    '15m': 15 * 60e3, '1h': 3600e3, '6h': 6 * 3600e3,
+    '24h': 24 * 3600e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3,
+  };
+  return { start: end - (spans[preset] ?? 3600e3), end };
 }
 
 export default function Historian() {
@@ -171,114 +187,101 @@ export default function Historian() {
     }));
   };
 
-  // Generate multi-tag time series dataset
-  const chartData = useMemo(() => {
-    const pointsCount = timePreset === '15m' ? 30 : timePreset === '1h' ? 60 : timePreset === '6h' ? 72 : timePreset === '24h' ? 96 : 120;
-    const intervalMs = timePreset === '15m' 
-      ? 30000 
-      : timePreset === '1h' 
-      ? 60000 
-      : timePreset === '6h' 
-      ? 300000 
-      : timePreset === '24h' 
-      ? 900000 
-      : 3600000;
+  // ===== 真实历史数据：/api/history（服务端聚合 + 降采样） =====
+  const { liveValues } = useRuntime();
+  const [historyData, setHistoryData] = useState<HistorySeries[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
 
-    const endTime = timePreset === 'custom' ? new Date(customEndDate).getTime() : Date.now();
-    const startTime = timePreset === 'custom' ? new Date(customStartDate).getTime() : endTime - pointsCount * intervalMs;
-    const step = (endTime - startTime) / pointsCount;
+  const samplingSec = timePreset === 'custom'
+    ? { '1s': 1, '5s': 5, '1m': 60, '5m': 300 }[samplingInterval]
+    : undefined; // 预设窗口由服务端按数据量自动降采样
 
-    const data: DataPoint[] = [];
-
-    for (let i = 0; i <= pointsCount; i++) {
-      const pointTime = new Date(startTime + i * step);
-      const point: DataPoint = {
-        timestamp: pointTime.toLocaleTimeString([], { 
-          hour: '2-digit', 
-          minute: '2-digit', 
-          ...(timePreset === '24h' || timePreset === '7d' || timePreset === '30d' ? { month: 'numeric', day: 'numeric' } : {}) 
-        }),
-        epoch: pointTime.getTime()
-      };
-
-      activeTags.forEach((tag, idx) => {
-        const baseValue = tag.name.includes('pH') 
-          ? 7.2 
-          : tag.name.includes('Temperature') || tag.name.includes('Temp') 
-          ? 35.5 
-          : tag.name.includes('Speed') 
-          ? 1200 
-          : tag.name.includes('Current') 
-          ? 24.8 
-          : tag.name.includes('Voltage') 
-          ? 220 
-          : tag.name.includes('Torque') 
-          ? 42.6 
-          : tag.name.includes('Pressure') 
-          ? 4.8 
-          : tag.name.includes('FlowRate') 
-          ? 125.4 
-          : 50;
-
-        // Wave simulation with harmonics
-        const freq = (idx + 1) * 0.15;
-        const wave = Math.sin(i * freq) * (baseValue * 0.08) + Math.cos(i * 0.05) * (baseValue * 0.04);
-        const noise = (Math.random() - 0.5) * (baseValue * 0.03);
-        const rawVal = Number(Math.max(0, baseValue + wave + noise).toFixed(2));
-
-        point[tag.id] = rawVal;
-        
-        // Normalized (0-100%) value calculation
-        const minExpected = baseValue * 0.7;
-        const maxExpected = baseValue * 1.3;
-        const normVal = Math.min(100, Math.max(0, ((rawVal - minExpected) / (maxExpected - minExpected)) * 100));
-        point[`${tag.id}_norm`] = Number(normVal.toFixed(1));
-      });
-
-      data.push(point);
-    }
-
-    return data;
-  }, [activeTags, timePreset, customStartDate, customEndDate, refreshTrigger]);
-
-  // Statistical calculations per tag
-  const tagStatistics: TagStat[] = useMemo(() => {
-    return activeTags.map(tag => {
-      const values = chartData.map(d => Number(d[tag.id]) || 0);
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const sum = values.reduce((a, b) => a + b, 0);
-      const avg = Number((sum / values.length).toFixed(2));
-      const current = values[values.length - 1] || 0;
-
-      // Calculate standard deviation
-      const squareDiffs = values.map(value => Math.pow(value - avg, 2));
-      const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / squareDiffs.length;
-      const stdDev = Number(Math.sqrt(avgSquareDiff).toFixed(2));
-
-      return {
-        tagId: tag.id,
-        name: tag.name,
-        unit: tag.unit,
-        color: tag.color,
-        min,
-        max,
-        avg,
-        current,
-        stdDev,
-        count: values.length
-      };
-    });
-  }, [activeTags, chartData]);
+  useEffect(() => {
+    if (!selectedTagIds.length) return;
+    const controller = new AbortController();
+    const { start, end } = presetSpanMs(timePreset, customStartDate, customEndDate);
+    setIsLoading(true);
+    setDataError(null);
+    fetchHistory(selectedTagIds, start, end, samplingSec, controller.signal)
+      .then((res) => setHistoryData(res.series))
+      .catch((e) => {
+        if (e.name === 'AbortError') return;
+        setDataError(String(e.message ?? e));
+        setHistoryData(null);
+      })
+      .finally(() => setIsLoading(false));
+    return () => controller.abort();
+  }, [selectedTagIds, timePreset, customStartDate, customEndDate, samplingSec, refreshTrigger]);
 
   // Auto-refresh interval
   useEffect(() => {
     if (!isAutoRefresh) return;
     const interval = setInterval(() => {
       setRefreshTrigger(prev => prev + 1);
-    }, 4000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [isAutoRefresh]);
+
+  const windowSpanH = (presetSpanMs(timePreset, customStartDate, customEndDate).end -
+    presetSpanMs(timePreset, customStartDate, customEndDate).start) / 3600e3;
+
+  // 服务端聚合结果 → 图表行（按桶时间对齐各位号；归一化基于工程量程或窗口极值）
+  const chartData = useMemo<DataPoint[]>(() => {
+    if (!historyData) return [];
+    const bucketFmt: Intl.DateTimeFormatOptions = windowSpanH >= 6
+      ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+      : { hour: '2-digit', minute: '2-digit', second: '2-digit' };
+    const rows = new Map<string, DataPoint>();
+    for (const series of historyData) {
+      if (series.error || !series.points.length) continue;
+      const min = Math.min(...series.points.map(p => p.min));
+      const max = Math.max(...series.points.map(p => p.max));
+      const base = series.engMin != null && series.engMax != null ? series.engMin : min;
+      const range = series.engMin != null && series.engMax != null
+        ? (series.engMax - series.engMin) || 1
+        : (max - min) || 1;
+      for (const p of series.points) {
+        let row = rows.get(p.t);
+        if (!row) {
+          row = { timestamp: new Date(p.t).toLocaleTimeString([], bucketFmt), epoch: Date.parse(p.t) };
+          rows.set(p.t, row);
+        }
+        row[series.tagId] = Number(p.avg.toFixed(4));
+        row[`${series.tagId}_norm`] = Number(
+          Math.min(100, Math.max(0, ((p.avg - base) / range) * 100)).toFixed(1)
+        );
+      }
+    }
+    return [...rows.values()].sort((a, b) => a.epoch - b.epoch);
+  }, [historyData, windowSpanH]);
+
+  // 统计包络：来自服务端聚合；Latest 取实时值（runtime store），质量为真实质量
+  const tagStatistics: TagStat[] = useMemo(() => {
+    if (!historyData) return [];
+    return activeTags.flatMap(tag => {
+      const series = historyData.find(s => s.tagId === tag.id);
+      if (!series || series.error || !series.stats) return [];
+      const st = series.stats;
+      const latest = liveValues[tag.id];
+      const current = typeof latest?.value === 'number'
+        ? latest.value
+        : series.points[series.points.length - 1]?.avg ?? 0;
+      return [{
+        tagId: tag.id,
+        name: series.name ?? tag.name,
+        unit: series.unit ?? tag.unit,
+        color: tag.color,
+        min: Number((st.min ?? 0).toFixed(2)),
+        max: Number((st.max ?? 0).toFixed(2)),
+        avg: Number((st.avg ?? 0).toFixed(2)),
+        current: Number(Number(current).toFixed(2)),
+        stdDev: Number((st.stdDev ?? 0).toFixed(2)),
+        count: st.count,
+        quality: latest?.quality ?? (st.count > 0 ? 'Good' : 'NoData'),
+      }];
+    });
+  }, [activeTags, historyData, liveValues]);
 
   // Quick Preset Selection presets
   const handleSelectQuickGroup = (type: 'all' | 'reactors' | 'drives' | 'clear') => {
@@ -816,9 +819,27 @@ export default function Historian() {
             </div>
 
             <div className="flex items-center gap-2 text-xs font-mono bg-slate-50 px-2.5 py-1 rounded border border-slate-200 text-slate-600">
-              <span>Points: {chartData.length}</span>
+              {isLoading ? (
+                <span className="flex items-center gap-1.5 text-indigo-600">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Querying TDengine…
+                </span>
+              ) : (
+                <span>Points: {chartData.length}</span>
+              )}
             </div>
           </div>
+
+          {dataError && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>历史查询失败：{dataError}（请确认网关 TDengine 存储已启用且运行中）</span>
+            </div>
+          )}
+          {!isLoading && !dataError && historyData && chartData.length === 0 && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-500">
+              所选时间窗内无历史数据（新写入的数据约需数秒聚合后可见）。
+            </div>
+          )}
 
           {/* Recharts Container */}
           <div ref={chartContainerRef} className="h-[380px] w-full relative">
@@ -943,7 +964,7 @@ export default function Historian() {
             <h4 className="font-bold text-slate-800 text-sm">Statistical Metrics & Engineering Envelope</h4>
           </div>
           <span className="text-xs text-slate-500 font-mono">
-            Sample Window: {timePreset.toUpperCase()} ({chartData.length} records)
+            Sample Window: {timePreset.toUpperCase()} · {historyData?.[0]?.intervalSec ? `${historyData[0].intervalSec}s buckets` : 'auto'} · {chartData.length} buckets
           </span>
         </div>
 
@@ -980,7 +1001,7 @@ export default function Historian() {
                     <td className="py-3 px-4 font-bold text-slate-600 font-mono">
                       {stat.unit || '-'}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-indigo-600">
+                    <td className={`py-3 px-4 text-right font-mono font-bold ${stat.quality === 'Bad' ? 'text-slate-400' : 'text-indigo-600'}`}>
                       {stat.current}
                     </td>
                     <td className="py-3 px-4 text-right font-mono text-emerald-700">
@@ -999,9 +1020,21 @@ export default function Historian() {
                       {delta}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                        <Check className="w-3 h-3" /> 100% Good
-                      </span>
+                      {stat.quality === 'Good' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                          <Check className="w-3 h-3" /> Good
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          stat.quality === 'Bad'
+                            ? 'bg-rose-100 text-rose-800'
+                            : stat.quality === 'Uncertain'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {stat.quality === 'NoData' ? 'No Data' : stat.quality}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );

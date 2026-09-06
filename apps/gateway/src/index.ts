@@ -165,6 +165,8 @@ async function main(): Promise<void> {
         tagId,
         name: tag.name,
         unit: tag.unit,
+        engMin: tag.engMin ?? null,
+        engMax: tag.engMax ?? null,
         intervalSec,
         points,
         stats: { min: s[0] ?? null, max: s[1] ?? null, avg: s[2] ?? null, stdDev: s[3] ?? null, count: s[4] ?? 0 },

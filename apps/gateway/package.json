@@ -1,0 +1,25 @@
+{
+  "name": "@iotconnector/gateway",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "modbus-sim": "tsx scripts/modbus-sim.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/websocket": "^11.0.1",
+    "@iotconnector/shared": "workspace:*",
+    "fastify": "^5.0.0",
+    "modbus-serial": "^8.0.25"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  }
+}

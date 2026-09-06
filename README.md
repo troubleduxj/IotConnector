@@ -135,15 +135,31 @@
 
 ## 🚀 快速启动 (Getting Started)
 
+> Phase 0 起项目为 pnpm monorepo：`apps/console`（Web 控制台）+ `apps/gateway`（网关运行时）+ `packages/shared`（共享模型与协议 schema）。产品需求见 `docs/PRD.md`，UI 标准见 `docs/UI_DESIGN_GUIDELINES.md`。
+
 1. **安装依赖**：
    ```bash
-   npm install
+   pnpm install
    ```
 
-2. **启动开发服务器**：
+2. **一键启动（网关 8080 + 控制台 3000）**：
    ```bash
-   npm run dev
+   pnpm dev
    ```
 
-3. **访问控制台**：
-   在浏览器中打开提示的本地地址 (通常为 `http://localhost:3000`) 即可体验全套企业级工业网关配置与监控平台。
+3. **（可选）启动 Modbus 模拟器**：让 Dashboard 的 Modbus 通道经真实 TCP 采集到数据：
+   ```bash
+   pnpm dev:modbus-sim
+   ```
+
+4. **访问控制台**：
+   在浏览器中打开 `http://localhost:3000`。Dashboard 顶栏徽章显示网关连接状态；"Live Equipment Status" 中的实时位号（pH/温度/压力/转速/电流）由网关推送驱动。
+
+### 环境变量（网关）
+
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `GATEWAY_PORT` | REST+WS 端口 | 8080 |
+| `TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:6041`），未设置则存储管道禁用 | — |
+| `TDENGINE_DB` / `TDENGINE_STABLE` | 目标库与超级表 | `factory_bridge` / `st_factory_equipment` |
+

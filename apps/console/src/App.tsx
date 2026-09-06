@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LayoutDashboard, Activity, FileSpreadsheet, LineChart, Code, Server, Settings, Database, Timer, Menu, X } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import DeviceManagement from './views/DeviceManagement';
@@ -14,8 +14,34 @@ import Scripts from './views/Scripts';
 import SystemConfiguration from './views/SystemConfiguration';
 import DataStorage from './views/DataStorage';
 import AcquisitionScheduler from './views/AcquisitionScheduler';
+import { useRuntime } from './store/runtime';
 
 type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'scripts' | 'settings';
+
+/** 顶栏网关连接状态徽章（真实反映 WS 连接状态，替代原型写死的 Live System） */
+function GatewayStatusBadge() {
+  const status = useRuntime((s) => s.status);
+  const connect = useRuntime((s) => s.connect);
+  useEffect(() => {
+    connect();
+  }, [connect]);
+
+  const config =
+    status === 'live'
+      ? { cls: 'bg-green-100 text-green-700 border-green-200', label: 'Live System' }
+      : status === 'connecting'
+        ? { cls: 'bg-amber-100 text-amber-700 border-amber-200', label: 'Connecting…' }
+        : { cls: 'bg-rose-100 text-rose-700 border-rose-200', label: 'Gateway Offline' };
+
+  return (
+    <span
+      className={`hidden sm:inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border font-medium ${config.cls}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'bg-green-500 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
+      {config.label}
+    </span>
+  );
+}
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard');
@@ -135,9 +161,7 @@ export default function App() {
             <h1 className="text-lg font-semibold text-slate-800">
               {navigation.find((item) => item.id === currentView)?.name}
             </h1>
-            <span className="hidden sm:inline-block bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full border border-green-200 font-medium">
-              Live System
-            </span>
+            <GatewayStatusBadge />
           </div>
           <div className="flex items-center gap-4">
             <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">

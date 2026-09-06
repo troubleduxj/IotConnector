@@ -1,13 +1,4 @@
-export type Protocol = 
-  | 'Siemens Profinet' 
-  | 'OPC UA' 
-  | 'Modbus TCP'
-  | 'EtherNet/IP (Rockwell)'
-  | 'Mitsubishi MELSEC'
-  | 'Omron FINS'
-  | 'MQTT / Sparkplug B'
-  | 'BACnet/IP'
-  | 'IEC 60870-5-104';
+import type { Protocol } from './types';
 
 export interface ProtocolMetadata {
   name: Protocol;
@@ -22,6 +13,10 @@ export interface ProtocolMetadata {
   bgColor: string;
 }
 
+/**
+ * 协议元数据单一来源：控制台徽章/配色、默认端口、地址语法帮助均取自此文件。
+ * color 字段为 Tailwind 类名（UI 规范 §2.4），不得在前端另行硬编码。
+ */
 export const PROTOCOL_CONFIGS: Record<Protocol, ProtocolMetadata> = {
   'Siemens Profinet': {
     name: 'Siemens Profinet',
@@ -132,3 +127,8 @@ export const PROTOCOL_CONFIGS: Record<Protocol, ProtocolMetadata> = {
     bgColor: 'bg-amber-600'
   }
 };
+
+/** Historian 多曲线色板（UI 规范 §2.5，8 色） */
+export const TAG_CHART_COLORS = [
+  '#4f46e5', '#059669', '#d97706', '#e11d48', '#0891b2', '#9333ea', '#ea580c', '#0d9488',
+];

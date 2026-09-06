@@ -1,0 +1,68 @@
+version: "3.9"
+
+# 开发/演示栈：TDengine + 三协议模拟器 + 网关 + 控制台
+# 用法：docker compose up -d
+# 控制台: http://localhost:3001  网关: http://localhost:8080  Explorer: http://localhost:16060
+
+services:
+  tdengine:
+    image: tdengine/tdengine:3.3.6.13
+    restart: unless-stopped
+    ports:
+      - "16030:6030"
+      - "16041:6041"
+      - "16060:6060"
+    volumes:
+      - tdengine-data:/var/lib/taos
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-u", "root:taosdata", "http://127.0.0.1:6041/-/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  s7-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm s7-sim"
+
+  modbus-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm modbus-sim"
+
+  opcua-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm opcua-sim"
+
+  gateway:
+    image: node:22-alpine
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - gateway-data:/workspace/apps/gateway/data
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && TDENGINE_URL=http://tdengine:6041 pnpm --filter @iotconnector/gateway start"
+    ports:
+      - "8080:8080"
+    depends_on:
+      tdengine:
+        condition: service_healthy
+
+  console:
+    image: node:22-alpine
+    working_dir: /workspace/apps/console
+    volumes:
+      - .:/workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --port=3001 --host=0.0.0.0 --strictPort"
+    ports:
+      - "3001:3001"
+
+volumes:
+  tdengine-data:
+  gateway-data:

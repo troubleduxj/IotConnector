@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import type { NotificationConfig } from '@iotconnector/shared';
 import {
-  createAlarm, deleteAlarm, fetchAlarmHistory, fetchAlarms, fetchGatewayTags,
+  ackAlarm, createAlarm, deleteAlarm, fetchAlarmHistory, fetchAlarms, fetchGatewayTags,
   saveNotifications, testNotificationChannel, updateAlarm,
   type AlarmEvent, type AlarmHistoryEvent, type AlarmRule, type GatewayTag,
 } from '../api';
@@ -207,7 +207,17 @@ export default function AlarmCenter() {
                     {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}
                   </div>
                 </div>
-                <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">ACTIVE</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {!a.ack && (
+                    <button
+                      onClick={() => void ackAlarm(a.id).then(() => fetchAlarms().then((d) => { setRules(d.rules); setActive(d.active); }).catch(() => {}))}
+                      className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-rose-600 border border-rose-300 hover:bg-rose-100"
+                    >
+                      确认
+                    </button>
+                  )}
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">ACTIVE</span>
+                </div>
               </div>
             ))
           )}

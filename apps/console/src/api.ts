@@ -3,7 +3,8 @@
  * 认证：令牌存 localStorage，全部请求自动附带 Authorization；401 触发全局登出事件。
  */
 
-import type { NotificationConfig } from '@iotconnector/shared';
+import type { AlarmEvent, NotificationConfig } from '@iotconnector/shared';
+export type { AlarmEvent };
 
 const TOKEN_KEY = 'fb_token';
 export type ConsoleRole = 'admin' | 'engineer' | 'operator';
@@ -104,20 +105,6 @@ export interface AlarmRule {
   threshold: number;
   hysteresis: number;
   enabled: boolean;
-  message?: string;
-}
-
-export interface AlarmEvent {
-  id: string;
-  ruleId: string;
-  tagId: string;
-  tagName: string;
-  channel: string;
-  state: 'Active' | 'Cleared';
-  kind: 'high' | 'low';
-  threshold: number;
-  value: number;
-  ts: number;
   message?: string;
 }
 
@@ -263,16 +250,16 @@ export async function deleteTag(id: string): Promise<void> {
 
 // ===== 认证（PRD FR-M10-02）=====
 
-export async function login(username: string, password: string): Promise<{ token: string; user: ConsoleUser }> {
+export async function login(username: string, password: string): Promise<{ token: string; user: ConsoleUser; mustChangePassword?: boolean }> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
-  const body = (await res.json()) as { token?: string; user?: ConsoleUser; error?: string };
+  const body = (await res.json()) as { token?: string; user?: ConsoleUser; mustChangePassword?: boolean; error?: string };
   if (!res.ok || !body.token || !body.user) throw new Error(body.error ?? '登录失败');
   setToken(body.token);
-  return { token: body.token, user: body.user };
+  return { token: body.token, user: body.user, mustChangePassword: body.mustChangePassword };
 }
 
 export async function fetchMe(): Promise<ConsoleUser | null> {
@@ -422,3 +409,149 @@ export async function testNotificationChannel(channel: string): Promise<{ ok: bo
   });
   return (await res.json()) as { ok: boolean; error?: string };
 }
+
+// ===== 存储任务 / 配方 / 脚本 / 调度 / 确认（Phase 1 收尾）=====
+
+export interface StorageTrigger {
+  mode: 'cycle' | 'deadband' | 'edge';
+  intervalMs?: number;
+  tagId?: string;
+  deadband?: number;
+  edge?: 'rising' | 'falling';
+}
+
+export interface StorageTask {
+  id: string;
+  name: string;
+  enabled: boolean;
+  tableName: string;
+  trigger: StorageTrigger;
+  mappings: Array<{ column: string; tagId: string }>;
+}
+
+export interface RecipeItem { tagId: string; value: number | string | boolean }
+export interface Recipe {
+  id: string;
+  name: string;
+  description: string;
+  items: RecipeItem[];
+  updatedAt: number;
+}
+
+export interface ScriptTrigger {
+  type: 'interval' | 'tagChange' | 'manual';
+  intervalMs?: number;
+  tagId?: string;
+}
+
+export interface GatewayScript {
+  id: string;
+  name: string;
+  description: string;
+  code: string;
+  trigger: ScriptTrigger;
+  enabled: boolean;
+  output?: string[];
+}
+
+export interface SchedulerChannel {
+  id: string;
+  name: string;
+  protocol: string;
+  enabled: boolean;
+  state: string;
+  pollIntervalMs: number;
+  tags: number;
+  samples: number;
+  rateHz: number;
+  lastError?: string;
+}
+
+export interface SchedulerStats {
+  uptimeSec: number;
+  totalSamples: number;
+  rateHz: number;
+  onlineChannels: number;
+  channels: SchedulerChannel[];
+}
+
+const jsonPut = (body: unknown): RequestInit => ({
+  method: 'PUT',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+const jsonPost = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+export const fetchStorageTasks = async (): Promise<StorageTask[]> =>
+  (await apiFetch('/api/storage-tasks')).json() as Promise<StorageTask[]>;
+
+export const createStorageTask = async (task: Omit<StorageTask, 'id'>): Promise<StorageTask> => {
+  const res = await apiFetch('/api/storage-tasks', jsonPost(task));
+  if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? '创建失败');
+  return (await res.json()) as StorageTask;
+};
+
+export const updateStorageTask = async (id: string, patch: Partial<StorageTask>): Promise<StorageTask> => {
+  return (await (await apiFetch(`/api/storage-tasks/${id}`, jsonPut(patch))).json()) as StorageTask;
+};
+
+export const deleteStorageTask = async (id: string): Promise<void> => {
+  await apiFetch(`/api/storage-tasks/${id}`, { method: 'DELETE' });
+};
+
+export const fetchRecipes = async (): Promise<Recipe[]> =>
+  (await apiFetch('/api/recipes')).json() as Promise<Recipe[]>;
+
+export const createRecipe = async (recipe: Omit<Recipe, 'id' | 'updatedAt'>): Promise<Recipe> => {
+  return (await (await apiFetch('/api/recipes', jsonPost(recipe))).json()) as Recipe;
+};
+
+export const updateRecipe = async (id: string, patch: Partial<Recipe>): Promise<Recipe> => {
+  return (await (await apiFetch(`/api/recipes/${id}`, jsonPut(patch))).json()) as Recipe;
+};
+
+export const deleteRecipe = async (id: string): Promise<void> => {
+  await apiFetch(`/api/recipes/${id}`, { method: 'DELETE' });
+};
+
+export interface DownloadResultItem { tagId: string; name?: string; value: unknown; ok: boolean; error?: string }
+
+export const downloadRecipe = async (id: string): Promise<{ ok: boolean; results: DownloadResultItem[] }> => {
+  return (await (await apiFetch(`/api/recipes/${id}/download`, { method: 'POST' })).json()) as { ok: boolean; results: DownloadResultItem[] };
+};
+
+export const fetchScripts = async (): Promise<GatewayScript[]> =>
+  (await apiFetch('/api/scripts')).json() as Promise<GatewayScript[]>;
+
+export const createScript = async (script: Omit<GatewayScript, 'id' | 'output'>): Promise<GatewayScript> => {
+  return (await (await apiFetch('/api/scripts', jsonPost(script))).json()) as GatewayScript;
+};
+
+export const updateScript = async (id: string, patch: Partial<GatewayScript>): Promise<GatewayScript> => {
+  return (await (await apiFetch(`/api/scripts/${id}`, jsonPut(patch))).json()) as GatewayScript;
+};
+
+export const deleteScript = async (id: string): Promise<void> => {
+  await apiFetch(`/api/scripts/${id}`, { method: 'DELETE' });
+};
+
+export const runScript = async (id: string): Promise<{ ok: boolean; outputs: string[]; error?: string }> => {
+  return (await (await apiFetch(`/api/scripts/${id}/run`, { method: 'POST' })).json()) as { ok: boolean; outputs: string[]; error?: string };
+};
+
+export const fetchScheduler = async (): Promise<SchedulerStats> =>
+  (await apiFetch('/api/scheduler')).json() as Promise<SchedulerStats>;
+
+export const ackAlarm = async (eventId: string, note?: string): Promise<AlarmEvent> => {
+  return (await (await apiFetch(`/api/alarms/events/${eventId}/ack`, jsonPost({ note }))).json()) as AlarmEvent;
+};
+
+export const changePassword = async (oldPassword: string, newPassword: string): Promise<{ ok: boolean; error?: string }> => {
+  return (await (await apiFetch('/api/auth/change-password', jsonPost({ oldPassword, newPassword }))).json()) as { ok: boolean; error?: string };
+};
+

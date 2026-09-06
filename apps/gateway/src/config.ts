@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
 import { hashPassword, type User } from './auth';
+import type { Recipe, Script, StorageTask } from '@iotconnector/shared';
 
 export interface GatewayConfig {
   channels: Channel[];
@@ -9,6 +10,9 @@ export interface GatewayConfig {
   alarms: AlarmRule[];
   notifications?: NotificationConfig;
   users?: User[];
+  storageTasks: StorageTask[];
+  recipes: Recipe[];
+  scripts: Script[];
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -88,6 +92,53 @@ function seedConfig(): GatewayConfig {
       wecom: { enabled: false, webhookUrl: '' },
       email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
     },
+    storageTasks: [
+      {
+        id: 'stk_1',
+        name: '反应釜工艺快照',
+        enabled: true,
+        tableName: 'task_reactor_snapshot',
+        trigger: { mode: 'cycle', intervalMs: 5000 },
+        mappings: [
+          { column: 'pH', tagId: '1' },
+          { column: 'Temperature', tagId: '2' },
+          { column: 'Pressure', tagId: '3' },
+        ],
+      },
+      {
+        id: 'stk_2',
+        name: '报警时刻快照',
+        enabled: true,
+        tableName: 'task_alm1_edge',
+        trigger: { mode: 'edge', tagId: '4', edge: 'rising' },
+        mappings: [
+          { column: 'Temperature', tagId: '2' },
+          { column: 'pH', tagId: '1' },
+        ],
+      },
+    ],
+    recipes: [
+      {
+        id: 'rcp_1',
+        name: '标准发酵配方',
+        description: '反应釜标准工艺目标值',
+        items: [
+          { tagId: '2', value: 36.5 },
+          { tagId: '1', value: 7.2 },
+        ],
+        updatedAt: Date.now(),
+      },
+    ],
+    scripts: [
+      {
+        id: 'scr_1',
+        name: '高温联动示例',
+        description: '温度超阈值时置位报警并记录日志',
+        code: "const temp = Read('R0021.Temperature');\nlog('当前温度', temp);\nif (temp > 36.2) {\n  Write('R0021.alm1', true);\n  log('已触发高温报警');\n}",
+        trigger: { type: 'interval', intervalMs: 2000 },
+        enabled: false,
+      },
+    ],
     // 种子账号（首次启动生成；正式交付时首登强制改密为后续任务）
     users: [
       { id: 'u_admin', username: 'admin', passwordHash: hashPassword('admin123'), role: 'admin', createdAt: Date.now() },
@@ -110,7 +161,12 @@ export function loadConfig(): GatewayConfig {
         email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
         ...(parsed.notifications ?? {}),
       } as NotificationConfig;
-      parsed.users = parsed.users ?? [];
+      // 旧配置迁移：缺失的段用种子默认填充（已存在但为空的段尊重现状）
+      const seed = seedConfig();
+      parsed.users = parsed.users ?? seed.users;
+      parsed.storageTasks = parsed.storageTasks ?? seed.storageTasks;
+      parsed.recipes = parsed.recipes ?? seed.recipes;
+      parsed.scripts = parsed.scripts ?? seed.scripts;
       return parsed;
     }
   } catch (e) {

@@ -103,6 +103,26 @@ export class AlarmEngine {
     }
   }
 
+  /** 告警确认（PRD FR-M10-01）：活动/历史事件标记确认人 */
+  ack(eventId: string, user: string, note?: string): AlarmEvent | null {
+    const apply = (e: AlarmEvent): AlarmEvent => ({ ...e, ack: { user, ts: Date.now(), note } });
+    const activeEntry = [...this.active.entries()].find(([, e]) => e.id === eventId);
+    if (activeEntry) {
+      const updated = apply(activeEntry[1]);
+      this.active.set(activeEntry[0], updated);
+      this.history = this.history.map((h) => (h.id === eventId ? updated : h));
+      this.onEvent?.(updated);
+      return updated;
+    }
+    if (this.history.some((h) => h.id === eventId)) {
+      const updated = apply({ ...this.history.find((h) => h.id === eventId)! });
+      this.history = this.history.map((h) => (h.id === eventId ? updated : h));
+      this.onEvent?.(updated);
+      return updated;
+    }
+    return null;
+  }
+
   private pushHistory(event: AlarmEvent): void {
     this.history.unshift(event);
     if (this.history.length > AlarmEngine.MAX_HISTORY) this.history.length = AlarmEngine.MAX_HISTORY;

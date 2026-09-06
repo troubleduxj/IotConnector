@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { mockTags } from '../data';
 import { useRuntime } from '../store/runtime';
-import { fetchAlarms, type AlarmsResponse } from '../api';
+import { ackAlarm, fetchAlarms, type AlarmsResponse } from '../api';
 import { Server, Activity, AlertTriangle, CheckCircle, Bell } from 'lucide-react';
 
 /** 按数据类型格式化：整数不带小数，浮点 2 位（UI 规范 §3.3） */
@@ -101,14 +101,25 @@ export default function Dashboard() {
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-rose-800 truncate">
                         {a.tagName} <span className="font-mono">{a.kind === 'high' ? '>' : '<'} {a.threshold}</span>
+                        {a.ack && <span className="ml-1.5 text-[10px] text-slate-500 font-normal">已确认({a.ack.user})</span>}
                       </div>
                       <div className="text-[10px] text-rose-500 font-mono">
                         当前 {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}
                       </div>
                     </div>
-                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
-                      ACTIVE
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!a.ack && (
+                        <button
+                          onClick={() => void ackAlarm(a.id).then(() => fetchAlarms().then(setAlarms).catch(() => {}))}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-rose-600 border border-rose-300 hover:bg-rose-100"
+                        >
+                          确认
+                        </button>
+                      )}
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
+                        ACTIVE
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>

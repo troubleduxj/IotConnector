@@ -1,0 +1,56 @@
+import { describe, expect, it } from 'vitest';
+import type { Tag } from '@iotconnector/shared';
+import { AlarmEngine } from '../src/alarms';
+
+const tag: Tag = { id: 't1', channelId: 'c1', name: 'X.Temperature', address: 'DB1.Real0', dataType: 'Float', unit: '°C', scale: 1, offset: 0 };
+
+function makeEngine(threshold = 36, hysteresis = 0.5): AlarmEngine {
+  return new AlarmEngine([
+    { id: 'r1', tagId: 't1', kind: 'high', threshold, hysteresis, enabled: true, message: 'temp high' },
+  ]);
+}
+
+describe('AlarmEngine（限值 + 回差状态机）', () => {
+  it('越限触发 Active 事件', () => {
+    const engine = makeEngine();
+    const events: string[] = [];
+    engine.onEvent = (e) => events.push(e.state);
+    engine.evaluate(tag, 35); // 未越限
+    engine.evaluate(tag, 36.5); // 越限
+    expect(events).toEqual(['Active']);
+    expect(engine.getActive()).toHaveLength(1);
+  });
+
+  it('回落到回差内才 Cleared', () => {
+    const engine = makeEngine(36, 0.5);
+    const states: string[] = [];
+    engine.onEvent = (e) => states.push(e.state);
+    engine.evaluate(tag, 36.5); // Active
+    engine.evaluate(tag, 35.8); // 仍在回差内（36-0.5=35.5 以上不清除）
+    expect(engine.getActive()).toHaveLength(1);
+    engine.evaluate(tag, 35.4); // 回差内 → Cleared
+    expect(states).toEqual(['Active', 'Cleared']);
+    expect(engine.getActive()).toHaveLength(0);
+  });
+
+  it('Bad 质量不评估', () => {
+    const engine = makeEngine();
+    engine.evaluate(tag, 40, 'Bad');
+    expect(engine.getActive()).toHaveLength(0);
+  });
+
+  it('停用规则不触发', () => {
+    const engine = makeEngine();
+    engine.setRules(engine.getRules().map((r) => ({ ...r, enabled: false })));
+    engine.evaluate(tag, 40);
+    expect(engine.getActive()).toHaveLength(0);
+  });
+
+  it('ack 标记确认人', () => {
+    const engine = makeEngine();
+    engine.evaluate(tag, 36.5);
+    const active = engine.getActive()[0];
+    const updated = engine.ack(active.id, 'operator_a', '已知悉');
+    expect(updated?.ack).toMatchObject({ user: 'operator_a' });
+  });
+});

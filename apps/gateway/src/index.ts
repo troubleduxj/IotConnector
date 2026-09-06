@@ -11,6 +11,9 @@ import { AlarmEngine } from './alarms';
 import { dispatchAlarm, sendTestMessage } from './notify';
 import { testChannel } from './engine/testers';
 import { toNodes7Address } from './engine/drivers/s7';
+import { StorageTaskEngine } from './storage-tasks';
+import { ScriptEngine } from './scripts';
+import type { Recipe, Script, StorageTask } from '@iotconnector/shared';
 import { AuthStore, hashPassword, type Role, type SessionUser } from './auth';
 import { TDengineWriter } from './storage/tdengine';
 
@@ -87,6 +90,21 @@ async function main(): Promise<void> {
   }
   alarmEngine.onPersist = persistAlarmEvent;
 
+  // 会话持久化：重启不掉线
+  const SESSION_FILE = path.resolve(process.cwd(), 'data', 'sessions.json');
+  try {
+    if (fs.existsSync(SESSION_FILE)) {
+      authStore.loadSessions(JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8')));
+      console.log('[auth] sessions restored');
+    }
+  } catch { /* ignore */ }
+  authStore.onSessionsChanged = (entries) => {
+    try {
+      fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
+      fs.writeFileSync(SESSION_FILE, JSON.stringify(entries, null, 2));
+    } catch { /* ignore */ }
+  };
+
   const storage = new TDengineWriter({
     url: process.env.TDENGINE_URL, // 未设置 → 管道禁用（状态 disabled）
     user: process.env.TDENGINE_USER ?? 'root',
@@ -98,6 +116,27 @@ async function main(): Promise<void> {
   const engine = new Engine(channels, tags);
   engine.start();
   storage.start();
+
+  const getValue = (tagId: string): number | string | boolean | undefined =>
+    engine.snapshot().find((v) => v.id === tagId)?.value;
+
+  const storageTaskEngine = new StorageTaskEngine(storage, getValue, getTag, process.env.TDENGINE_DB ?? 'factory_bridge');
+  storageTaskEngine.sync(config.storageTasks ?? []);
+
+  const scriptEngine = new ScriptEngine(
+    (key) => getValue(tags.find((t) => t.name === key || t.id === key)?.id ?? key),
+    (key) => tags.find((t) => t.name === key || t.id === key),
+    async (tagId, value) => {
+      const r = await engine.write(tagId, value);
+      if (!r.ok) throw new Error(r.error);
+    },
+  );
+  scriptEngine.setScripts(config.scripts ?? []);
+
+  engine.onTagSample = (tag, value, quality) => {
+    storageTaskEngine.onTagSample(tag.id, value);
+    scriptEngine.onTagSample(tag.id, value);
+  };
   // 告警审计表（事件持久化到 TDengine，best-effort）
   void storage
     .query(
@@ -110,7 +149,11 @@ async function main(): Promise<void> {
   engine.onEvaluate = (tag, value, quality) => alarmEngine.evaluate(tag, value, quality);
 
   const persist = (): void => {
-    saveConfig({ channels, tags, alarms: alarmEngine.getRules(), users: authStore.getUsers(), notifications });
+    saveConfig({
+      channels, tags, alarms: alarmEngine.getRules(),
+      users: authStore.getUsers(), notifications,
+      storageTasks: config.storageTasks, recipes: config.recipes, scripts: config.scripts,
+    });
   };
 
   const app = Fastify({ logger: false });
@@ -535,8 +578,12 @@ async function main(): Promise<void> {
     if (!username || !password) return reply.code(400).send({ ok: false, error: '用户名与口令必填' });
     const result = authStore.login(username, password);
     if (!result) return reply.code(401).send({ ok: false, error: '用户名或口令错误' });
+    if (result.ok === false) {
+      const code = result.locked === true ? 423 : 401;
+      return reply.code(code).send({ ok: false, error: result.error });
+    }
     auditLog(result.user, 'login', `${username} 登录成功`);
-    return result;
+    return { token: result.token, user: result.user, mustChangePassword: result.mustChangePassword ?? false };
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
@@ -617,6 +664,17 @@ async function main(): Promise<void> {
   });
 
   // ===== 告警历史查询（持久化于 TDengine alarm_events）=====
+  app.post('/api/alarms/events/:id/ack', async (req, reply) => {
+    if (!requireAuth(req, reply, 'operator')) return;
+    const user = requireAuth(req, reply, 'operator');
+    if (!user) return;
+    const { note } = (req.body ?? {}) as { note?: string };
+    const updated = alarmEngine.ack((req.params as { id: string }).id, user.username, note);
+    if (!updated) return reply.code(404).send({ ok: false, error: 'event not found' });
+    broadcast({ type: 'alarm', event: updated });
+    return updated;
+  });
+
   app.get('/api/alarms/history', async (req) => {
     const q = (req.query ?? {}) as { tagId?: string; state?: string; start?: string; end?: string; limit?: string; offset?: string };
     const limit = Math.min(200, Math.max(1, Number(q.limit ?? 50)));
@@ -638,6 +696,229 @@ async function main(): Promise<void> {
       return { ts, eventId, ruleId, tagId, tagName, channel, state: status, kind, threshold, value, message };
     });
     return { ok: true, total: (total.data?.[0]?.[0] as number) ?? 0, limit, offset, events };
+  });
+
+  // ===== 调度指标（PRD M3 页真实化）=====
+  app.get('/api/scheduler', async () => {
+    const uptimeSec = Math.round(process.uptime());
+    const perChannel = channels.map((c) => {
+      const st = engine.getChannelStats(c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        protocol: c.protocol,
+        enabled: c.enabled,
+        state: engine.statusesList().find((s) => s.id === c.id)?.state ?? '—',
+        pollIntervalMs: c.pollIntervalMs,
+        tags: tags.filter((t) => t.channelId === c.id).length,
+        samples: st.samples,
+        rateHz: uptimeSec > 0 ? Number((st.samples / uptimeSec).toFixed(2)) : 0,
+        lastError: st.lastError,
+      };
+    });
+    const totalSamples = perChannel.reduce((sum, c) => sum + c.samples, 0);
+    return {
+      uptimeSec,
+      totalSamples,
+      rateHz: uptimeSec > 0 ? Number((totalSamples / uptimeSec).toFixed(2)) : 0,
+      onlineChannels: perChannel.filter((c) => c.state === 'online').length,
+      channels: perChannel,
+    };
+  });
+
+  // ===== 存储任务 CRUD（PRD FR-M4-01）=====
+  app.get('/api/storage-tasks', async () => config.storageTasks ?? []);
+
+  app.post('/api/storage-tasks', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as Partial<StorageTask>;
+    if (!b.name || !b.tableName || !b.trigger) return reply.code(400).send({ ok: false, error: 'name, tableName & trigger required' });
+    const task: StorageTask = {
+      id: `stk_${Date.now()}`,
+      name: b.name,
+      enabled: b.enabled ?? true,
+      tableName: b.tableName,
+      trigger: b.trigger,
+      mappings: b.mappings ?? [],
+    };
+    config.storageTasks = [...(config.storageTasks ?? []), task];
+    persist();
+    storageTaskEngine.sync(config.storageTasks);
+    broadcastConfigChanged();
+    return reply.code(201).send(task);
+  });
+
+  app.put('/api/storage-tasks/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const i = (config.storageTasks ?? []).findIndex((t) => t.id === (req.params as { id: string }).id);
+    if (i < 0) return reply.code(404).send({ ok: false, error: 'task not found' });
+    config.storageTasks[i] = { ...config.storageTasks[i], ...(req.body as Partial<StorageTask>) };
+    persist();
+    storageTaskEngine.sync(config.storageTasks);
+    broadcastConfigChanged();
+    return config.storageTasks[i];
+  });
+
+  app.delete('/api/storage-tasks/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    config.storageTasks = (config.storageTasks ?? []).filter((t) => t.id !== (req.params as { id: string }).id);
+    persist();
+    storageTaskEngine.sync(config.storageTasks);
+    broadcastConfigChanged();
+    return { ok: true };
+  });
+
+  // ===== 配方 CRUD + 下发（PRD M6）=====
+  app.get('/api/recipes', async () => config.recipes ?? []);
+
+  app.post('/api/recipes', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as Partial<Recipe>;
+    if (!b.name) return reply.code(400).send({ ok: false, error: 'name required' });
+    const recipe: Recipe = {
+      id: `rcp_${Date.now()}`,
+      name: b.name,
+      description: b.description ?? '',
+      items: b.items ?? [],
+      updatedAt: Date.now(),
+    };
+    config.recipes = [...(config.recipes ?? []), recipe];
+    persist();
+    broadcastConfigChanged();
+    return reply.code(201).send(recipe);
+  });
+
+  app.put('/api/recipes/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const i = (config.recipes ?? []).findIndex((r) => r.id === (req.params as { id: string }).id);
+    if (i < 0) return reply.code(404).send({ ok: false, error: 'recipe not found' });
+    const b = (req.body ?? {}) as Partial<Recipe>;
+    config.recipes[i] = { ...config.recipes[i], name: b.name ?? config.recipes[i].name, description: b.description ?? config.recipes[i].description, items: b.items ?? config.recipes[i].items, updatedAt: Date.now() };
+    persist();
+    broadcastConfigChanged();
+    return config.recipes[i];
+  });
+
+  app.delete('/api/recipes/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    config.recipes = (config.recipes ?? []).filter((r) => r.id !== (req.params as { id: string }).id);
+    persist();
+    broadcastConfigChanged();
+    return { ok: true };
+  });
+
+  // 配方下发：逐参数写入并返回逐项结果（PRD FR-M6-02）
+  app.post('/api/recipes/:id/download', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const recipe = (config.recipes ?? []).find((r) => r.id === (req.params as { id: string }).id);
+    if (!recipe) return reply.code(404).send({ ok: false, error: 'recipe not found' });
+    const results = [];
+    for (const item of recipe.items) {
+      const tag = getTag(item.tagId);
+      if (!tag) {
+        results.push({ tagId: item.tagId, ok: false, error: 'tag not found' });
+        continue;
+      }
+      const r = await engine.write(item.tagId, item.value);
+      auditLog(actor, 'recipe.download', `${recipe.name}: ${tag.name} = ${item.value} ${r.ok ? '成功' : '失败 ' + (r.error ?? '')}`);
+      results.push({ tagId: item.tagId, name: tag.name, value: item.value, ok: r.ok, error: r.error });
+    }
+    return { ok: results.every((r) => r.ok), results };
+  });
+
+  // ===== 边缘脚本 CRUD / 运行 / 输出（决策 D5）=====
+  app.get('/api/scripts', async () =>
+    (config.scripts ?? []).map((s) => ({ ...s, triggerText: s.trigger.type, output: scriptEngine.getOutputs(s.id).slice(-20) })),
+  );
+
+  app.post('/api/scripts', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as Partial<Script>;
+    if (!b.name || !b.code) return reply.code(400).send({ ok: false, error: 'name & code required' });
+    const script: Script = {
+      id: `scr_${Date.now()}`,
+      name: b.name,
+      description: b.description ?? '',
+      code: b.code,
+      trigger: b.trigger ?? { type: 'manual' },
+      enabled: b.enabled ?? false,
+    };
+    config.scripts = [...(config.scripts ?? []), script];
+    persist();
+    scriptEngine.setScripts(config.scripts);
+    broadcastConfigChanged();
+    return reply.code(201).send(script);
+  });
+
+  app.put('/api/scripts/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const i = (config.scripts ?? []).findIndex((s) => s.id === (req.params as { id: string }).id);
+    if (i < 0) return reply.code(404).send({ ok: false, error: 'script not found' });
+    const b = (req.body ?? {}) as Partial<Script>;
+    config.scripts[i] = { ...config.scripts[i], name: b.name ?? config.scripts[i].name, description: b.description ?? config.scripts[i].description, code: b.code ?? config.scripts[i].code, trigger: b.trigger ?? config.scripts[i].trigger, enabled: b.enabled ?? config.scripts[i].enabled };
+    persist();
+    scriptEngine.setScripts(config.scripts);
+    broadcastConfigChanged();
+    return config.scripts[i];
+  });
+
+  app.delete('/api/scripts/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    config.scripts = (config.scripts ?? []).filter((s) => s.id !== (req.params as { id: string }).id);
+    persist();
+    scriptEngine.setScripts(config.scripts);
+    broadcastConfigChanged();
+    return { ok: true };
+  });
+
+  app.post('/api/scripts/:id/run', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'operator');
+    if (!actor) return;
+    const result = await scriptEngine.runScript((req.params as { id: string }).id);
+    auditLog(actor, 'script.run', `${(req.params as { id: string }).id}: ${result.ok ? '成功' : '失败 ' + (result.error ?? '')}`);
+    return result;
+  });
+
+  app.get('/api/scripts/:id/output', async (req) => ({
+    output: scriptEngine.getOutputs((req.params as { id: string }).id).slice(-20),
+  }));
+
+  // ===== 改密 / 会话管理（认证加固）=====
+  app.post('/api/auth/change-password', async (req, reply) => {
+    const user = requireAuth(req, reply, 'operator');
+    if (!user) return;
+    const { oldPassword, newPassword } = (req.body ?? {}) as { oldPassword?: string; newPassword?: string };
+    if (!oldPassword || !newPassword || newPassword.length < 6) {
+      return reply.code(400).send({ ok: false, error: '新口令至少 6 位' });
+    }
+    const target = authStore.findUser(user.id);
+    if (!target || !authStore.verifyUserPassword(target, oldPassword)) {
+      return reply.code(400).send({ ok: false, error: '旧口令错误' });
+    }
+    authStore.changePassword(user.id, newPassword);
+    persist();
+    auditLog(user, 'password.change', `${user.username} 修改口令`);
+    return { ok: true };
+  });
+
+  app.get('/api/auth/sessions', async (req, reply) => {
+    if (!requireAuth(req, reply, 'admin')) return;
+    return authStore.listSessions();
+  });
+
+  app.delete('/api/auth/sessions/:token', async (req, reply) => {
+    if (!requireAuth(req, reply, 'admin')) return;
+    return { ok: authStore.kickSession((req.params as { token: string }).token) };
   });
 
   await app.listen({ port: PORT, host: '0.0.0.0' });

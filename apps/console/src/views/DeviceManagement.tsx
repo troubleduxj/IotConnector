@@ -3,7 +3,7 @@ import {
   Plus, Save, Download, Upload, Network, Trash2, CheckCircle2, X, Edit2, Search,
   AlertTriangle, HelpCircle, Play, Radio, Loader2,
 } from 'lucide-react';
-import { PROTOCOL_CONFIGS, getParamSchema, type Protocol } from '@iotconnector/shared';
+import { PROTOCOL_CONFIGS, getParamSchema, validateAddress, type Protocol } from '@iotconnector/shared';
 import {
   createChannel, createTag, deleteChannel, deleteTag, fetchConfig, testChannelConnection,
   updateChannel, updateTag, type ChannelTestResult, type GatewayChannel, type GatewayTag,
@@ -160,6 +160,7 @@ export default function DeviceManagement() {
   // ===== 位号 CRUD =====
   const openTagAdd = (): void => {
     if (!selected) return;
+    setTagAddrError(null);
     setTagModal({
       mode: 'add',
       draft: {
@@ -169,8 +170,16 @@ export default function DeviceManagement() {
     });
   };
 
+  const [tagAddrError, setTagAddrError] = useState<string | null>(null);
+
   const submitTag = async (): Promise<void> => {
     if (!tagModal) return;
+    const validation = validateAddress((selected?.protocol ?? 'Modbus TCP') as Protocol, tagModal.draft.address);
+    if (!validation.ok) {
+      setTagAddrError(validation.error ?? '地址不合法');
+      return;
+    }
+    setTagAddrError(null);
     setBusy(true);
     try {
       if (tagModal.mode === 'add') await createTag(tagModal.draft);
@@ -690,9 +699,17 @@ export default function DeviceManagement() {
                 </label>
                 <input
                   value={tagModal.draft.address}
-                  onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, address: e.target.value } })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  onChange={(e) => {
+                    setTagModal({ ...tagModal, draft: { ...tagModal.draft, address: e.target.value } });
+                    setTagAddrError(null);
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+                    tagAddrError ? 'border-rose-400 bg-rose-50' : 'border-slate-300 focus:border-indigo-500'
+                  }`}
                 />
+                {tagAddrError && (
+                  <p className="text-[11px] text-rose-600 mt-1">✗ {tagAddrError}</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">数据类型</label>

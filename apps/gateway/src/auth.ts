@@ -16,6 +16,8 @@ export interface User {
   passwordHash: string;
   role: Role;
   createdAt: number;
+  /** 首次登录须改密 */
+  mustChangePassword?: boolean;
 }
 
 export interface SessionUser {
@@ -50,8 +52,22 @@ interface Session {
   expiresAt: number;
 }
 
+interface LoginAttempt {
+  count: number;
+  lockedUntil: number;
+}
+
 export class AuthStore {
   private sessions = new Map<string, Session>();
+  private attempts = new Map<string, LoginAttempt>();
+
+  /** 会话持久化钩子（登录/登出/过期时调用） */
+  onSessionsChanged?: (entries: Array<{ token: string; user: SessionUser; expiresAt: number }>) => void;
+  /** 登录失败锁定回调（审计用） */
+  onLockout?: (username: string, lockedUntil: number) => void;
+
+  static MAX_ATTEMPTS = 5;
+  static LOCKOUT_MS = 10 * 60_000;
 
   constructor(private users: User[]) {}
 
@@ -67,13 +83,76 @@ export class AuthStore {
     this.users = users;
   }
 
-  login(username: string, password: string): { token: string; user: SessionUser } | null {
+  login(username: string, password: string):
+    | { ok: true; token: string; user: SessionUser; mustChangePassword?: boolean }
+    | { ok: false; error: string; locked?: boolean }
+    | null {
+    const attempt = this.attempts.get(username);
+    if (attempt && attempt.lockedUntil > Date.now()) {
+      const mins = Math.ceil((attempt.lockedUntil - Date.now()) / 60000);
+      return { ok: false, error: `失败次数过多，账号锁定至 ${new Date(attempt.lockedUntil).toLocaleTimeString()}（约 ${mins} 分钟）`, locked: true };
+    }
     const user = this.users.find((u) => u.username === username);
-    if (!user || !verifyPassword(password, user.passwordHash)) return null;
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      const rec = attempt ?? { count: 0, lockedUntil: 0 };
+      rec.count += 1;
+      if (rec.count >= AuthStore.MAX_ATTEMPTS) {
+        rec.lockedUntil = Date.now() + AuthStore.LOCKOUT_MS;
+        rec.count = 0;
+        this.onLockout?.(username, rec.lockedUntil);
+      }
+      this.attempts.set(username, rec);
+      return null; // 用户名或口令错误（与不存在一致，防枚举）
+    }
+    this.attempts.delete(username);
     const token = randomBytes(24).toString('hex');
     const sessionUser: SessionUser = { id: user.id, username: user.username, role: user.role };
     this.sessions.set(token, { user: sessionUser, expiresAt: Date.now() + SESSION_TTL_MS });
-    return { token, user: sessionUser };
+    this.persistSessions();
+    return {
+      ok: true,
+      token,
+      user: sessionUser,
+      mustChangePassword: user.mustChangePassword,
+    };
+  }
+
+  listSessions(): Array<{ token: string; username: string; role: Role; expiresAt: number }> {
+    return [...this.sessions.entries()].map(([token, s]) => ({
+      token,
+      username: s.user.username,
+      role: s.user.role,
+      expiresAt: s.expiresAt,
+    }));
+  }
+
+  kickSession(token: string): boolean {
+    return this.sessions.delete(token);
+  }
+
+  verifyUserPassword(user: User, password: string): boolean {
+    return verifyPassword(password, user.passwordHash);
+  }
+
+  changePassword(userId: string, newPassword: string): boolean {
+    const user = this.users.find((u) => u.id === userId);
+    if (!user) return false;
+    user.passwordHash = hashPassword(newPassword);
+    user.mustChangePassword = false;
+    return true;
+  }
+
+  /** 启动时恢复持久化的会话 */
+  loadSessions(entries: Array<{ token: string; user: SessionUser; expiresAt: number }>): void {
+    for (const e of entries) {
+      if (e.expiresAt > Date.now()) this.sessions.set(e.token, { user: e.user, expiresAt: e.expiresAt });
+    }
+  }
+
+  private persistSessions(): void {
+    this.onSessionsChanged?.(
+      [...this.sessions.entries()].map(([token, s]) => ({ token, user: s.user, expiresAt: s.expiresAt })),
+    );
   }
 
   verify(token: string | undefined): SessionUser | null {

@@ -114,6 +114,7 @@ export interface AlarmEvent {
   value: number;
   ts: number;
   message?: string;
+  ack?: { user: string; ts: number; note?: string };
 }
 
 /** 告警通知配置：通用 Webhook + 钉钉机器人（支持加签）+ 企业微信机器人 + SMTP 邮件 */
@@ -149,4 +150,54 @@ export interface EmailConfig {
   to: string;
   /** 465 端口通常为 true（隐式 TLS），587 为 false（STARTTLS） */
   secure: boolean;
+}
+
+// ===== Phase 1 收尾模型：存储任务 / 配方 / 脚本 / 告警确认 =====
+
+/** 存储任务触发模式（PRD FR-M4-02） */
+export type StorageTrigger =
+  | { mode: 'cycle'; intervalMs: number }
+  | { mode: 'deadband'; tagId: string; deadband: number }
+  | { mode: 'edge'; tagId: string; edge: 'rising' | 'falling' };
+
+export interface StorageTask {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** 目标表（自动建于配置库） */
+  tableName: string;
+  trigger: StorageTrigger;
+  /** 列映射：任务表列名 → 位号 */
+  mappings: Array<{ column: string; tagId: string }>;
+}
+
+/** 配方（PRD M6）：参数集绑定到位号，批量下发 */
+export interface Recipe {
+  id: string;
+  name: string;
+  description: string;
+  items: Array<{ tagId: string; value: number | string | boolean }>;
+  updatedAt: number;
+}
+
+/** 边缘脚本触发方式（决策 D5：JS 沙箱） */
+export type ScriptTrigger =
+  | { type: 'interval'; intervalMs: number }
+  | { type: 'tagChange'; tagId: string }
+  | { type: 'manual' };
+
+export interface Script {
+  id: string;
+  name: string;
+  description: string;
+  code: string;
+  trigger: ScriptTrigger;
+  enabled: boolean;
+}
+
+/** 告警确认信息（PRD FR-M10-01） */
+export interface AlarmAck {
+  user: string;
+  ts: number;
+  note?: string;
 }

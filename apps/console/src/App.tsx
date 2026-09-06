@@ -19,10 +19,12 @@ import DataStorage from './views/DataStorage';
 import AcquisitionScheduler from './views/AcquisitionScheduler';
 import AlarmCenter from './views/AlarmCenter';
 import Login from './views/Login';
+import ForceChangePassword from './views/ForceChangePassword';
 import { fetchMe, logout, type ConsoleUser } from './api';
 import { AUTH_EXPIRED_EVENT } from './api';
 import { useRuntime } from './store/runtime';
 import { I18nProvider, useI18n, type Lang } from './i18n';
+import { Toaster } from './components/Toast';
 
 type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'alarms' | 'scripts' | 'settings';
 
@@ -39,6 +41,7 @@ export default function App(): React.JSX.Element {
 /** 认证门卫：会话有效进主界面，否则登录页 */
 function Shell(): React.JSX.Element {
   const [user, setUser] = useState<ConsoleUser | 'loading'>('loading');
+  const [mustChange, setMustChange] = useState(false);
 
   useEffect(() => {
     fetchMe().then((u) => setUser(u)).catch(() => setUser(null));
@@ -51,7 +54,10 @@ function Shell(): React.JSX.Element {
     return <div className="min-h-screen bg-slate-900" />;
   }
   if (user === null) {
-    return <Login onLogin={setUser} />;
+    return <Login onLogin={(u, mc) => { setUser(u); setMustChange(Boolean(mc)); }} />;
+  }
+  if (mustChange) {
+    return <ForceChangePassword onDone={() => setMustChange(false)} />;
   }
   return <Console user={user} onLogout={() => setUser(null)} />;
 }
@@ -89,7 +95,7 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
       case 'scheduler':
         return <AcquisitionScheduler />;
       case 'storage':
-        return <DataStorage dbType={dbType} />;
+        return <DataStorage />;
       case 'diagnostics':
         return <Diagnostics />;
       case 'recipes':
@@ -109,6 +115,7 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex font-sans text-slate-900 overflow-hidden relative">
+      <Toaster />
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div

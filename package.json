@@ -9,9 +9,11 @@
     "dev:gateway": "pnpm --filter @iotconnector/gateway dev",
     "dev:modbus-sim": "pnpm --filter @iotconnector/gateway modbus-sim",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "vitest": "^5.0.0"
   }
 }

@@ -31,6 +31,10 @@ export class Engine {
 
   /** 数值点评估钩子（告警引擎等，工程值，含不变值） */
   onEvaluate?: (tag: Tag, value: number, quality: Quality) => void;
+  /** 全类型采样钩子（存储任务/脚本触发），去重前调用 */
+  onTagSample?: (tag: Tag, value: number | string | boolean, quality: Quality) => void;
+  private sampleCounts = new Map<string, number>();
+  private channelLastErrors = new Map<string, string>();
 
   /** 配置变更后同步通道/位号引用（index.ts 持有同一数组并原地修改） */
   syncConfig(channels: Channel[], tags: Tag[]): void {
@@ -164,6 +168,8 @@ export class Engine {
     }
 
     if (typeof value === 'number') this.onEvaluate?.(rt.tag, value, quality);
+    this.sampleCounts.set(rt.tag.channelId, (this.sampleCounts.get(rt.tag.channelId) ?? 0) + 1);
+    this.onTagSample?.(rt.tag, value, quality);
 
     const now = Date.now();
     const unchanged = value === rt.value && quality === rt.quality;
@@ -183,7 +189,16 @@ export class Engine {
     const next: ChannelStatus = { id: channelId, state, detail };
     if (state === 'online' && prev?.state === 'online' && prev.detail === detail) return;
     this.statuses.set(channelId, next);
+    if (state === 'error' || state === 'offline') this.channelLastErrors.set(channelId, detail ?? state);
     this.onStatus?.(next);
+  }
+
+  /** 调度页指标（PRD M3） */
+  getChannelStats(channelId: string): { samples: number; lastError?: string } {
+    return {
+      samples: this.sampleCounts.get(channelId) ?? 0,
+      lastError: this.channelLastErrors.get(channelId),
+    };
   }
 
   private flush(): void {

@@ -5,7 +5,7 @@ import type { ConsoleUser } from '../api';
 import { useI18n } from '../i18n';
 
 /** 登录页（PRD FR-M10-02）：本地账号 + 会话令牌 */
-export default function Login({ onLogin }: { onLogin: (user: ConsoleUser) => void }) {
+export default function Login({ onLogin }: { onLogin: (user: ConsoleUser, mustChange: boolean) => void }) {
   const { t } = useI18n();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -17,8 +17,8 @@ export default function Login({ onLogin }: { onLogin: (user: ConsoleUser) => voi
     setBusy(true);
     setError(null);
     try {
-      const { user } = await login(username, password);
-      onLogin(user);
+      const result = await login(username, password);
+      onLogin(result.user, Boolean(result.mustChangePassword));
     } catch (e) {
       setError(String((e as Error).message ?? e));
     } finally {

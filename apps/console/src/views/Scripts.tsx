@@ -1,155 +1,233 @@
-import React, { useState } from 'react';
-import { Play, Save, Plus, Settings, Zap } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus, Save, Trash2, Loader2, Play, Check, X } from 'lucide-react';
+import {
+  fetchScripts, createScript, updateScript, deleteScript, runScript,
+  type GatewayScript,
+} from '../api';
+
+/**
+ * 边缘脚本（决策 D5：JS 沙箱）：脚本 CRUD + 触发配置 + 手动运行与输出台。
+ * 沙箱 API：Read('通道.位号') / Write('通道.位号', 值) / log(...)
+ */
 
 export default function Scripts() {
-  const [triggerType, setTriggerType] = useState('tag');
-  const [scriptEnabled, setScriptEnabled] = useState(true);
+  const [scripts, setScripts] = useState<GatewayScript[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<GatewayScript | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [outputs, setOutputs] = useState<string[]>([]);
+  const [running, setRunning] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const code = `temperature = Read[R0021.Temperature]
-pressure = Read[R0021.Pressure]
+  const showToast = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
-if temperature > 38.0:
-    Write[R0021.alm1, True]
-    print(f"High temperature alert: {temperature}")
-else:
-    Write[R0021.alm1, False]
-`;
+  const load = async (keepSelection = true): Promise<void> => {
+    const list = await fetchScripts();
+    setScripts(list);
+    setSelectedId((prev) => (keepSelection && prev && list.some((s) => s.id === prev) ? prev : list[0]?.id ?? null));
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    const s = scripts.find((x) => x.id === selectedId);
+    setDraft(s ? JSON.parse(JSON.stringify(s)) as GatewayScript : null);
+    setOutputs(s?.output ?? []);
+  }, [selectedId, scripts]);
+
+  const selected = scripts.find((x) => x.id === selectedId) ?? null;
+
+  const save = async (): Promise<void> => {
+    if (!draft) return;
+    setBusy(true);
+    try {
+      if (selected) await updateScript(draft.id, draft);
+      else await createScript(draft);
+      await load();
+      showToast('脚本已保存并生效。');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    if (!selected) return;
+    if (!window.confirm(`确认删除脚本 "${selected.name}"？`)) return;
+    await deleteScript(selected.id);
+    await load(false);
+    showToast('已删除。');
+  };
+
+  const run = async (): Promise<void> => {
+    if (!draft) return;
+    // 先保存再运行，保证执行的是编辑器内容
+    await save();
+    setRunning(true);
+    try {
+      const result = await runScript(draft.id);
+      setOutputs(result.outputs ?? []);
+      showToast(result.ok ? '执行完成。' : `执行失败：${result.error ?? ''}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const lineCount = (draft?.code ?? '').split('\n').length;
 
   return (
-    <div className="space-y-6 flex flex-col h-[calc(100vh-140px)]">
-      <div className="flex justify-between items-center shrink-0">
-        <p className="text-sm text-slate-500">Edit and manage Python scripts for custom logic.</p>
-        <div className="flex items-center space-x-3">
-          <button className="flex items-center px-4 py-2 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-md hover:bg-slate-50 transition-colors">
-            <Save className="w-4 h-4 mr-2" />
-            Save
-          </button>
-          <button className="flex items-center px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 transition-colors shadow-sm">
-            <Play className="w-4 h-4 mr-2" />
-            Run Script
-          </button>
+    <div className="space-y-6">
+      {toast && <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl">{toast}</div>}
+
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800">边缘脚本（JS 沙箱）</h2>
+          <p className="text-sm text-slate-500 mt-1">
+            沙箱 API：<code className="font-mono text-indigo-600">Read('通道.位号')</code>、
+            <code className="font-mono text-indigo-600">Write('通道.位号', 值)</code>、
+            <code className="font-mono text-indigo-600">log(...)</code>（超时 1s，写操作在脚本结束后批量应用）
+          </p>
         </div>
+        <button
+          onClick={() => { void createScript({ name: `脚本_${Date.now() % 10000}`, description: '', code: "log('hello');\n", trigger: { type: 'manual' }, enabled: false }).then((s) => load().then(() => setSelectedId(s.id))); }}
+          className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700"
+        >
+          <Plus className="w-4 h-4 mr-2" /> 新建脚本
+        </button>
       </div>
 
-      <div className="flex flex-1 gap-6 min-h-0">
-        {/* Scripts List (Left) */}
-        <div className="w-64 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col shrink-0">
-          <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-            <h3 className="font-semibold text-slate-800 text-sm uppercase tracking-wider text-xs">Scripts</h3>
-            <button className="p-1 hover:bg-slate-200 rounded text-indigo-600 transition-colors">
-              <Plus className="w-4 h-4" />
-            </button>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* 脚本列表 */}
+        <div className="lg:col-span-3 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-100 bg-slate-50/70">
+            <span className="font-bold text-slate-800 text-sm">脚本 ({scripts.length})</span>
           </div>
-          <ul className="overflow-auto py-2">
-            <li>
-              <button className="w-full text-left px-4 py-2 bg-indigo-50 text-indigo-700 border-l-2 border-indigo-600 text-sm font-medium">
-                Temperature Monitor
+          <div className="divide-y divide-slate-100">
+            {scripts.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSelectedId(s.id)}
+                className={`w-full text-left p-3 transition-colors ${s.id === selectedId ? 'bg-indigo-50/50 border-l-2 border-indigo-500' : 'hover:bg-slate-50 border-l-2 border-transparent'}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-slate-800 truncate">{s.name}</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${s.enabled ? 'bg-green-500' : 'bg-slate-300'}`} />
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  {s.trigger.type === 'interval' ? `周期 ${s.trigger.intervalMs}ms` : s.trigger.type === 'tagChange' ? '位号变化' : '手动'}
+                </div>
               </button>
-            </li>
-            <li>
-              <button className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-600 border-l-2 border-transparent text-sm font-medium transition-colors">
-                Data Logger
-              </button>
-            </li>
-          </ul>
-        </div>
-        
-        {/* Code Editor (Center) */}
-        <div className="flex-1 bg-slate-900 rounded-xl shadow-inner border border-slate-700 flex flex-col overflow-hidden min-w-0">
-          <div className="px-4 py-2 bg-slate-800 border-b border-slate-700 flex items-center shrink-0">
-            <div className="flex space-x-1.5 mr-4">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-            </div>
-            <span className="text-xs text-slate-400 font-mono">monitor.py</span>
-          </div>
-          <div className="flex-1 p-4 overflow-auto">
-            <pre className="font-mono text-sm text-slate-300">
-              <code>
-{code.split('\n').map((line, i) => (
-  <div key={i} className="flex">
-    <span className="w-8 text-slate-600 select-none text-right pr-4 shrink-0">{i + 1}</span>
-    <span className="whitespace-pre">{line}</span>
-  </div>
-))}
-              </code>
-            </pre>
+            ))}
+            {scripts.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">暂无脚本。</div>}
           </div>
         </div>
 
-        {/* Script Settings (Right) */}
-        <div className="w-80 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col shrink-0 overflow-hidden">
-          <div className="px-4 py-4 border-b border-slate-200 bg-slate-50 flex items-center gap-2 shrink-0">
-            <Settings className="w-4 h-4 text-indigo-600" />
-            <h3 className="font-semibold text-slate-800 text-sm">Script Settings</h3>
-          </div>
-          
-          <div className="p-5 space-y-6 overflow-y-auto">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Script Name</label>
-                <input type="text" defaultValue="Temperature Monitor" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-800" />
-              </div>
-              
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
-                <textarea rows={2} defaultValue="Monitors reactor temp and triggers high alarm." className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none text-slate-600"></textarea>
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
-                <label className="text-sm font-semibold text-slate-700">Enable Script</label>
-                <button
-                  type="button"
-                  onClick={() => setScriptEnabled(!scriptEnabled)}
-                  className={`${scriptEnabled ? 'bg-indigo-600' : 'bg-slate-200'} relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2`}
-                >
-                  <span className={`${scriptEnabled ? 'translate-x-4' : 'translate-x-0'} pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`} />
-                </button>
-              </div>
-            </div>
-
-            <div className="pt-5 border-t border-slate-100">
-              <div className="flex items-center gap-2 mb-4">
-                <Zap className="w-4 h-4 text-amber-500" />
-                <h4 className="font-semibold text-slate-800 text-sm">Execution Trigger</h4>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Trigger Type</label>
-                  <select 
-                    value={triggerType}
-                    onChange={(e) => setTriggerType(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-slate-700"
-                  >
-                    <option value="tag">Bool Tag (Rising Edge)</option>
-                    <option value="expression">Expression (False to True)</option>
-                  </select>
+        {/* 编辑器 + 配置 */}
+        <div className="lg:col-span-9 space-y-6">
+          {!draft ? (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center text-slate-400 text-sm">选择或新建脚本。</div>
+          ) : (
+            <>
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+                  <div className="flex items-center gap-3 flex-1">
+                    <input
+                      value={draft.name}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      className="font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none text-sm w-48"
+                    />
+                    <input
+                      value={draft.description}
+                      onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+                      placeholder="说明"
+                      className="text-xs text-slate-500 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none flex-1"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
+                      className={`px-2.5 py-1 rounded-md text-xs font-bold border ${draft.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+                    >
+                      {draft.enabled ? '启用中' : '已停用'}
+                    </button>
+                    <button onClick={() => void remove()} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => void save()} disabled={busy} className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60">
+                      {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存
+                    </button>
+                    <button onClick={() => void run()} disabled={running} className="flex items-center px-3.5 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-md hover:bg-emerald-700 disabled:opacity-60">
+                      {running ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1.5" />} 运行
+                    </button>
+                  </div>
                 </div>
 
-                {triggerType === 'tag' ? (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Trigger Tag</label>
-                    <input type="text" defaultValue="R0021.alm1" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-indigo-700" placeholder="e.g. Channel.TagName" />
-                    <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                      Script executes only when this bool tag transitions from False to True.
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Expression</label>
-                    <textarea rows={3} defaultValue="Read[R0021.Temperature] > 38.0" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none text-indigo-700" placeholder="e.g. Read[Channel.Tag] > 50"></textarea>
-                    <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-                      Script executes when expression dynamically evaluates from False to True.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+                {/* 触发配置 */}
+                <div className="px-6 py-3 border-b border-slate-200 bg-slate-50/70 flex items-center gap-3 text-xs">
+                  <span className="font-semibold text-slate-600">触发：</span>
+                  <select
+                    value={draft.trigger.type}
+                    onChange={(e) => {
+                      const type = e.target.value as GatewayScript['trigger']['type'];
+                      const trigger = type === 'interval' ? { type, intervalMs: 2000 } : type === 'tagChange' ? { type, tagId: '' } : { type };
+                      setDraft({ ...draft, trigger });
+                    }}
+                    className="px-2 py-1.5 border border-slate-300 rounded-md font-medium"
+                  >
+                    <option value="manual">手动</option>
+                    <option value="interval">周期</option>
+                    <option value="tagChange">位号变化</option>
+                  </select>
+                  {draft.trigger.type === 'interval' && (
+                    <input
+                      value={draft.trigger.intervalMs ?? 2000}
+                      onChange={(e) => setDraft({ ...draft, trigger: { type: 'interval', intervalMs: Math.max(500, Number(e.target.value)) } })}
+                      className="w-28 px-2 py-1.5 border border-slate-300 rounded-md font-mono"
+                      placeholder="ms"
+                    />
+                  )}
+                  {draft.trigger.type === 'tagChange' && (
+                    <input
+                      value={draft.trigger.tagId ?? ''}
+                      onChange={(e) => setDraft({ ...draft, trigger: { type: 'tagChange', tagId: e.target.value } })}
+                      className="w-56 px-2 py-1.5 border border-slate-300 rounded-md font-mono"
+                      placeholder="位号 id（可从参数诊断页查询）"
+                    />
+                  )}
+                </div>
 
+                {/* 代码编辑器 */}
+                <div className="relative bg-slate-900">
+                  <div className="absolute left-0 top-0 bottom-0 w-10 select-none text-right pr-2 pt-3 text-[11px] leading-5 font-mono text-slate-600 overflow-hidden">
+                    {Array.from({ length: lineCount }, (_, i) => <div key={i}>{i + 1}</div>)}
+                  </div>
+                  <textarea
+                    value={draft.code}
+                    onChange={(e) => setDraft({ ...draft, code: e.target.value })}
+                    spellCheck={false}
+                    className="w-full h-72 bg-slate-900 text-slate-100 font-mono text-sm leading-5 pl-12 pr-4 py-3 resize-none focus:outline-none border-0"
+                  />
+                </div>
+              </div>
+
+              {/* 输出台 */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800 text-sm">输出台</h4>
+                  <span className="text-[11px] text-slate-400 font-mono">{outputs.length} 条</span>
+                </div>
+                <div className="p-4 bg-slate-900 min-h-[100px] max-h-56 overflow-y-auto font-mono text-[11px] leading-5">
+                  {outputs.length === 0 ? (
+                    <div className="text-slate-500">暂无输出。点击「运行」执行脚本。</div>
+                  ) : (
+                    outputs.map((line, i) => (
+                      <div key={i} className={line.startsWith('✗') || line.startsWith('Write ') ? 'text-cyan-300' : 'text-slate-300'}>
+                        {line}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

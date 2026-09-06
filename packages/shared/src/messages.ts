@@ -1,4 +1,4 @@
-import type { ChannelStatus, StorageStatus, TagValueUpdate } from './types';
+import type { AlarmEvent, ChannelStatus, StorageStatus, TagValueUpdate } from './types';
 
 /**
  * 网关 ↔ 控制台 WebSocket 消息协议（v1）。
@@ -15,7 +15,9 @@ export type ServerMessage =
   | { type: 'tags-batch'; values: TagValueUpdate[] }
   | { type: 'channel-status'; status: ChannelStatus }
   | { type: 'storage-status'; status: StorageStatus }
-  | { type: 'write-result'; tagId: string; ok: boolean; error?: string };
+  | { type: 'write-result'; tagId: string; ok: boolean; error?: string }
+  | { type: 'alarm'; event: AlarmEvent }
+  | { type: 'config-changed' };
 
 export type ClientMessage =
   | { type: 'subscribe' }

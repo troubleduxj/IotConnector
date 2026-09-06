@@ -1,36 +1,127 @@
-import React, { useState } from 'react';
-import { mockTags } from '../data';
-import { Search, Send, Edit2, X } from 'lucide-react';
-import { Tag } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { fetchAlarms, fetchGatewayTags, writeTagValue, createAlarm, updateAlarm, deleteAlarm, type AlarmRule, type GatewayTag } from '../api';
+import { useRuntime } from '../store/runtime';
+import { Search, Send, X, Bell, Trash2, Check, Loader2 } from 'lucide-react';
 
-export default function Diagnostics() {
+/**
+ * 在线参数诊断（PRD M5）：真实位号表 + WS 实时值 + 类型感知写入 + 告警规则管理。
+ * 位号来自网关 /api/tags（单一数据源），实时值/质量来自 WS 推送。
+ */
+
+type WriteTarget = { tag: GatewayTag };
+type AlarmTarget = { tag: GatewayTag };
+
+export default function Diagnose() {
+  const [tags, setTags] = useState<GatewayTag[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [tags, setTags] = useState<Tag[]>(mockTags);
-  const [editingTag, setEditingTag] = useState<Tag | null>(null);
-  const [editValue, setEditValue] = useState<string>('');
+  const { liveValues, status, connect } = useRuntime();
 
-  const filteredTags = tags.filter(tag => 
-    tag.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    tag.channel.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [writeTarget, setWriteTarget] = useState<WriteTarget | null>(null);
+  const [writeValue, setWriteValue] = useState('');
+  const [writeBusy, setWriteBusy] = useState(false);
+  const [writeResult, setWriteResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  const handleEdit = (tag: Tag) => {
-    setEditingTag(tag);
-    setEditValue(String(tag.value));
+  const [alarmTarget, setAlarmTarget] = useState<AlarmTarget | null>(null);
+  const [alarmRules, setAlarmRules] = useState<AlarmRule[]>([]);
+  const [alarmKind, setAlarmKind] = useState<'high' | 'low'>('high');
+  const [alarmThreshold, setAlarmThreshold] = useState('');
+  const [alarmHyst, setAlarmHyst] = useState('0.2');
+  const [alarmBusy, setAlarmBusy] = useState(false);
+
+  const loadTags = (): void => {
+    fetchGatewayTags().then(setTags).catch(() => setTags([]));
   };
 
-  const handleSave = () => {
-    if (!editingTag) return;
-    
-    let parsedValue: string | number | boolean = editValue;
-    if (editingTag.type === 'number') {
-      parsedValue = Number(editValue) || 0;
-    } else if (editingTag.type === 'boolean') {
-      parsedValue = editValue.toLowerCase() === 'true';
-    }
+  useEffect(() => {
+    connect();
+    loadTags();
+  }, [connect]);
 
-    setTags(tags.map(t => t.id === editingTag.id ? { ...t, value: parsedValue, lastUpdated: new Date().toISOString() } : t));
-    setEditingTag(null);
+  const loadAlarmRules = (): void => {
+    fetchAlarms().then((d) => setAlarmRules(d.rules)).catch(() => setAlarmRules([]));
+  };
+
+  const filteredTags = useMemo(
+    () =>
+      tags.filter(
+        (t) =>
+          t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          t.channelId.toLowerCase().includes(searchTerm.toLowerCase()),
+      ),
+    [tags, searchTerm],
+  );
+
+  const openWrite = (tag: GatewayTag): void => {
+    const current = liveValues[tag.id]?.value;
+    setWriteTarget({ tag });
+    setWriteValue(typeof current === 'boolean' ? String(current) : typeof current === 'number' ? String(current) : '');
+    setWriteResult(null);
+  };
+
+  const submitWrite = async (): Promise<void> => {
+    if (!writeTarget) return;
+    const { tag } = writeTarget;
+    let value: number | string | boolean = writeValue;
+    if (tag.dataType === 'Bool') {
+      value = writeValue.trim().toLowerCase() === 'true' || writeValue === '1';
+    } else if (tag.dataType !== 'String') {
+      value = Number(writeValue);
+      if (Number.isNaN(value)) {
+        setWriteResult({ ok: false, msg: '数值格式不合法' });
+        return;
+      }
+    }
+    setWriteBusy(true);
+    const result = await writeTagValue(tag.id, value);
+    setWriteBusy(false);
+    setWriteResult(
+      result.ok
+        ? { ok: true, msg: `已下发到控制器（${tag.name} = ${value}）` }
+        : { ok: false, msg: `写入失败：${result.error ?? 'unknown'}` },
+    );
+  };
+
+  const openAlarms = (tag: GatewayTag): void => {
+    setAlarmTarget({ tag });
+    setAlarmThreshold('');
+    setAlarmKind('high');
+    loadAlarmRules();
+  };
+
+  const tagRules = alarmRules.filter((r) => r.tagId === alarmTarget?.tag.id);
+
+  const submitAlarm = async (): Promise<void> => {
+    if (!alarmTarget || !alarmThreshold) return;
+    const threshold = Number(alarmThreshold);
+    if (Number.isNaN(threshold)) return;
+    setAlarmBusy(true);
+    await createAlarm({
+      tagId: alarmTarget.tag.id,
+      kind: alarmKind,
+      threshold,
+      hysteresis: Number(alarmHyst) || 0,
+      enabled: true,
+      message: `${alarmTarget.tag.name} ${alarmKind === 'high' ? '>' : '<'} ${threshold}`,
+    });
+    setAlarmBusy(false);
+    loadAlarmRules();
+  };
+
+  const qualityCell = (tag: GatewayTag): { label: string; cls: string } => {
+    const live = liveValues[tag.id];
+    const q = live?.quality ?? 'Uncertain';
+    if (q === 'Good') return { label: 'Good', cls: 'text-green-700 bg-green-500' };
+    if (q === 'Bad') return { label: 'Bad', cls: 'text-rose-700 bg-rose-500' };
+    return { label: 'Uncertain', cls: 'text-amber-700 bg-amber-400' };
+  };
+
+  const formatLive = (tag: GatewayTag): string => {
+    const live = liveValues[tag.id];
+    if (!live) return '—';
+    const v = live.value;
+    if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+    if (typeof v === 'number') return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+    return String(v);
   };
 
   return (
@@ -39,60 +130,79 @@ export default function Diagnostics() {
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
           <div className="relative w-72">
             <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
-            <input 
+            <input
               type="text"
-              placeholder="Filter by TagName or Channel..."
+              placeholder="按位号名或通道过滤…"
               className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                status === 'live' ? 'bg-green-500 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'
+              }`}
+            />
+            {status === 'live' ? `${tags.length} 位号 · 实时推送中` : status === 'connecting' ? '连接网关…' : '网关离线'}
+          </div>
         </div>
-        
+
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-[11px] uppercase font-bold tracking-wider">
-                <th className="px-6 py-3 border-b border-slate-200">Channel</th>
-                <th className="px-6 py-3 border-b border-slate-200">TagName</th>
-                <th className="px-6 py-3 border-b border-slate-200">Value</th>
-                <th className="px-6 py-3 border-b border-slate-200">Type</th>
-                <th className="px-6 py-3 border-b border-slate-200">Quality</th>
-                <th className="px-6 py-3 border-b border-slate-200 text-right">Actions</th>
+                <th className="px-6 py-3 border-b border-slate-200">通道</th>
+                <th className="px-6 py-3 border-b border-slate-200">位号</th>
+                <th className="px-6 py-3 border-b border-slate-200">地址</th>
+                <th className="px-6 py-3 border-b border-slate-200">当前值</th>
+                <th className="px-6 py-3 border-b border-slate-200">类型</th>
+                <th className="px-6 py-3 border-b border-slate-200">质量</th>
+                <th className="px-6 py-3 border-b border-slate-200 text-right">操作</th>
               </tr>
             </thead>
             <tbody className="text-sm text-slate-600">
-              {filteredTags.map(tag => (
-                <tr key={tag.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors group">
-                  <td className="px-6 py-4 font-mono font-medium">{tag.channel}</td>
-                  <td className="px-6 py-4 font-mono font-medium text-slate-900">{tag.name}</td>
-                  <td className="px-6 py-4 font-semibold text-slate-700">
-                    {typeof tag.value === 'boolean' ? (tag.value ? 'True' : 'False') : tag.value}
-                  </td>
-                  <td className="px-6 py-4 text-slate-500">{tag.type}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center gap-2 font-medium ${
-                      tag.quality === 'Good' ? 'text-green-700' : 'text-amber-700'
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${tag.quality === 'Good' ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-                      {tag.quality}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button 
-                      onClick={() => handleEdit(tag)}
-                      className="text-slate-400 hover:text-indigo-600 transition-colors p-1 rounded-md hover:bg-indigo-50"
-                      title="Write Value"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filteredTags.map((tag) => {
+                const q = qualityCell(tag);
+                return (
+                  <tr key={tag.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-3 font-mono font-medium text-[12px]">{tag.channelId}</td>
+                    <td className="px-6 py-3 font-mono font-medium text-slate-900">
+                      {tag.name}
+                      {tag.unit && <span className="ml-1 text-slate-400 text-[11px]">{tag.unit}</span>}
+                    </td>
+                    <td className="px-6 py-3 font-mono text-[12px] text-slate-500">{tag.address}</td>
+                    <td className="px-6 py-3 font-semibold text-slate-800 font-mono">{formatLive(tag)}</td>
+                    <td className="px-6 py-3 text-slate-500 text-[12px]">{tag.dataType}</td>
+                    <td className="px-6 py-3">
+                      <span className={`inline-flex items-center gap-2 font-medium ${q.cls.replace(/bg-\S+/, '')}`}>
+                        <span className={`w-2 h-2 rounded-full ${q.cls.split(' ')[1]}`}></span>
+                        {q.label}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => openAlarms(tag)}
+                        className="text-slate-400 hover:text-amber-600 transition-colors p-1.5 rounded-md hover:bg-amber-50 mr-1"
+                        title="告警规则"
+                      >
+                        <Bell className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => openWrite(tag)}
+                        className="text-slate-400 hover:text-indigo-600 transition-colors p-1.5 rounded-md hover:bg-indigo-50"
+                        title="写入"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {filteredTags.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500 text-sm">
-                    No tags found matching "{searchTerm}"
+                  <td colSpan={7} className="px-6 py-8 text-center text-slate-500 text-sm">
+                    {tags.length === 0 ? '尚未加载位号（网关未连接？）' : `没有匹配 "${searchTerm}" 的位号`}
                   </td>
                 </tr>
               )}
@@ -101,50 +211,172 @@ export default function Diagnostics() {
         </div>
       </div>
 
-      {/* Edit Modal */}
-      {editingTag && (
+      {/* 写入弹窗 */}
+      {writeTarget && (
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-              <h3 className="font-semibold text-slate-800">Write Tag Value</h3>
-              <button onClick={() => setEditingTag(null)} className="text-slate-400 hover:text-slate-600">
+              <h3 className="font-semibold text-slate-800">写入位号值</h3>
+              <button onClick={() => setWriteTarget(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Tag Name</label>
-                <div className="text-sm font-medium text-slate-900">{editingTag.name}</div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">位号</label>
+                <div className="text-sm font-mono font-medium text-slate-900">
+                  {writeTarget.tag.name}
+                  {writeTarget.tag.unit && <span className="ml-1 text-slate-400">({writeTarget.tag.unit})</span>}
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                  {writeTarget.tag.channelId} · {writeTarget.tag.address} · {writeTarget.tag.dataType}
+                </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Current Value</label>
-                <div className="text-sm text-slate-700">{String(editingTag.value)}</div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">当前值</label>
+                <div className="text-sm text-slate-700 font-mono">{formatLive(writeTarget.tag)}</div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">New Value</label>
-                <input 
-                  type="text" 
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  autoFocus
-                />
+                <label className="block text-xs font-medium text-slate-500 mb-1">新值</label>
+                {writeTarget.tag.dataType === 'Bool' ? (
+                  <select
+                    value={writeValue}
+                    onChange={(e) => setWriteValue(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  >
+                    <option value="true">TRUE</option>
+                    <option value="false">FALSE</option>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={writeValue}
+                    onChange={(e) => setWriteValue(e.target.value)}
+                    inputMode={writeTarget.tag.dataType === 'String' ? 'text' : 'decimal'}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    autoFocus
+                  />
+                )}
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  写入为危险操作：经网关下发到真实控制器（S7/Modbus/OPC UA），生效后可在图表中观察。
+                </p>
               </div>
+              {writeResult && (
+                <div
+                  className={`px-3 py-2 rounded-md text-xs flex items-center gap-2 ${
+                    writeResult.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                  }`}
+                >
+                  {writeResult.ok ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                  {writeResult.msg}
+                </div>
+              )}
             </div>
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3">
-              <button 
-                onClick={() => setEditingTag(null)}
+              <button
+                onClick={() => setWriteTarget(null)}
                 className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md transition-colors"
               >
-                Cancel
+                关闭
               </button>
-              <button 
-                onClick={handleSave}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors flex items-center"
+              <button
+                onClick={() => void submitWrite()}
+                disabled={writeBusy}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-md transition-colors flex items-center"
               >
-                <Send className="w-4 h-4 mr-2" />
-                Send to Controller
+                {writeBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                确认写入
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 告警规则弹窗 */}
+      {alarmTarget && (
+        <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Bell className="w-4 h-4 text-amber-500" /> 告警规则
+              </h3>
+              <button
+                onClick={() => setAlarmTarget(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="text-sm font-mono font-medium text-slate-900">{alarmTarget.tag.name}</div>
+
+              {tagRules.length > 0 && (
+                <div className="space-y-2">
+                  {tagRules.map((rule) => (
+                    <div key={rule.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
+                      <div className="text-xs">
+                        <span className={`font-bold ${rule.kind === 'high' ? 'text-rose-600' : 'text-blue-600'}`}>
+                          {rule.kind === 'high' ? '越上限' : '越下限'}
+                        </span>
+                        <span className="font-mono ml-1">{rule.threshold}</span>
+                        <span className="text-slate-400 ml-2">回差 {rule.hysteresis}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => void updateAlarm(rule.id, { enabled: !rule.enabled }).then(loadAlarmRules)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            rule.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                          }`}
+                        >
+                          {rule.enabled ? '启用' : '停用'}
+                        </button>
+                        <button
+                          onClick={() => void deleteAlarm(rule.id).then(loadAlarmRules)}
+                          className="p-1 text-slate-400 hover:text-rose-600"
+                          title="删除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-slate-100">
+                <div className="text-xs font-semibold text-slate-600 mb-2">新建规则</div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={alarmKind}
+                    onChange={(e) => setAlarmKind(e.target.value as 'high' | 'low')}
+                    className="px-2 py-1.5 border border-slate-300 rounded-md text-xs font-semibold"
+                  >
+                    <option value="high">越上限 &gt;</option>
+                    <option value="low">越下限 &lt;</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="阈值"
+                    value={alarmThreshold}
+                    onChange={(e) => setAlarmThreshold(e.target.value)}
+                    className="w-24 px-2 py-1.5 border border-slate-300 rounded-md text-xs font-mono"
+                  />
+                  <span className="text-[11px] text-slate-400">回差</span>
+                  <input
+                    type="text"
+                    value={alarmHyst}
+                    onChange={(e) => setAlarmHyst(e.target.value)}
+                    className="w-16 px-2 py-1.5 border border-slate-300 rounded-md text-xs font-mono"
+                  />
+                  <button
+                    onClick={() => void submitAlarm()}
+                    disabled={alarmBusy || !alarmThreshold}
+                    className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-50 flex items-center"
+                  >
+                    {alarmBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

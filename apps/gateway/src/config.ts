@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Channel, Tag } from '@iotconnector/shared';
+import type { AlarmRule, Channel, Tag } from '@iotconnector/shared';
 
 export interface GatewayConfig {
   channels: Channel[];
   tags: Tag[];
+  alarms: AlarmRule[];
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -72,13 +73,20 @@ function seedConfig(): GatewayConfig {
       { id: '15', channelId: 'opc-01', name: 'Welder.Voltage', address: 'ns=2;s=Welder_001_WeldingVoltage', dataType: 'Float', unit: 'V', scale: 1, offset: 0, engMin: 0, engMax: 50, description: 'Arc Voltage Feedback' },
       { id: '18', channelId: 'opc-01', name: 'Robot.CycleProgress', address: 'ns=2;s=Valve_01_Opening', dataType: 'Float', unit: '%', scale: 1, offset: 0, engMin: 0, engMax: 100, description: 'Motion Execution Progress' },
     ],
+    alarms: [
+      { id: 'alm-1', tagId: '2', kind: 'high', threshold: 36.2, hysteresis: 0.3, enabled: true, message: 'Reactor temperature high' },
+      { id: 'alm-2', tagId: '7', kind: 'high', threshold: 25.8, hysteresis: 0.4, enabled: true, message: 'Inverter current high' },
+      { id: 'alm-3', tagId: '1', kind: 'low', threshold: 6.9, hysteresis: 0.1, enabled: true, message: 'Reactor pH low' },
+    ],
   };
 }
 
 export function loadConfig(): GatewayConfig {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig;
+      const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig;
+      parsed.alarms = parsed.alarms ?? []; // 旧版本配置迁移
+      return parsed;
     }
   } catch (e) {
     console.error('[config] load failed, falling back to seed:', e);

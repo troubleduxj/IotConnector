@@ -29,6 +29,68 @@ export class Engine {
     private tags: Tag[],
   ) {}
 
+  /** 数值点评估钩子（告警引擎等，工程值，含不变值） */
+  onEvaluate?: (tag: Tag, value: number, quality: Quality) => void;
+
+  /** 配置变更后同步通道/位号引用（index.ts 持有同一数组并原地修改） */
+  syncConfig(channels: Channel[], tags: Tag[]): void {
+    this.channels = channels;
+    this.tags = tags;
+  }
+
+  /** 通道删除：停止驱动并清理其运行时状态 */
+  async removeChannel(channelId: string): Promise<void> {
+    const old = this.drivers.get(channelId);
+    if (old) {
+      await old.stop().catch(() => {});
+      this.drivers.delete(channelId);
+    }
+    for (const t of this.tags.filter((t) => t.channelId === channelId)) {
+      this.runtimes.delete(t.id);
+    }
+    this.statuses.delete(channelId);
+  }
+
+  /** 新增/更新位号运行时（配置 CRUD 后调用） */
+  upsertTagRuntime(tag: Tag): void {
+    const prev = this.runtimes.get(tag.id);
+    this.runtimes.set(tag.id, { tag, value: prev?.value ?? 0, quality: prev?.quality ?? 'Uncertain', ts: 0 });
+  }
+
+  removeTagRuntime(tagId: string): void {
+    this.runtimes.delete(tagId);
+  }
+
+  /** 通道热重载：停止驱动 → 以当前位号表重建 → 重启（PRD FR-M2-06 配置热生效） */
+  async reloadChannel(channelId: string): Promise<void> {
+    const channel = this.channels.find((c) => c.id === channelId);
+    if (!channel) return;
+    const old = this.drivers.get(channelId);
+    if (old) {
+      await old.stop().catch(() => {});
+      this.drivers.delete(channelId);
+    }
+    const channelTags = this.tags.filter((t) => t.channelId === channelId);
+    for (const t of channelTags) {
+      this.upsertTagRuntime(t);
+    }
+    const state: ChannelState = channel.enabled ? 'connecting' : 'disabled';
+    this.statuses.set(channelId, { id: channelId, state });
+    this.onStatus?.({ id: channelId, state });
+    if (!channel.enabled) return;
+
+    const ctx = {
+      channel,
+      tags: channelTags,
+      publish: (tagId: string, raw: number | string | boolean, quality: Quality = 'Good') =>
+        this.publish(tagId, raw, quality),
+      setStatus: (s: ChannelState, detail?: string) => this.setStatus(channelId, s, detail),
+    };
+    const driver = createDriver(channel, ctx);
+    this.drivers.set(channelId, driver);
+    void driver.start().catch((e) => this.setStatus(channelId, 'error', String(e)));
+  }
+
   start(): void {
     const byChannel = new Map<string, Tag[]>();
     for (const tag of this.tags) {
@@ -100,6 +162,8 @@ export class Engine {
     if (typeof raw === 'number') {
       value = Number((raw * (rt.tag.scale || 1) + (rt.tag.offset ?? 0)).toFixed(4));
     }
+
+    if (typeof value === 'number') this.onEvaluate?.(rt.tag, value, quality);
 
     const now = Date.now();
     const unchanged = value === rt.value && quality === rt.quality;

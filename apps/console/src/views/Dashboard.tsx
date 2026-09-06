@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { mockTags } from '../data';
 import { useRuntime } from '../store/runtime';
-import { Server, Activity, AlertTriangle, CheckCircle } from 'lucide-react';
+import { fetchAlarms, type AlarmsResponse } from '../api';
+import { Server, Activity, AlertTriangle, CheckCircle, Bell } from 'lucide-react';
 
 /** 按数据类型格式化：整数不带小数，浮点 2 位（UI 规范 §3.3） */
 function formatValue(v: number | string | boolean): string {
@@ -11,9 +12,22 @@ function formatValue(v: number | string | boolean): string {
 
 export default function Dashboard() {
   const { liveValues, channels, status, lastUpdateTs, connect } = useRuntime();
+  const [alarms, setAlarms] = useState<AlarmsResponse | null>(null);
+
   useEffect(() => {
     connect();
   }, [connect]);
+
+  // 告警轮询：5s（活动告警 + 最近事件，PRD FR-M1-04）
+  useEffect(() => {
+    const load = (): void => { fetchAlarms().then(setAlarms).catch(() => {}); };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activeAlarms = alarms?.active ?? [];
+  const recentAlarms = (alarms?.history ?? []).slice(0, 6);
 
   const activeTags = mockTags.length;
   const goodQualityTags = mockTags.filter((t) => liveValues[t.id]?.quality !== 'Bad').length;
@@ -46,8 +60,77 @@ export default function Dashboard() {
             <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Warnings</div>
             <AlertTriangle className="w-4 h-4 text-amber-500" />
           </div>
-          <div className={`text-3xl font-bold ${warnings > 0 ? 'text-amber-500' : ''}`}>{warnings}</div>
-          <div className="text-amber-600/80 text-xs mt-2">Requires review</div>
+          <div className={`text-3xl font-bold ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-amber-500'}`}>
+            {activeAlarms.length}
+          </div>
+          <div className="text-amber-600/80 text-xs mt-2">
+            {activeAlarms.length > 0 ? '活动告警待处理' : 'Bad 质量位号'}
+          </div>
+        </div>
+      </div>
+
+      {/* 告警面板（PRD FR-M1-04） */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+          <h3 className="font-semibold text-slate-800 flex items-center">
+            <Bell className={`w-5 h-5 mr-2 ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-slate-500'}`} />
+            Alarms
+            {activeAlarms.length > 0 && (
+              <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 animate-pulse">
+                {activeAlarms.length} ACTIVE
+              </span>
+            )}
+          </h3>
+          <span className="text-xs text-slate-400 font-mono">规则 {alarms?.rules.length ?? 0} 条</span>
+        </div>
+        <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Active</div>
+            {activeAlarms.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
+                无活动告警 ✓
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {activeAlarms.map((a) => (
+                  <div key={a.id} className="px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-rose-800 truncate">
+                        {a.tagName} <span className="font-mono">{a.kind === 'high' ? '>' : '<'} {a.threshold}</span>
+                      </div>
+                      <div className="text-[10px] text-rose-500 font-mono">
+                        当前 {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}
+                      </div>
+                    </div>
+                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
+                      ACTIVE
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Recent Events</div>
+            {recentAlarms.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
+                暂无事件
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                {recentAlarms.map((a) => (
+                  <div key={a.id} className="px-3 py-1.5 rounded-md bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px]">
+                    <span className={`font-bold ${a.state === 'Active' ? 'text-rose-600' : 'text-slate-500'}`}>
+                      {a.tagName} {a.state === 'Active' ? '触发' : '已恢复'}
+                    </span>
+                    <span className="font-mono text-slate-400">
+                      {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

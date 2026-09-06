@@ -88,3 +88,30 @@ export interface StorageStatus {
   written: number;
   error?: string;
 }
+
+/** 告警规则（PRD FR-M10-01 最小集：限值告警 + 回差） */
+export interface AlarmRule {
+  id: string;
+  tagId: string;
+  /** 越上限 / 越下限 */
+  kind: 'high' | 'low';
+  threshold: number;
+  /** 回差（消除临界抖动）：high 规则回落到 threshold - hysteresis 以下才清除 */
+  hysteresis: number;
+  enabled: boolean;
+  message?: string;
+}
+
+export interface AlarmEvent {
+  id: string;
+  ruleId: string;
+  tagId: string;
+  tagName: string;
+  channel: string;
+  state: 'Active' | 'Cleared';
+  kind: 'high' | 'low';
+  threshold: number;
+  value: number;
+  ts: number;
+  message?: string;
+}

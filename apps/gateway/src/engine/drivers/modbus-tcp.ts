@@ -1,5 +1,7 @@
+import net from 'node:net';
 import ModbusRTU from 'modbus-serial';
 import type { Tag } from '@iotconnector/shared';
+import { pushFrame } from '../../diagnostics';
 import type { Driver, DriverContext } from '../driver';
 
 const RECONNECT_MS = 5000;
@@ -76,6 +78,7 @@ export class ModbusTcpDriver implements Driver {
       return;
     }
     this.client.setID(Number(this.ctx.channel.params.slaveId ?? 1));
+    this.tapSocket();
     this.ctx.setStatus('online', 'Modbus TCP connected');
     this.timer = setInterval(() => void this.poll(), Math.max(200, this.ctx.channel.pollIntervalMs));
   }
@@ -94,6 +97,20 @@ export class ModbusTcpDriver implements Driver {
     const off = regOffset(tag.address);
     if (off == null) throw new Error(`invalid Modbus address: ${tag.address}`);
     await this.client.writeRegister(off, Number(rawValue));
+  }
+
+  /** 报文诊断：捕获底层 socket 的真实 TX/RX 字节（PRD FR-M2-20 Modbus 先行） */
+  private tapSocket(): void {
+    const sock = (this.client as unknown as { _port?: { _client?: net.Socket } })._port?._client;
+    if (!sock) return;
+    const origWrite = sock.write.bind(sock);
+    sock.write = (data: Buffer | Uint8Array, ...rest: unknown[]): boolean => {
+      pushFrame(this.ctx.channel.id, 'TX', Buffer.from(data), 'MBAP 请求');
+      return origWrite(data, ...rest);
+    };
+    sock.on('data', (chunk: Buffer) => {
+      pushFrame(this.ctx.channel.id, 'RX', chunk, 'MBAP 响应');
+    });
   }
 
   private scheduleReconnect(): void {

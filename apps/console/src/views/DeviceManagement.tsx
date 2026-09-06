@@ -9,6 +9,7 @@ import {
   updateChannel, updateTag, type ChannelTestResult, type GatewayChannel, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
+import { fetchChannelFrames, type CapturedFrame } from '../api';
 
 /**
  * 设备与通道管理（PRD M2）：通道/位号配置 CRUD 直连网关 REST，
@@ -25,7 +26,9 @@ export default function DeviceManagement() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<GatewayChannel | null>(null);
   const [protocolFilter, setProtocolFilter] = useState<string>('All');
-  const [activeTab, setActiveTab] = useState<'connection' | 'tags'>('connection');
+  const [activeTab, setActiveTab] = useState<'connection' | 'tags' | 'diagnostics'>('connection');
+  const [frames, setFrames] = useState<CapturedFrame[]>([]);
+  const [framesPaused, setFramesPaused] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -253,6 +256,18 @@ export default function DeviceManagement() {
     reader.readAsText(file);
   };
 
+  // 报文诊断轮询（选中诊断 TAB 且非暂停时 2s 拉取）
+  useEffect(() => {
+    if (activeTab !== 'diagnostics' || !selectedId) return;
+    const load = (): void => {
+      fetchChannelFrames(selectedId).then((d) => setFrames(d.frames)).catch(() => {});
+    };
+    load();
+    if (framesPaused) return;
+    const timer = setInterval(load, 2000);
+    return () => clearInterval(timer);
+  }, [activeTab, selectedId, framesPaused]);
+
   const filteredTagList = selectedTags.filter(
     (t) => t.name.toLowerCase().includes(tagSearch.toLowerCase()) || t.address.toLowerCase().includes(tagSearch.toLowerCase()),
   );
@@ -388,7 +403,7 @@ export default function DeviceManagement() {
 
               {/* Tabs */}
               <div className="px-6 border-b border-slate-200 flex gap-1">
-                {(['connection', 'tags'] as const).map((tab) => (
+                {(['connection', 'tags', 'diagnostics'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -396,7 +411,7 @@ export default function DeviceManagement() {
                       activeTab === tab ? 'text-indigo-600 border-indigo-600' : 'text-slate-500 hover:text-slate-700 border-transparent'
                     }`}
                   >
-                    {tab === 'connection' ? '连接参数' : `位号映射 (${selectedTags.length})`}
+                    {tab === 'connection' ? '连接参数' : tab === 'tags' ? `位号映射 (${selectedTags.length})` : '报文诊断'}
                   </button>
                 ))}
               </div>
@@ -522,6 +537,52 @@ export default function DeviceManagement() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {activeTab === 'diagnostics' && (
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs text-slate-500">
+                      捕获 {selected.name} 通道的真实 TCP 字节流（环形缓冲 200 帧）。
+                      当前驱动支持：Modbus TCP / MELSEC（其余驱动接入后自动启用）。
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setFramesPaused(!framesPaused)}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md border ${
+                          framesPaused ? 'bg-slate-100 text-slate-500 border-slate-200' : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                        }`}
+                      >
+                        {framesPaused ? '已暂停' : '实时捕获中'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          void fetch(`/api/channels/${selected.id}/frames?clear=1`);
+                          setFrames([]);
+                        }}
+                        className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-slate-900 p-4 min-h-[320px] max-h-[420px] overflow-y-auto font-mono text-[11px] leading-5">
+                    {frames.length === 0 ? (
+                      <div className="text-slate-500">等待报文…（采集运行时每周期产生 TX/RX 帧）</div>
+                    ) : (
+                      frames.map((f, i) => (
+                        <div key={i} className="flex items-start gap-2 py-0.5 border-b border-slate-800/60">
+                          <span className="text-slate-500 shrink-0">{new Date(f.ts).toLocaleTimeString()}</span>
+                          <span className={`shrink-0 font-bold ${f.dir === 'TX' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                            {f.dir}
+                          </span>
+                          <span className="text-slate-500 shrink-0">{f.bytes}B</span>
+                          <span className="text-cyan-300 break-all">{f.hex}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
 

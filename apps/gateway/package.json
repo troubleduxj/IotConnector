@@ -10,7 +10,8 @@
     "s7-sim": "tsx scripts/s7-sim.ts",
     "opcua-sim": "tsx scripts/opcua-sim-node.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "melsec-sim": "tsx scripts/melsec-sim.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
@@ -20,7 +21,9 @@
     "modbus-serial": "^8.0.25",
     "node-opcua": "^2.134.0",
     "nodemailer": "^10.0.0",
-    "nodes7": "^0.3.18"
+    "nodes7": "^0.3.18",
+    "omron-fins": "^0.5.0",
+    "st-ethernet-ip": "^2.7.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

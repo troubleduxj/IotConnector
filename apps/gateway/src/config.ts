@@ -48,6 +48,36 @@ function seedConfig(): GatewayConfig {
         params: { slaveId: 1, byteOrder32: 'CDAB', addressingModel: '1', maxHoldingRegisters: 120 },
       },
       {
+        id: 'melsec-01',
+        name: 'FX5U_Packer',
+        protocol: 'Mitsubishi MELSEC',
+        host: '127.0.0.1',
+        port: 11021, // 本地模拟器端口（scripts/melsec-sim.ts），真机 SLMP 端口通常 6006/端站配置
+        enabled: true,
+        pollIntervalMs: 1000,
+        params: { mcFrame: '3E (Binary)', plcSeries: 'iQ-F (FX5U)' },
+      },
+      {
+        id: 'fins-01',
+        name: 'CJ2_Welder',
+        protocol: 'Omron FINS',
+        host: '127.0.0.1',
+        port: 9600,
+        enabled: false, // 需真实 CJ2/CS1 或 FINS 网关
+        pollIntervalMs: 1000,
+        params: { finsUdp: false, srcNode: 1, dstNode: 10 },
+      },
+      {
+        id: 'enip-01',
+        name: 'L32E_Line1',
+        protocol: 'EtherNet/IP (Rockwell)',
+        host: '127.0.0.1',
+        port: 44818,
+        enabled: false, // 需真实 ControlLogix/Emulator
+        pollIntervalMs: 1000,
+        params: { slot: 0 },
+      },
+      {
         id: 'opc-01',
         name: 'OPC_UA_Server',
         protocol: 'OPC UA',
@@ -79,6 +109,9 @@ function seedConfig(): GatewayConfig {
       { id: '9', channelId: 'opc-01', name: 'Main.FlowRate', address: 'ns=2;s=Flow_Sensor_01', dataType: 'Float', unit: 'L/min', scale: 1, offset: 0, engMin: 0, engMax: 100, description: 'Coolant flow rate' },
       { id: '15', channelId: 'opc-01', name: 'Welder.Voltage', address: 'ns=2;s=Welder_001_WeldingVoltage', dataType: 'Float', unit: 'V', scale: 1, offset: 0, engMin: 0, engMax: 50, description: 'Arc Voltage Feedback' },
       { id: '18', channelId: 'opc-01', name: 'Robot.CycleProgress', address: 'ns=2;s=Valve_01_Opening', dataType: 'Float', unit: '%', scale: 1, offset: 0, engMin: 0, engMax: 100, description: 'Motion Execution Progress' },
+      { id: '30', channelId: 'melsec-01', name: 'Packer.SealTemp', address: 'D10', dataType: 'Float', unit: '°C', scale: 1, offset: 0, engMin: 30, engMax: 40, description: 'Heat Sealer Temperature' },
+      { id: '31', channelId: 'melsec-01', name: 'Packer.Speed', address: 'D0', dataType: 'Int16', unit: 'pcs/h', scale: 1, offset: 0, engMin: 1000, engMax: 1600, description: 'Packer Line Speed' },
+      { id: '32', channelId: 'melsec-01', name: 'Packer.Alarm', address: 'M20', dataType: 'Bool', unit: '', scale: 1, offset: 0, description: 'Packer Alarm' },
     ],
     alarms: [
       { id: 'alm-1', tagId: '2', kind: 'high', threshold: 36.2, hysteresis: 0.3, enabled: true, message: 'Reactor temperature high' },

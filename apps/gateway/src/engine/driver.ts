@@ -1,5 +1,8 @@
 import type { Channel, ChannelState, Quality, Tag } from '@iotconnector/shared';
 import { ModbusTcpDriver } from './drivers/modbus-tcp';
+import { MelsecDriver } from './drivers/melsec';
+import { FinsDriver } from './drivers/fins';
+import { EnipDriver } from './drivers/enip';
 import { SimulationDriver } from './drivers/simulation';
 import { S7Driver } from './drivers/s7';
 import { OpcUaDriver } from './drivers/opcua';
@@ -28,6 +31,12 @@ export function createDriver(channel: Channel, ctx: DriverContext): Driver {
       return new ModbusTcpDriver(ctx);
     case 'Siemens Profinet':
       return new S7Driver(ctx);
+    case 'Mitsubishi MELSEC':
+      return new MelsecDriver(ctx);
+    case 'Omron FINS':
+      return new FinsDriver(ctx);
+    case 'EtherNet/IP (Rockwell)':
+      return new EnipDriver(ctx);
     case 'OPC UA':
       return new OpcUaDriver(ctx);
     default:

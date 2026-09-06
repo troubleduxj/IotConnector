@@ -8,6 +8,7 @@ import type { AlarmEvent, AlarmRule, Channel, NotificationConfig, Tag } from '@i
 import { Engine } from './engine/engine';
 import { loadConfig, saveConfig } from './config';
 import { AlarmEngine } from './alarms';
+import { getFrames, clearFrames } from './diagnostics';
 import { dispatchAlarm, sendTestMessage } from './notify';
 import { testChannel } from './engine/testers';
 import { toNodes7Address } from './engine/drivers/s7';
@@ -673,6 +674,15 @@ async function main(): Promise<void> {
     if (!updated) return reply.code(404).send({ ok: false, error: 'event not found' });
     broadcast({ type: 'alarm', event: updated });
     return updated;
+  });
+
+  // ===== 报文诊断（PRD FR-M2-20，Modbus 先行）=====
+  app.get('/api/channels/:id/frames', async (req) => {
+    const q = (req.query ?? {}) as { limit?: string; dir?: string; clear?: string };
+    const id = (req.params as { id: string }).id;
+    if (q.clear === '1') clearFrames(id);
+    const dir = q.dir === 'TX' || q.dir === 'RX' ? q.dir : undefined;
+    return { ok: true, frames: getFrames(id, Math.min(200, Number(q.limit ?? 100)), dir) };
   });
 
   app.get('/api/alarms/history', async (req) => {

@@ -555,3 +555,17 @@ export const changePassword = async (oldPassword: string, newPassword: string): 
   return (await (await apiFetch('/api/auth/change-password', jsonPost({ oldPassword, newPassword }))).json()) as { ok: boolean; error?: string };
 };
 
+
+// ===== 报文诊断（FR-M2-20）=====
+
+export interface CapturedFrame {
+  ts: number;
+  dir: 'TX' | 'RX';
+  hex: string;
+  bytes: number;
+  note?: string;
+}
+
+export async function fetchChannelFrames(channelId: string): Promise<{ ok: boolean; frames: CapturedFrame[] }> {
+  return (await apiFetch(`/api/channels/${channelId}/frames?limit=200`)).json() as Promise<{ ok: boolean; frames: CapturedFrame[] }>;
+}

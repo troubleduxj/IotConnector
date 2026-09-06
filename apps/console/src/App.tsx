@@ -4,7 +4,10 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { LayoutDashboard, Activity, FileSpreadsheet, LineChart, Code, Server, Settings, Database, Timer, Menu, X } from 'lucide-react';
+import {
+  LayoutDashboard, Activity, FileSpreadsheet, LineChart, Code, Server, Settings, Database, Timer,
+  Menu, X, Bell, LogOut, Languages,
+} from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import DeviceManagement from './views/DeviceManagement';
 import Diagnostics from './views/Diagnostics';
@@ -14,53 +17,70 @@ import Scripts from './views/Scripts';
 import SystemConfiguration from './views/SystemConfiguration';
 import DataStorage from './views/DataStorage';
 import AcquisitionScheduler from './views/AcquisitionScheduler';
+import AlarmCenter from './views/AlarmCenter';
+import Login from './views/Login';
+import { fetchMe, logout, type ConsoleUser } from './api';
+import { AUTH_EXPIRED_EVENT } from './api';
 import { useRuntime } from './store/runtime';
+import { I18nProvider, useI18n, type Lang } from './i18n';
 
-type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'scripts' | 'settings';
+type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'alarms' | 'scripts' | 'settings';
 
-/** 顶栏网关连接状态徽章（真实反映 WS 连接状态，替代原型写死的 Live System） */
-function GatewayStatusBadge() {
-  const status = useRuntime((s) => s.status);
-  const connect = useRuntime((s) => s.connect);
-  useEffect(() => {
-    connect();
-  }, [connect]);
+const ROLE_LABEL: Record<string, string> = { admin: '管理员', engineer: '工程师', operator: '操作员' };
 
-  const config =
-    status === 'live'
-      ? { cls: 'bg-green-100 text-green-700 border-green-200', label: 'Live System' }
-      : status === 'connecting'
-        ? { cls: 'bg-amber-100 text-amber-700 border-amber-200', label: 'Connecting…' }
-        : { cls: 'bg-rose-100 text-rose-700 border-rose-200', label: 'Gateway Offline' };
-
+export default function App(): React.JSX.Element {
   return (
-    <span
-      className={`hidden sm:inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border font-medium ${config.cls}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'bg-green-500 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
-      {config.label}
-    </span>
+    <I18nProvider>
+      <Shell />
+    </I18nProvider>
   );
 }
 
-export default function App() {
+/** 认证门卫：会话有效进主界面，否则登录页 */
+function Shell(): React.JSX.Element {
+  const [user, setUser] = useState<ConsoleUser | 'loading'>('loading');
+
+  useEffect(() => {
+    fetchMe().then((u) => setUser(u)).catch(() => setUser(null));
+    const onExpired = (): void => setUser(null);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  if (user === 'loading') {
+    return <div className="min-h-screen bg-slate-900" />;
+  }
+  if (user === null) {
+    return <Login onLogin={setUser} />;
+  }
+  return <Console user={user} onLogout={() => setUser(null)} />;
+}
+
+function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }): React.JSX.Element {
+  const { t, lang, setLang } = useI18n();
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [dbType, setDbType] = useState('TDengine'); // Default to TDengine to showcase the integration
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navigation = [
-    { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
-    { id: 'devices', name: 'Device Management', icon: Server },
-    { id: 'scheduler', name: 'Acquisition Scheduler', icon: Timer },
-    { id: 'storage', name: 'Data Storage Rules', icon: Database },
-    { id: 'diagnostics', name: 'Parameter Diagnose', icon: Activity },
-    { id: 'recipes', name: 'Recipe Management', icon: FileSpreadsheet },
-    { id: 'historian', name: 'Historian Query', icon: LineChart },
-    { id: 'scripts', name: 'Python Scripts', icon: Code },
-    { id: 'settings', name: 'System Config', icon: Settings },
+    { id: 'dashboard', name: t('nav.dashboard'), icon: LayoutDashboard },
+    { id: 'devices', name: t('nav.devices'), icon: Server },
+    { id: 'scheduler', name: t('nav.scheduler'), icon: Timer },
+    { id: 'storage', name: t('nav.storage'), icon: Database },
+    { id: 'diagnostics', name: t('nav.diagnose'), icon: Activity },
+    { id: 'recipes', name: t('nav.recipes'), icon: FileSpreadsheet },
+    { id: 'historian', name: t('nav.historian'), icon: LineChart },
+    { id: 'alarms', name: t('nav.alarms'), icon: Bell },
+    { id: 'scripts', name: t('nav.scripts'), icon: Code },
+    { id: 'settings', name: t('nav.settings'), icon: Settings },
   ] as const;
 
-  const renderView = () => {
+  const doLogout = async (): Promise<void> => {
+    await logout();
+    onLogout();
+  };
+
+  const renderView = (): React.JSX.Element => {
     switch (currentView) {
       case 'dashboard':
         return <Dashboard />;
@@ -76,6 +96,8 @@ export default function App() {
         return <Recipes />;
       case 'historian':
         return <Historian />;
+      case 'alarms':
+        return <AlarmCenter />;
       case 'scripts':
         return <Scripts />;
       case 'settings':
@@ -87,10 +109,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex font-sans text-slate-900 overflow-hidden relative">
-      
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-slate-900/50 z-40 md:hidden backdrop-blur-sm"
           onClick={() => setIsMobileMenuOpen(false)}
         />
@@ -105,7 +126,7 @@ export default function App() {
             </div>
             <span className="font-bold text-white text-lg tracking-tight">FactoryBridge</span>
           </div>
-          <button 
+          <button
             className="md:hidden text-slate-400 hover:text-white"
             onClick={() => setIsMobileMenuOpen(false)}
           >
@@ -113,7 +134,7 @@ export default function App() {
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 scrollbar-hide">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">Core Systems</div>
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">{t('nav.group')}</div>
           {navigation.map((item) => {
             const Icon = item.icon;
             const isActive = currentView === item.id;
@@ -125,8 +146,8 @@ export default function App() {
                   setIsMobileMenuOpen(false);
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-left ${
-                  isActive 
-                    ? 'bg-indigo-600 text-white' 
+                  isActive
+                    ? 'bg-indigo-600 text-white'
                     : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                 }`}
               >
@@ -152,7 +173,7 @@ export default function App() {
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 shrink-0 z-10">
           <div className="flex items-center gap-3 md:gap-4">
-            <button 
+            <button
               className="md:hidden p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-md"
               onClick={() => setIsMobileMenuOpen(true)}
             >
@@ -163,9 +184,30 @@ export default function App() {
             </h1>
             <GatewayStatusBadge />
           </div>
-          <div className="flex items-center gap-4">
-            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
-              AT
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+              className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold text-slate-500 hover:text-indigo-600 border border-slate-200 rounded-md hover:border-indigo-300 transition-colors"
+              title="切换语言 / Switch language"
+            >
+              <Languages className="w-4 h-4" />
+              {t('header.lang')}
+            </button>
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
+                {user.username.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden sm:block leading-tight">
+                <div className="text-xs font-bold text-slate-800">{user.username}</div>
+                <div className="text-[10px] text-slate-400">{ROLE_LABEL[user.role] ?? user.role}</div>
+              </div>
+              <button
+                onClick={() => void doLogout()}
+                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                title={t('header.logout')}
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </header>
@@ -179,3 +221,24 @@ export default function App() {
   );
 }
 
+/** 顶栏网关连接状态徽章（真实反映 WS 连接状态） */
+function GatewayStatusBadge() {
+  const { status } = useRuntime();
+  const { t } = useI18n();
+
+  const config =
+    status === 'live'
+      ? { cls: 'bg-green-100 text-green-700 border-green-200', label: t('header.live') }
+      : status === 'connecting'
+        ? { cls: 'bg-amber-100 text-amber-700 border-amber-200', label: t('header.connecting') }
+        : { cls: 'bg-rose-100 text-rose-700 border-rose-200', label: t('header.offline') };
+
+  return (
+    <span
+      className={`hidden sm:inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border font-medium ${config.cls}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${status === 'live' ? 'bg-green-500 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'}`} />
+      {config.label}
+    </span>
+  );
+}

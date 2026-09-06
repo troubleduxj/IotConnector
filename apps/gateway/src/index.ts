@@ -9,6 +9,7 @@ import { Engine } from './engine/engine';
 import { loadConfig, saveConfig } from './config';
 import { AlarmEngine } from './alarms';
 import { WebhookNotifier } from './notify';
+import { AuthStore, hashPassword, type Role, type SessionUser } from './auth';
 import { TDengineWriter } from './storage/tdengine';
 
 /** ws 连接的最小接口（@fastify/websocket v11 传入 ws.WebSocket） */
@@ -30,6 +31,24 @@ async function main(): Promise<void> {
   const getTag = (id: string): Tag | undefined => tags.find((t) => t.id === id);
 
   const alarmEngine = new AlarmEngine(config.alarms ?? []);
+  const authStore = new AuthStore(config.users ?? []);
+  // 空账号表（旧配置迁移）时注入种子账号
+  if (authStore.getUsers().length === 0) {
+    authStore.setUsers([
+      { id: 'u_admin', username: 'admin', passwordHash: hashPassword('admin123'), role: 'admin', createdAt: Date.now() },
+      { id: 'u_engineer', username: 'engineer', passwordHash: hashPassword('engineer123'), role: 'engineer', createdAt: Date.now() },
+      { id: 'u_operator', username: 'operator', passwordHash: hashPassword('operator123'), role: 'operator', createdAt: Date.now() },
+    ]);
+  }
+  const AUDIT_FILE = path.resolve(process.cwd(), 'data', 'audit.jsonl');
+  const auditLog = (user: SessionUser, action: string, detail: string): void => {
+    try {
+      fs.mkdirSync(path.dirname(AUDIT_FILE), { recursive: true });
+      fs.appendFileSync(AUDIT_FILE, JSON.stringify({ ts: Date.now(), user: user.username, role: user.role, action, detail }) + '\n');
+    } catch {
+      /* 审计失败不阻塞业务 */
+    }
+  };
   const notifications: NotificationConfig = config.notifications ?? { enabled: false, webhookUrl: '' };
   const notifier = new WebhookNotifier(() => notifications);
 
@@ -90,7 +109,7 @@ async function main(): Promise<void> {
   engine.onEvaluate = (tag, value, quality) => alarmEngine.evaluate(tag, value, quality);
 
   const persist = (): void => {
-    saveConfig({ channels, tags, alarms: alarmEngine.getRules() });
+    saveConfig({ channels, tags, alarms: alarmEngine.getRules(), users: authStore.getUsers(), notifications });
   };
 
   const app = Fastify({ logger: false });
@@ -113,6 +132,25 @@ async function main(): Promise<void> {
     }
   };
   engine.onStatus = (status) => broadcast({ type: 'channel-status', status });
+
+  // ===== 认证助手（PRD FR-M10-02）=====
+  const tokenOf = (req): string | undefined => {
+    const h = req.headers.authorization as string | undefined;
+    if (h?.startsWith('Bearer ')) return h.slice(7);
+    return (req.query as Record<string, string> | undefined)?.token;
+  };
+  /** 校验失败时已发送响应并返回 null；成功返回会话用户 */
+  const requireAuth = (req, reply, minRole: Role): SessionUser | null => {
+    const result = authStore.authorize(tokenOf(req), minRole);
+    if ('code' in result) {
+      void reply.code(result.code).send({
+        ok: false,
+        error: result.code === 401 ? '未登录或会话已过期' : '权限不足（需要更高角色）',
+      });
+      return null;
+    }
+    return result.user;
+  };
   alarmEngine.onEvent = (event) => {
     broadcast({ type: 'alarm', event });
     void notifier.send(event);
@@ -165,6 +203,7 @@ async function main(): Promise<void> {
   app.get('/api/tags/live', async () => engine.snapshot());
 
   app.post('/api/tags/:id/write', async (req, reply) => {
+    if (!requireAuth(req, reply, 'operator')) return;
     const { value } = (req.body ?? {}) as { value?: number | string | boolean };
     if (value === undefined) return reply.code(400).send({ ok: false, error: 'body.value required' });
     return engine.write((req.params as { id: string }).id, value);
@@ -243,6 +282,8 @@ async function main(): Promise<void> {
   const broadcastConfigChanged = (): void => broadcast({ type: 'config-changed' });
 
   app.post('/api/channels', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const b = (req.body ?? {}) as Partial<Channel>;
     if (!b.name || !b.protocol) return reply.code(400).send({ ok: false, error: 'name & protocol required' });
     if (channels.some((c) => c.name === b.name)) return reply.code(409).send({ ok: false, error: 'channel name already exists' });
@@ -264,6 +305,8 @@ async function main(): Promise<void> {
   });
 
   app.put('/api/channels/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
     if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
     const b = (req.body ?? {}) as Partial<Channel>;
@@ -280,6 +323,8 @@ async function main(): Promise<void> {
   });
 
   app.delete('/api/channels/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
     const id = (req.params as { id: string }).id;
     const i = channels.findIndex((c) => c.id === id);
     if (i < 0) return reply.code(404).send({ ok: false, error: 'channel not found' });
@@ -295,6 +340,8 @@ async function main(): Promise<void> {
   });
 
   app.post('/api/tags', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const b = (req.body ?? {}) as Partial<Tag>;
     if (!b.channelId || !b.name || !b.address) return reply.code(400).send({ ok: false, error: 'channelId, name & address required' });
     if (!channels.some((c) => c.id === b.channelId)) return reply.code(404).send({ ok: false, error: 'channel not found' });
@@ -321,6 +368,8 @@ async function main(): Promise<void> {
   });
 
   app.put('/api/tags/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const tag = getTag((req.params as { id: string }).id);
     if (!tag) return reply.code(404).send({ ok: false, error: 'tag not found' });
     const b = (req.body ?? {}) as Partial<Tag>;
@@ -341,6 +390,8 @@ async function main(): Promise<void> {
   });
 
   app.delete('/api/tags/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const id = (req.params as { id: string }).id;
     const tag = getTag(id);
     if (!tag) return reply.code(404).send({ ok: false, error: 'tag not found' });
@@ -361,6 +412,8 @@ async function main(): Promise<void> {
   }));
 
   app.post('/api/alarms', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const b = (req.body ?? {}) as Partial<AlarmRule>;
     if (!b.tagId || !b.kind || b.threshold === undefined) {
       return reply.code(400).send({ ok: false, error: 'tagId, kind & threshold required' });
@@ -382,6 +435,8 @@ async function main(): Promise<void> {
   });
 
   app.put('/api/alarms/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const rule = alarmEngine.getRules().find((r) => r.id === (req.params as { id: string }).id);
     if (!rule) return reply.code(404).send({ ok: false, error: 'alarm rule not found' });
     const b = (req.body ?? {}) as Partial<AlarmRule>;
@@ -397,6 +452,8 @@ async function main(): Promise<void> {
   });
 
   app.delete('/api/alarms/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const ok = alarmEngine.removeRule((req.params as { id: string }).id);
     if (!ok) return reply.code(404).send({ ok: false, error: 'alarm rule not found' });
     persist();
@@ -415,11 +472,124 @@ async function main(): Promise<void> {
   app.get('/api/notifications', async () => notifications);
 
   app.put('/api/notifications', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     const b = (req.body ?? {}) as Partial<NotificationConfig>;
     if (b.enabled !== undefined) notifications.enabled = Boolean(b.enabled);
     if (b.webhookUrl !== undefined) notifications.webhookUrl = String(b.webhookUrl);
     persist();
     return notifications;
+  });
+
+  // ===== 认证与用户管理（PRD FR-M10-02）=====
+  app.post('/api/auth/login', async (req, reply) => {
+    const { username, password } = (req.body ?? {}) as { username?: string; password?: string };
+    if (!username || !password) return reply.code(400).send({ ok: false, error: '用户名与口令必填' });
+    const result = authStore.login(username, password);
+    if (!result) return reply.code(401).send({ ok: false, error: '用户名或口令错误' });
+    auditLog(result.user, 'login', `${username} 登录成功`);
+    return result;
+  });
+
+  app.post('/api/auth/logout', async (req, reply) => {
+    const user = requireAuth(req, reply, 'operator');
+    if (!user) return;
+    authStore.logout(tokenOf(req));
+    auditLog(user, 'logout', `${user.username} 退出登录`);
+    return { ok: true };
+  });
+
+  app.get('/api/auth/me', async (req, reply) => {
+    const user = authStore.verify(tokenOf(req));
+    if (!user) return reply.code(401).send({ ok: false, error: '未登录' });
+    return user;
+  });
+
+  app.get('/api/users', async (req, reply) => {
+    if (!requireAuth(req, reply, 'admin')) return;
+    return authStore.getUsers().map(({ passwordHash: _ph, ...u }) => u);
+  });
+
+  app.post('/api/users', async (req, reply) => {
+    const user = requireAuth(req, reply, 'admin');
+    if (!user) return;
+    const b = (req.body ?? {}) as { username?: string; password?: string; role?: Role };
+    if (!b.username || !b.password || !b.role) return reply.code(400).send({ ok: false, error: 'username, password & role required' });
+    if (authStore.getUsers().some((u) => u.username === b.username)) {
+      return reply.code(409).send({ ok: false, error: '用户名已存在' });
+    }
+    const created = {
+      id: `u_${Date.now()}`,
+      username: b.username,
+      passwordHash: hashPassword(b.password),
+      role: b.role,
+      createdAt: Date.now(),
+    };
+    authStore.setUsers([...authStore.getUsers(), created]);
+    persist();
+    auditLog(user, 'user.create', `${b.username} (${b.role})`);
+    return reply.code(201).send({ id: created.id, username: created.username, role: created.role });
+  });
+
+  app.put('/api/users/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    const target = authStore.findUser((req.params as { id: string }).id);
+    if (!target) return reply.code(404).send({ ok: false, error: 'user not found' });
+    const b = (req.body ?? {}) as { password?: string; role?: Role };
+    if (b.password) target.passwordHash = hashPassword(b.password);
+    if (b.role) target.role = b.role;
+    persist();
+    auditLog(actor, 'user.update', `${target.username} role=${target.role}`);
+    return { id: target.id, username: target.username, role: target.role };
+  });
+
+  app.delete('/api/users/:id', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    const id = (req.params as { id: string }).id;
+    if (id === actor.id) return reply.code(400).send({ ok: false, error: '不能删除当前登录账号' });
+    const target = authStore.findUser(id);
+    if (!target) return reply.code(404).send({ ok: false, error: 'user not found' });
+    authStore.setUsers(authStore.getUsers().filter((u) => u.id !== id));
+    persist();
+    auditLog(actor, 'user.delete', target.username);
+    return { ok: true };
+  });
+
+  app.get('/api/audit', async (req, reply) => {
+    if (!requireAuth(req, reply, 'admin')) return;
+    try {
+      const lines = fs.readFileSync(AUDIT_FILE, 'utf-8').split('\n').filter(Boolean);
+      const events = lines.slice(-200).map((l) => JSON.parse(l) as Record<string, unknown>).reverse();
+      return { events };
+    } catch {
+      return { events: [] };
+    }
+  });
+
+  // ===== 告警历史查询（持久化于 TDengine alarm_events）=====
+  app.get('/api/alarms/history', async (req) => {
+    const q = (req.query ?? {}) as { tagId?: string; state?: string; start?: string; end?: string; limit?: string; offset?: string };
+    const limit = Math.min(200, Math.max(1, Number(q.limit ?? 50)));
+    const offset = Math.max(0, Number(q.offset ?? 0));
+    const where: string[] = [];
+    if (q.tagId) where.push(`tag_id='${q.tagId.replace(/'/g, "''")}'`);
+    if (q.state === 'Active' || q.state === 'Cleared') where.push(`status='${q.state}'`);
+    if (q.start) where.push(`ts >= ${Number(q.start)}`);
+    if (q.end) where.push(`ts <= ${Number(q.end)}`);
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const db = process.env.TDENGINE_DB ?? 'factory_bridge';
+    const rows = await storage.query(
+      `SELECT ts, event_id, rule_id, tag_id, tag_name, channel, status, kind, threshold, val, message ` +
+        `FROM ${db}.alarm_events ${clause} ORDER BY ts DESC LIMIT ${limit} OFFSET ${offset}`,
+    );
+    const total = await storage.query(`SELECT COUNT(*) FROM ${db}.alarm_events ${clause}`);
+    const events = (rows.data ?? []).map((r) => {
+      const [ts, eventId, ruleId, tagId, tagName, channel, status, kind, threshold, value, message] = r as unknown[];
+      return { ts, eventId, ruleId, tagId, tagName, channel, state: status, kind, threshold, value, message };
+    });
+    return { ok: true, total: (total.data?.[0]?.[0] as number) ?? 0, limit, offset, events };
   });
 
   await app.listen({ port: PORT, host: '0.0.0.0' });

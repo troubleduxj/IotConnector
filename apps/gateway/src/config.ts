@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
+import { hashPassword, type User } from './auth';
 
 export interface GatewayConfig {
   channels: Channel[];
   tags: Tag[];
   alarms: AlarmRule[];
   notifications?: NotificationConfig;
+  users?: User[];
 }
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -80,6 +82,12 @@ function seedConfig(): GatewayConfig {
       { id: 'alm-3', tagId: '1', kind: 'low', threshold: 6.9, hysteresis: 0.1, enabled: true, message: 'Reactor pH low' },
     ],
     notifications: { enabled: false, webhookUrl: '' },
+    // 种子账号（首次启动生成；正式交付时首登强制改密为后续任务）
+    users: [
+      { id: 'u_admin', username: 'admin', passwordHash: hashPassword('admin123'), role: 'admin', createdAt: Date.now() },
+      { id: 'u_engineer', username: 'engineer', passwordHash: hashPassword('engineer123'), role: 'engineer', createdAt: Date.now() },
+      { id: 'u_operator', username: 'operator', passwordHash: hashPassword('operator123'), role: 'operator', createdAt: Date.now() },
+    ],
   };
 }
 
@@ -89,6 +97,7 @@ export function loadConfig(): GatewayConfig {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig;
       parsed.alarms = parsed.alarms ?? []; // 旧版本配置迁移
       parsed.notifications = parsed.notifications ?? { enabled: false, webhookUrl: '' };
+      parsed.users = parsed.users ?? [];
       return parsed;
     }
   } catch (e) {

@@ -1,6 +1,39 @@
 /**
  * 网关 REST API 客户端（经 Vite 代理 /api → gateway）。
+ * 认证：令牌存 localStorage，全部请求自动附带 Authorization；401 触发全局登出事件。
  */
+
+const TOKEN_KEY = 'fb_token';
+export type ConsoleRole = 'admin' | 'engineer' | 'operator';
+export interface ConsoleUser {
+  id: string;
+  username: string;
+  role: ConsoleRole;
+}
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string | null): void {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+/** 401 时由 apiFetch 派发，App 捕获后切回登录页 */
+export const AUTH_EXPIRED_EVENT = 'fb-auth-expired';
+
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = getToken();
+  const headers = new Headers(init?.headers);
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401 && getToken()) {
+    setToken(null);
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
+  return res;
+}
 
 export interface HistoryPoint {
   t: string;
@@ -52,7 +85,7 @@ export async function fetchHistory(
     end: String(end),
   });
   if (intervalSec) params.set('interval', String(intervalSec));
-  const res = await fetch(`/api/history?${params.toString()}`, { signal });
+  const res = await apiFetch(`/api/history?${params.toString()}`, { signal });
   const body = (await res.json()) as HistoryResponse;
   if (!res.ok || !body.ok) {
     throw new Error(body.error ?? `history query failed (HTTP ${res.status})`);
@@ -93,12 +126,12 @@ export interface AlarmsResponse {
 }
 
 export async function fetchAlarms(): Promise<AlarmsResponse> {
-  const res = await fetch('/api/alarms');
+  const res = await apiFetch('/api/alarms');
   return (await res.json()) as AlarmsResponse;
 }
 
 export async function createAlarm(rule: Omit<AlarmRule, 'id'>): Promise<AlarmRule> {
-  const res = await fetch('/api/alarms', {
+  const res = await apiFetch('/api/alarms', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(rule),
@@ -107,7 +140,7 @@ export async function createAlarm(rule: Omit<AlarmRule, 'id'>): Promise<AlarmRul
 }
 
 export async function updateAlarm(id: string, patch: Partial<AlarmRule>): Promise<AlarmRule> {
-  const res = await fetch(`/api/alarms/${id}`, {
+  const res = await apiFetch(`/api/alarms/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),
@@ -116,7 +149,7 @@ export async function updateAlarm(id: string, patch: Partial<AlarmRule>): Promis
 }
 
 export async function deleteAlarm(id: string): Promise<void> {
-  await fetch(`/api/alarms/${id}`, { method: 'DELETE' });
+  await apiFetch(`/api/alarms/${id}`, { method: 'DELETE' });
 }
 
 // ===== 配置 CRUD（PRD FR-M2-01）=====
@@ -136,7 +169,7 @@ export interface GatewayTag {
 }
 
 export async function fetchGatewayTags(): Promise<GatewayTag[]> {
-  const res = await fetch('/api/tags');
+  const res = await apiFetch('/api/tags');
   return (await res.json()) as GatewayTag[];
 }
 
@@ -144,7 +177,7 @@ export async function writeTagValue(
   tagId: string,
   value: number | string | boolean,
 ): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`/api/tags/${encodeURIComponent(tagId)}/write`, {
+  const res = await apiFetch(`/api/tags/${encodeURIComponent(tagId)}/write`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ value }),
@@ -173,12 +206,12 @@ export interface GatewayConfigFull {
 }
 
 export async function fetchConfig(): Promise<GatewayConfigFull> {
-  const res = await fetch('/api/config');
+  const res = await apiFetch('/api/config');
   return (await res.json()) as GatewayConfigFull;
 }
 
 export async function createChannel(channel: Omit<GatewayChannel, 'id'>): Promise<GatewayChannel> {
-  const res = await fetch('/api/channels', {
+  const res = await apiFetch('/api/channels', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(channel),
@@ -188,7 +221,7 @@ export async function createChannel(channel: Omit<GatewayChannel, 'id'>): Promis
 }
 
 export async function updateChannel(id: string, patch: Partial<GatewayChannel>): Promise<GatewayChannel> {
-  const res = await fetch(`/api/channels/${id}`, {
+  const res = await apiFetch(`/api/channels/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),
@@ -198,11 +231,11 @@ export async function updateChannel(id: string, patch: Partial<GatewayChannel>):
 }
 
 export async function deleteChannel(id: string): Promise<void> {
-  await fetch(`/api/channels/${id}`, { method: 'DELETE' });
+  await apiFetch(`/api/channels/${id}`, { method: 'DELETE' });
 }
 
 export async function createTag(tag: Omit<GatewayTag, 'id'>): Promise<GatewayTag> {
-  const res = await fetch('/api/tags', {
+  const res = await apiFetch('/api/tags', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(tag),
@@ -212,7 +245,7 @@ export async function createTag(tag: Omit<GatewayTag, 'id'>): Promise<GatewayTag
 }
 
 export async function updateTag(id: string, patch: Partial<GatewayTag>): Promise<GatewayTag> {
-  const res = await fetch(`/api/tags/${id}`, {
+  const res = await apiFetch(`/api/tags/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),
@@ -222,6 +255,128 @@ export async function updateTag(id: string, patch: Partial<GatewayTag>): Promise
 }
 
 export async function deleteTag(id: string): Promise<void> {
-  await fetch(`/api/tags/${id}`, { method: 'DELETE' });
+  await apiFetch(`/api/tags/${id}`, { method: 'DELETE' });
 }
 
+
+// ===== 认证（PRD FR-M10-02）=====
+
+export async function login(username: string, password: string): Promise<{ token: string; user: ConsoleUser }> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const body = (await res.json()) as { token?: string; user?: ConsoleUser; error?: string };
+  if (!res.ok || !body.token || !body.user) throw new Error(body.error ?? '登录失败');
+  setToken(body.token);
+  return { token: body.token, user: body.user };
+}
+
+export async function fetchMe(): Promise<ConsoleUser | null> {
+  if (!getToken()) return null;
+  const res = await apiFetch('/api/auth/me');
+  if (!res.ok) {
+    setToken(null);
+    return null;
+  }
+  return (await res.json()) as ConsoleUser;
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST' });
+  } finally {
+    setToken(null);
+  }
+}
+
+// ===== 用户管理（admin）=====
+
+export interface ManagedUser {
+  id: string;
+  username: string;
+  role: ConsoleRole;
+  createdAt?: number;
+}
+
+export async function fetchUsers(): Promise<ManagedUser[]> {
+  return (await (await apiFetch('/api/users')).json()) as ManagedUser[];
+}
+
+export async function createUser(username: string, password: string, role: ConsoleRole): Promise<ManagedUser> {
+  const res = await apiFetch('/api/users', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password, role }),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? '创建失败');
+  return (await res.json()) as ManagedUser;
+}
+
+export async function updateUser(id: string, patch: { password?: string; role?: ConsoleRole }): Promise<void> {
+  await apiFetch(`/api/users/${id}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
+}
+
+// ===== 审计日志（admin）=====
+
+export interface AuditEntry {
+  ts: number;
+  user: string;
+  role: string;
+  action: string;
+  detail: string;
+}
+
+export async function fetchAudit(): Promise<AuditEntry[]> {
+  const res = await apiFetch('/api/audit');
+  const body = (await res.json()) as { events: AuditEntry[] };
+  return body.events ?? [];
+}
+
+// ===== 告警历史（TDengine 持久化）=====
+
+export interface AlarmHistoryEvent {
+  ts: number;
+  eventId: string;
+  ruleId: string;
+  tagId: string;
+  tagName: string;
+  channel: string;
+  state: string;
+  kind: string;
+  threshold: number;
+  value: number;
+  message?: string;
+}
+
+export interface AlarmHistoryResponse {
+  ok: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  events: AlarmHistoryEvent[];
+  error?: string;
+}
+
+export async function fetchAlarmHistory(
+  filters: { tagId?: string; state?: string; start?: number; end?: number; limit?: number; offset?: number },
+): Promise<AlarmHistoryResponse> {
+  const params = new URLSearchParams();
+  if (filters.tagId) params.set('tagId', filters.tagId);
+  if (filters.state) params.set('state', filters.state);
+  if (filters.start) params.set('start', String(filters.start));
+  if (filters.end) params.set('end', String(filters.end));
+  params.set('limit', String(filters.limit ?? 50));
+  params.set('offset', String(filters.offset ?? 0));
+  const res = await apiFetch(`/api/alarms/history?${params.toString()}`);
+  return (await res.json()) as AlarmHistoryResponse;
+}

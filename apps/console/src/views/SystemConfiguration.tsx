@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell } from 'lucide-react';
-import { fetchAlarms } from '../api';
+import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, type AuditEntry, type ConsoleUser, type ManagedUser } from '../api';
 
 interface NotificationConfig {
   enabled: boolean;
@@ -13,12 +13,22 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [apiEnabled, setApiEnabled] = useState(true);
   const [notify, setNotify] = useState<NotificationConfig>({ enabled: false, webhookUrl: '' });
   const [notifyToast, setNotifyToast] = useState<string | null>(null);
+  const [me, setMe] = useState<ConsoleUser | null>(null);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'operator' as ConsoleUser['role'] });
 
   useEffect(() => {
     fetch('/api/notifications')
       .then((r) => r.json())
       .then(setNotify)
       .catch(() => {});
+    fetchMe().then(async (u) => {
+      if (u?.role !== 'admin') return;
+      setMe(u);
+      setUsers(await fetchUsers().catch(() => []));
+      setAudit(await fetchAudit().catch(() => []));
+    });
   }, []);
 
   const saveNotify = async (): Promise<void> => {
@@ -329,6 +339,121 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
             </div>
           </div>
         </div>
+
+        {/* 用户与审计（PRD FR-M10-02，仅管理员） */}
+        {me?.role === 'admin' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+              <div className="p-2 bg-slate-200 text-slate-600 rounded-lg"><Shield className="w-5 h-5" /></div>
+              <h3 className="font-bold text-slate-800">用户与审计</h3>
+              <span className="ml-auto text-[11px] text-slate-400 font-mono">管理员 {me.username}</span>
+            </div>
+            <div className="p-6 space-y-5">
+              <div className="overflow-x-auto border border-slate-100 rounded-lg">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase font-bold border-b border-slate-200">
+                      <th className="px-4 py-2">用户名</th>
+                      <th className="px-4 py-2">角色</th>
+                      <th className="px-4 py-2 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {users.map((u) => (
+                      <tr key={u.id} className="hover:bg-slate-50/80">
+                        <td className="px-4 py-2 font-mono font-bold text-slate-800">{u.username}</td>
+                        <td className="px-4 py-2">
+                          <select
+                            value={u.role}
+                            disabled={u.id === me.id}
+                            onChange={async (e) => { await updateUser(u.id, { role: e.target.value as ConsoleUser['role'] }); setUsers(await fetchUsers()); }}
+                            className="px-2 py-1 border border-slate-300 rounded text-[11px] font-medium disabled:opacity-50"
+                          >
+                            <option value="admin">管理员</option>
+                            <option value="engineer">工程师</option>
+                            <option value="operator">操作员</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <button
+                            onClick={async () => {
+                              const pwd = window.prompt(`为 ${u.username} 设置新口令：`);
+                              if (pwd) { await updateUser(u.id, { password: pwd }); }
+                            }}
+                            className="text-indigo-600 hover:text-indigo-800 text-[11px] font-bold mr-3"
+                          >
+                            改密
+                          </button>
+                          <button
+                            onClick={async () => { if (u.id !== me.id && window.confirm(`确认删除用户 ${u.username}？`)) { await deleteUser(u.id); setUsers(await fetchUsers()); } }}
+                            disabled={u.id === me.id}
+                            className="text-rose-600 hover:text-rose-800 text-[11px] font-bold disabled:opacity-40"
+                          >
+                            删除
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  placeholder="用户名"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  className="w-32 px-2 py-1.5 border border-slate-300 rounded-md text-xs font-mono"
+                />
+                <input
+                  placeholder="口令"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  className="w-32 px-2 py-1.5 border border-slate-300 rounded-md text-xs font-mono"
+                />
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value as ConsoleUser['role'] })}
+                  className="px-2 py-1.5 border border-slate-300 rounded-md text-xs font-medium"
+                >
+                  <option value="operator">操作员</option>
+                  <option value="engineer">工程师</option>
+                  <option value="admin">管理员</option>
+                </select>
+                <button
+                  onClick={async () => {
+                    if (!newUser.username || !newUser.password) return;
+                    try {
+                      await createUser(newUser.username, newUser.password, newUser.role);
+                      setUsers(await fetchUsers());
+                      setNewUser({ username: '', password: '', role: 'operator' });
+                    } catch (e) {
+                      window.alert(String(e));
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700"
+                >
+                  新增用户
+                </button>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">审计日志（最近 200 条）</div>
+                <div className="max-h-40 overflow-y-auto font-mono text-[10px] space-y-1">
+                  {audit.map((a, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-slate-500">
+                      <span className="text-slate-400">{new Date(a.ts).toLocaleString()}</span>
+                      <span className="font-bold text-slate-700">{a.user}</span>
+                      <span className="px-1.5 py-0.5 bg-slate-100 rounded">{a.action}</span>
+                      <span className="truncate">{a.detail}</span>
+                    </div>
+                  ))}
+                  {audit.length === 0 && <div className="text-slate-400">暂无记录</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Real-time Data Pipeline (Redis) */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">

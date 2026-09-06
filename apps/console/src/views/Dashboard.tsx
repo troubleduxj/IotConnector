@@ -82,16 +82,13 @@ export default function Dashboard() {
               const live = liveValues[tag.id];
               const value = live ? live.value : tag.value;
               const isBad = live?.quality === 'Bad';
-              const channelState = channels[mockChannelId(tag.channel)]?.state;
               return (
                 <div key={tag.id} className="p-4 rounded-lg border border-slate-100 bg-slate-50 flex flex-col">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-semibold text-slate-400">{tag.channel}</span>
                     {live && (
                       <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          isBad ? 'bg-rose-500' : channelState === 'online' ? 'bg-green-500' : 'bg-amber-400'
-                        }`}
+                        className={`w-1.5 h-1.5 rounded-full ${isBad ? 'bg-rose-500' : 'bg-green-500'}`}
                         title={isBad ? 'Bad quality' : `Live (${live.quality})`}
                       />
                     )}
@@ -119,11 +116,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-}
-
-/** mock channel 名 → 网关通道 id（PoC 种子：sim-01 / mb-01） */
-function mockChannelId(channelName: string): string {
-  if (channelName === 'R0021_S7_1500') return 'sim-01';
-  if (channelName === 'R0022_Modbus_Drive') return 'mb-01';
-  return channelName;
 }

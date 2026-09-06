@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "modbus-sim": "tsx scripts/modbus-sim.ts",
+    "opcua-sim": "tsx scripts/opcua-sim-node.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit"
   },
@@ -15,7 +16,8 @@
     "@fastify/websocket": "^11.0.1",
     "@iotconnector/shared": "workspace:*",
     "fastify": "^5.0.0",
-    "modbus-serial": "^8.0.25"
+    "modbus-serial": "^8.0.25",
+    "node-opcua": "^2.134.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

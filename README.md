@@ -163,3 +163,11 @@
 | `TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:6041`），未设置则存储管道禁用 | — |
 | `TDENGINE_DB` / `TDENGINE_STABLE` | 目标库与超级表 | `factory_bridge` / `st_factory_equipment` |
 
+
+### 已知问题：gopcua 版模拟器与外部 OPC UA 栈互操作
+
+`D:\Cursor\Project\ProDB\opcua-simulator`（gopcua v0.8.0 / v0.9.1 服务端）的 opc.tcp 端点在收到
+OPN（打开安全通道）帧后会直接断开连接——node-opcua 客户端与裸二进制协议实现均被断链，
+仅 gopcua 自家客户端与 HTTP API 可用。PoC 期间已用 node-opcua v0.9.1 重新构建验证，行为一致，
+属 gopcua server 包的互操作缺陷。当前使用 `scripts/opcua-sim-node.ts`（node-opcua 服务器，
+节点命名与 gopcua 版兼容）联调；修复 gopcua 后仅需把通道 `endpointUrl` 切回即可，驱动零改动。

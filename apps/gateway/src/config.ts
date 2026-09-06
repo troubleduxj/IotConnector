@@ -38,6 +38,25 @@ function seedConfig(): GatewayConfig {
         pollIntervalMs: 1000,
         params: { slaveId: 1, byteOrder32: 'CDAB', addressingModel: '1', maxHoldingRegisters: 120 },
       },
+      {
+        id: 'opc-01',
+        name: 'OPC_UA_Server',
+        protocol: 'OPC UA',
+        host: 'localhost',
+        port: 4840,
+        enabled: true,
+        pollIntervalMs: 1000,
+        params: {
+          // node-opcua 版模拟器端点（scripts/opcua-sim-node.ts）。
+          // 注意：gopcua 版模拟器（ProDB opcua-simulator）公告的是无路径端点
+          // opc.tcp://127.0.0.1:4840，但该服务端当前在 OPN 阶段断开外部协议栈。
+          endpointUrl: 'opc.tcp://127.0.0.1:4840',
+          securityMode: 'None',
+          securityPolicy: 'None',
+          authType: 'Anonymous',
+          publishInterval: 250,
+        },
+      },
     ],
     tags: [
       { id: '1', channelId: 'sim-01', name: 'R0021.pH', address: 'DB301.Real10', dataType: 'Float', unit: 'pH', scale: 1, offset: 0, engMin: 0, engMax: 14, description: 'Reactor pH level' },
@@ -47,6 +66,10 @@ function seedConfig(): GatewayConfig {
       { id: '5', channelId: 'mb-01', name: 'R0022.Speed', address: '40001', dataType: 'Int16', unit: 'RPM', scale: 1, offset: 0, engMin: 0, engMax: 1500, description: 'Motor Speed' },
       { id: '6', channelId: 'mb-01', name: 'R0022.Status', address: '40002', dataType: 'Int16', unit: '', scale: 1, offset: 0, description: 'Running Status' },
       { id: '7', channelId: 'mb-01', name: 'R0022.Current', address: '40003', dataType: 'Float', unit: 'A', scale: 0.1, offset: 0, engMin: 0, engMax: 40, description: 'Inverter output current' },
+      { id: '8', channelId: 'opc-01', name: 'Main.Pressure', address: 'ns=2;s=Pressure_Sensor_01', dataType: 'Float', unit: 'bar', scale: 1, offset: 0, engMin: 0, engMax: 10, description: 'Main line pressure' },
+      { id: '9', channelId: 'opc-01', name: 'Main.FlowRate', address: 'ns=2;s=Flow_Sensor_01', dataType: 'Float', unit: 'L/min', scale: 1, offset: 0, engMin: 0, engMax: 100, description: 'Coolant flow rate' },
+      { id: '15', channelId: 'opc-01', name: 'Welder.Voltage', address: 'ns=2;s=Welder_001_WeldingVoltage', dataType: 'Float', unit: 'V', scale: 1, offset: 0, engMin: 0, engMax: 50, description: 'Arc Voltage Feedback' },
+      { id: '18', channelId: 'opc-01', name: 'Robot.CycleProgress', address: 'ns=2;s=Valve_01_Opening', dataType: 'Float', unit: '%', scale: 1, offset: 0, engMin: 0, engMax: 100, description: 'Motion Execution Progress' },
     ],
   };
 }

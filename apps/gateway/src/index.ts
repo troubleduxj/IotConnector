@@ -106,6 +106,73 @@ async function main(): Promise<void> {
     return engine.write((req.params as { id: string }).id, value);
   });
 
+  /**
+   * Historian 聚合查询（PRD FR-M7-03）：服务端窗口聚合 + 自动降采样。
+   * GET /api/history?tagIds=1,5&start=<ms>&end=<ms>&interval=<秒，可选>
+   */
+  app.get('/api/history', async (req, reply) => {
+    if (storage.status.state !== 'online') {
+      return reply.code(503).send({ ok: false, error: `storage offline (${storage.status.state})`, storage: storage.status });
+    }
+    const q = (req.query ?? {}) as { tagIds?: string; start?: string; end?: string; interval?: string };
+    const tagIds = (q.tagIds ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    if (!tagIds.length) return reply.code(400).send({ ok: false, error: 'query.tagIds required (max 8)' });
+
+    const end = q.end ? Number(q.end) : Date.now();
+    const start = q.start ? Number(q.start) : end - 3600_000;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return reply.code(400).send({ ok: false, error: 'invalid start/end (epoch ms)' });
+    }
+    // 目标 ~150 点，吸附到常用粒度
+    const AUTO_STEPS = [1, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+    const rawSec = (end - start) / 1000 / 150;
+    const intervalSec = q.interval
+      ? Math.max(1, Number(q.interval))
+      : AUTO_STEPS.find((s) => s >= rawSec) ?? Math.ceil(rawSec);
+
+    const db = process.env.TDENGINE_DB ?? 'factory_bridge';
+    const stable = process.env.TDENGINE_STABLE ?? 'st_factory_equipment';
+
+    const series = [];
+    for (const tagId of tagIds) {
+      const tag = tagById.get(tagId);
+      if (!tag) {
+        series.push({ tagId, error: 'unknown tag' });
+        continue;
+      }
+      const tn = tag.name.replace(/'/g, "''");
+      const where = `WHERE tag_name='${tn}' AND ts >= ${start} AND ts <= ${end}`;
+      const agg = await storage.query(
+        `SELECT _wstart, AVG(val), MIN(val), MAX(val), COUNT(*) FROM ${db}.${stable} ${where} INTERVAL(${intervalSec}s)`,
+      );
+      const stats = await storage.query(
+        `SELECT MIN(val), MAX(val), AVG(val), STDDEV(val), COUNT(*) FROM ${db}.${stable} ${where}`,
+      );
+      if (agg.code !== 0) {
+        series.push({ tagId, error: agg.msg ?? `TDengine error ${agg.code}` });
+        continue;
+      }
+      const points = (agg.data ?? []).map((row) => {
+        const [t, avg, min, max, n] = row as [number, number, number, number, number];
+        return { t: new Date(t).toISOString(), avg, min, max, n };
+      });
+      const s = (stats.data?.[0] ?? []) as number[];
+      series.push({
+        tagId,
+        name: tag.name,
+        unit: tag.unit,
+        intervalSec,
+        points,
+        stats: { min: s[0] ?? null, max: s[1] ?? null, avg: s[2] ?? null, stdDev: s[3] ?? null, count: s[4] ?? 0 },
+      });
+    }
+    return { ok: true, start, end, intervalSec, series };
+  });
+
   await app.listen({ port: PORT, host: '0.0.0.0' });
   console.log(`[gateway] REST+WS listening on http://0.0.0.0:${PORT}  (ws://localhost:${PORT}/ws)`);
   console.log(`[gateway] channels: ${config.channels.length}, tags: ${config.tags.length}, storage: ${storage.status.state}`);

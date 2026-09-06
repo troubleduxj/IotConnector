@@ -160,8 +160,26 @@
 | 变量 | 说明 | 默认 |
 |---|---|---|
 | `GATEWAY_PORT` | REST+WS 端口 | 8080 |
-| `TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:6041`），未设置则存储管道禁用 | — |
+| `TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:16041`），未设置则存储管道禁用 | — |
 | `TDENGINE_DB` / `TDENGINE_STABLE` | 目标库与超级表 | `factory_bridge` / `st_factory_equipment` |
+
+### TDengine 存储与历史查询（Phase 0 已打通）
+
+```bash
+# 启动 TDengine（Docker，REST 映射到宿主机 16041 —— 6041 被 VMware vmnat 占用）
+docker run -d --name tdengine --restart unless-stopped -p 16030:6030 -p 16041:6041 tdengine/tdengine:3.3.6.13
+
+# 网关开启存储
+TDENGINE_URL=http://127.0.0.1:16041 pnpm --filter @iotconnector/gateway dev
+```
+
+- 写入管道：SQL 批量 `INSERT INTO db.tb_x USING <STable> TAGS(...) VALUES ...`，
+  按位号哈希自动建子表；断线缓存（10 万点上限）恢复后补写。
+  注：TDengine 3.3.6 的 taosAdapter 已移除 schemaless REST 端点（迁往 WebSocket），
+  故采用等价的 SQL 方式，超级表/子表架构与 PRD FR-M4-03 一致。
+- 历史查询 API：`GET /api/history?tagIds=1,5,8&start=<ms>&end=<ms>&interval=<秒可选>`
+  —— 服务端窗口聚合（AVG/MIN/MAX/点数，粒度自动降采样至 ~150 点）+ 统计包络
+  （Min/Max/均值/标准差/点数），对应 PRD FR-M7-03/05。
 
 
 ### 已知问题：gopcua 版模拟器与外部 OPC UA 栈互操作

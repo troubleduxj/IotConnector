@@ -59,6 +59,11 @@ export class TDengineWriter {
     this.state = cfg.url ? 'offline' : 'disabled';
   }
 
+  /** 未配置 TDENGINE_URL 时为 false，存储任务引擎据此跳过建表/写入 */
+  get enabled(): boolean {
+    return Boolean(this.cfg.url);
+  }
+
   get status(): StorageStatus {
     return {
       engine: 'tdengine',

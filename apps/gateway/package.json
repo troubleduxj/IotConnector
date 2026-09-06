@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
     "melsec-sim": "tsx scripts/melsec-sim.ts",
-    "mqtt-broker": "node scripts/mqtt-broker.cjs"
+    "mqtt-broker": "node scripts/mqtt-broker.cjs",
+    "fins-sim": "tsx scripts/fins-sim.ts",
+    "enip-sim": "node scripts/enip-sim.cjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

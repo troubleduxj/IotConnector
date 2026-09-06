@@ -36,6 +36,12 @@ export class StorageTaskEngine {
   ) {}
 
   sync(tasks: StorageTask[]): void {
+    // TDengine 未配置时整体跳过，避免建表请求打到无效 URL 导致进程崩溃
+    if (!this.storage.enabled) {
+      this.stop();
+      this.tasks = [];
+      return;
+    }
     this.tasks = tasks;
     const ids = new Set(tasks.filter((t) => t.enabled).map((t) => t.id));
     // 停止不再启用/已删除的任务

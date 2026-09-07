@@ -19,6 +19,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [auditFilter, setAuditFilter] = useState('');
+  const [tab, setTab] = useState<'config' | 'audit'>('config');
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'operator' as ConsoleUser['role'] });
   const [resetTarget, setResetTarget] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState('');
@@ -49,16 +50,16 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     return () => clearInterval(timer);
   }, []);
 
-  // 审计日志（admin）：初始加载 + 15s 轮询
+  // 审计日志（admin）：进入审计 TAB 才加载并 15s 轮询
   useEffect(() => {
-    if (me?.role !== 'admin') return;
+    if (me?.role !== 'admin' || tab !== 'audit') return;
     const load = (): void => {
       void fetchAudit().then(setAudit).catch(() => {});
     };
     load();
     const timer = setInterval(load, 15000);
     return () => clearInterval(timer);
-  }, [me?.role]);
+  }, [me?.role, tab]);
 
   const saveNorthboundCfg = async (): Promise<void> => {
     if (!northbound) return;
@@ -188,6 +189,29 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
         </button>
       </div>
 
+      {/* TAB：系统配置 / 审计日志（admin） */}
+      <div className="flex gap-1 border-b border-slate-200">
+        <button
+          onClick={() => setTab('config')}
+          className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+            tab === 'config' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          {t('sys.title')}
+        </button>
+        {me?.role === 'admin' && (
+          <button
+            onClick={() => setTab('audit')}
+            className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+              tab === 'audit' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            {t('sys.audit.title')}
+          </button>
+        )}
+      </div>
+
+      {tab === 'config' && (
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Left Column */}
         <div className="space-y-6">
@@ -619,9 +643,10 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
         </div>
 
       </div>
+      )}
 
       {/* 审计日志（FR-M10-03，admin）：配置变更/写操作/下发/登录全量留痕 */}
-      {me?.role === 'admin' && (
+      {tab === 'audit' && me?.role === 'admin' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3 justify-between bg-slate-50">
             <div className="flex items-center gap-3">

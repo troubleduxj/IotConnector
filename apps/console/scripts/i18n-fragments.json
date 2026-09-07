@@ -33,7 +33,15 @@
       "dash.grid.noTags": "该通道暂无位号",
       "dash.grid.waitLive": "等待数据",
       "dash.alarms.viewAll": "全部告警",
-      "dash.alarms.duration": "持续 {d}"
+      "dash.alarms.duration": "持续 {d}",
+      "dash.trend.title": "关键工况趋势",
+      "dash.trend.window": "近 30 分钟",
+      "dash.trend.edit": "编辑",
+      "dash.trend.custom": "历史查询",
+      "dash.trend.storageHint": "TDengine 存储未启用，启用后即可查看关键位号走势。",
+      "dash.trend.empty": "暂无置顶位号，点击右上角「编辑」选择要关注的工艺参数。",
+      "dash.trend.pickTitle": "置顶位号（最多 {n} 个）",
+      "dash.trend.noAnalog": "暂无可置顶的模拟量位号"
     },
     "en": {
       "dash.kpi.alarmsPending": "Active alarms pending",
@@ -68,7 +76,15 @@
       "dash.grid.noTags": "No tags in this channel",
       "dash.grid.waitLive": "Waiting for data",
       "dash.alarms.viewAll": "All Alarms",
-      "dash.alarms.duration": "for {d}"
+      "dash.alarms.duration": "for {d}",
+      "dash.trend.title": "Key Process Trends",
+      "dash.trend.window": "Last 30 min",
+      "dash.trend.edit": "Edit",
+      "dash.trend.custom": "Historian",
+      "dash.trend.storageHint": "TDengine storage is disabled. Enable it to view tag trends.",
+      "dash.trend.empty": "No pinned tags yet. Click \"Edit\" to pick process parameters to watch.",
+      "dash.trend.pickTitle": "Pinned tags (max {n})",
+      "dash.trend.noAnalog": "No analog tags available to pin"
     }
   },
   "dev": {

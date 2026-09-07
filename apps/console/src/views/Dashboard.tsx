@@ -1,17 +1,18 @@
 /**
- * 仪表盘（PRD FR-M1，P1+P2 重构）：全真实数据，无 mock。
+ * 仪表盘（PRD FR-M1，P1+P2+P3 重构）：全真实数据，无 mock。
  * A 区：运行总览 KPI（采集吞吐走势 / 在线通道点阵 / 位号质量 / 活动告警 / 存储管道）
  * B 区：通道健康带 —— 仅展示已创建通道（配置 × /api/scheduler × WS channel-status）
- * C 区：告警速览（活动告警：类型图标 + 持续时长 + 确认；最近事件）
+ * C 区：关键工况趋势（C1，TDengine 真聚合 sparkline，可置顶位号）+ 告警速览（C2）
  * D 区：位号总览 —— 按通道分组的真实位号网格，WS 实时值
- * 数据源：/api/config、/api/scheduler（3s）、/api/alarms（WS alarmSeq 触发）、WS tags-batch/storage-status
+ * 数据源：/api/config、/api/scheduler（3s）、/api/history（30s）、/api/alarms（WS alarmSeq 触发）、WS tags-batch/storage-status
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, CheckCircle, ChevronRight, Database, Server,
+  SlidersHorizontal, TrendingUp, X,
 } from 'lucide-react';
 import {
-  ackAlarm, fetchAlarms, fetchConfig, fetchScheduler,
+  ackAlarm, fetchAlarms, fetchConfig, fetchHistory, fetchScheduler,
   type AlarmsResponse, type GatewayChannel, type GatewayTag, type SchedulerStats,
 } from '../api';
 import { PROTOCOL_CONFIGS, type Protocol } from '@iotconnector/shared';
@@ -262,37 +263,43 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNa
               </button>
             );
           })}
-          {channels.length === 0 && (
+          {channels.length === 0 && (config === null ? (
+            <>
+              {Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} className="h-[104px]" />)}
+            </>
+          ) : (
             <div className="col-span-full text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-4">
               {wsStatus === 'offline' ? t('dash.grid.offline') : t('dash.grid.connecting')}
             </div>
-          )}
+          ))}
         </div>
       </div>
 
-      {/* ===== C 区：告警速览 ===== */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <h3 className="font-semibold text-slate-800 flex items-center">
-            <Bell className={`w-5 h-5 mr-2 ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-slate-500'}`} />
-            {t('dash.alarms.title')}
-            {activeAlarms.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 animate-pulse">
-                {t('dash.alarms.activeBadge', { n: activeAlarms.length })}
-              </span>
-            )}
-          </h3>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400 font-mono">{t('dash.alarms.ruleCount', { n: alarms?.rules.length ?? 0 })}</span>
-            <button
-              onClick={() => onNavigate?.('alarms')}
-              className="flex items-center gap-0.5 text-xs font-bold text-indigo-600 hover:text-indigo-700"
-            >
-              {t('dash.alarms.viewAll')} <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+      {/* ===== C 区：关键工况趋势（C1）+ 告警速览（C2） ===== */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="lg:col-span-8 min-w-0">
+          <TrendPanel channels={enabledChannels} allTags={allTags} liveValues={liveValues} onNavigate={onNavigate} />
         </div>
-        <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="lg:col-span-4 min-w-0">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center">
+                <Bell className={`w-5 h-5 mr-2 ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-slate-500'}`} />
+                {t('dash.alarms.title')}
+                {activeAlarms.length > 0 && (
+                  <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 animate-pulse">
+                    {t('dash.alarms.activeBadge', { n: activeAlarms.length })}
+                  </span>
+                )}
+              </h3>
+              <button
+                onClick={() => onNavigate?.('alarms')}
+                className="flex items-center gap-0.5 text-xs font-bold text-indigo-600 hover:text-indigo-700"
+              >
+                {t('dash.alarms.viewAll')} <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
           {/* 活动告警 */}
           <div>
             <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">{t('dash.alarms.activeCol')}</div>
@@ -303,7 +310,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNa
             ) : (
               <div className="space-y-2">
                 {activeAlarms.map((a) => (
-                  <div key={a.id} className="px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between">
+                  <div key={a.id} className="px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-300">
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-rose-800 truncate flex items-center gap-1">
                         {a.kind === 'high' ? <ArrowUp className="w-3.5 h-3.5 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 shrink-0 text-blue-500" />}
@@ -338,7 +345,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNa
                 {t('dash.alarms.noEvents')}
               </div>
             ) : (
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              <div className="space-y-1.5 max-h-44 overflow-y-auto">
                 {(alarms?.history ?? []).slice(0, 8).map((a) => (
                   <div key={a.id} className="px-3 py-1.5 rounded-md bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px]">
                     <span className={`font-bold flex items-center gap-1 ${a.state === 'Active' ? 'text-rose-600' : 'text-slate-500'}`}>
@@ -354,6 +361,8 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNa
                 ))}
               </div>
             )}
+          </div>
+            </div>
           </div>
         </div>
       </div>
@@ -419,11 +428,13 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNa
             </div>
           );
         })}
-        {channels.length === 0 && (
+        {channels.length === 0 && (config === null ? (
+          Array.from({ length: 2 }, (_, i) => <SkeletonCard key={i} className="h-24" />)
+        ) : (
           <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-4">
             {t('dash.grid.connecting')}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
@@ -446,5 +457,234 @@ function Sparkline({ values }: { values: number[] }): React.JSX.Element {
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-[26px] mt-1" preserveAspectRatio="none">
       <polyline points={pts} fill="none" stroke="#6366f1" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
+  );
+}
+
+// ===== C1：关键工况趋势（TDengine 真聚合 + 可置顶位号） =====
+
+const PIN_KEY = 'fb_dash_pinned_tags';
+const MAX_PIN = 6;
+const TREND_WINDOW_MS = 30 * 60_000;
+const TREND_INTERVAL_SEC = 30;
+const ANALOG_TYPES = new Set(['Int16', 'UInt16', 'Int32', 'UInt32', 'Float', 'Double']);
+
+/** C1 面板：置顶位号 30min 走势（/api/history 30s 粒度），现值取 WS 实时 */
+function TrendPanel({
+  channels, allTags, liveValues, onNavigate,
+}: {
+  channels: GatewayChannel[];
+  allTags: GatewayTag[];
+  liveValues: Record<string, { value: number | string | boolean; quality?: string; ts: number }>;
+  onNavigate?: (v: DashboardNavTarget) => void;
+}): React.JSX.Element {
+  const { t, lang } = useI18n();
+  const [pinned, setPinned] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(PIN_KEY);
+      if (raw !== null) {
+        const v = JSON.parse(raw);
+        if (Array.isArray(v)) return v.filter((x) => typeof x === 'string').slice(0, MAX_PIN);
+      }
+    } catch { /* 损坏则走默认 */ }
+    return [];
+  });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [series, setSeries] = useState<Record<string, number[]>>({});
+  const [storageOff, setStorageOff] = useState(false);
+  const pinnedKey = pinned.join(',');
+
+  // 首次进入（从未设置过置顶）→ 每个已启用通道取第一个模拟量位号
+  useEffect(() => {
+    if (localStorage.getItem(PIN_KEY) !== null) return;
+    if (channels.length === 0 || allTags.length === 0) return;
+    const def: string[] = [];
+    for (const ch of channels) {
+      const tag = allTags.find((tg) => tg.channelId === ch.id && ANALOG_TYPES.has(tg.dataType));
+      if (tag) def.push(tag.id);
+    }
+    const picked = def.slice(0, MAX_PIN);
+    setPinned(picked);
+    localStorage.setItem(PIN_KEY, JSON.stringify(picked));
+  }, [channels, allTags]);
+
+  const loadTrend = (): void => {
+    if (pinned.length === 0) { setSeries({}); return; }
+    const end = Date.now();
+    fetchHistory(pinned, end - TREND_WINDOW_MS, end, TREND_INTERVAL_SEC)
+      .then((res) => {
+        const m: Record<string, number[]> = {};
+        for (const s of res.series) m[s.tagId] = (s.points ?? []).map((p) => p.avg);
+        setSeries(m);
+        setStorageOff(false);
+      })
+      .catch(() => setStorageOff(true));
+  };
+
+  useEffect(() => {
+    loadTrend();
+    const timer = setInterval(loadTrend, 30_000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedKey]);
+
+  const tagById = useMemo(() => new Map(allTags.map((tg) => [tg.id, tg])), [allTags]);
+  const chName = useMemo(() => new Map(channels.map((c) => [c.id, c.name])), [channels]);
+  const analogTags = useMemo(
+    () => allTags.filter((tg) => ANALOG_TYPES.has(tg.dataType) && channels.some((c) => c.id === tg.channelId)),
+    [allTags, channels],
+  );
+
+  const togglePin = (id: string): void => {
+    setPinned((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : prev.length < MAX_PIN ? [...prev, id] : prev;
+      localStorage.setItem(PIN_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+        <h3 className="font-semibold text-slate-800 flex items-center">
+          <TrendingUp className="w-5 h-5 mr-2 text-indigo-500" />
+          {t('dash.trend.title')}
+          <span className="ml-2 text-[10px] font-mono text-slate-400">{t('dash.trend.window')}</span>
+        </h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPickerOpen((v) => !v)}
+            className={`flex items-center gap-1 px-2 py-1 text-xs font-bold rounded-md border transition-colors ${
+              pickerOpen ? 'text-indigo-700 bg-indigo-50 border-indigo-200' : 'text-slate-500 bg-white border-slate-200 hover:text-indigo-600'
+            }`}
+          >
+            {pickerOpen ? <X className="w-3.5 h-3.5" /> : <SlidersHorizontal className="w-3.5 h-3.5" />}
+            {t('dash.trend.edit')}
+          </button>
+          <button
+            onClick={() => onNavigate?.('historian')}
+            className="flex items-center gap-0.5 text-xs font-bold text-indigo-600 hover:text-indigo-700"
+          >
+            {t('dash.trend.custom')} <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {pickerOpen && (
+        <div className="px-5 py-3 border-b border-slate-100 bg-indigo-50/40 animate-in fade-in slide-in-from-top-1">
+          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+            {t('dash.trend.pickTitle', { n: MAX_PIN })}
+          </div>
+          {analogTags.length === 0 ? (
+            <div className="text-xs text-slate-400 py-1">{t('dash.trend.noAnalog')}</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-1 max-h-44 overflow-y-auto">
+              {analogTags.map((tag) => {
+                const active = pinned.includes(tag.id);
+                const full = !active && pinned.length >= MAX_PIN;
+                return (
+                  <button
+                    key={tag.id}
+                    onClick={() => { if (!full) togglePin(tag.id); }}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] text-left transition-colors ${
+                      active ? 'bg-indigo-600 text-white border-indigo-600' : full ? 'bg-white text-slate-300 border-slate-100 cursor-not-allowed' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                    }`}
+                    title={`${chName.get(tag.channelId) ?? ''} · ${tag.name}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? 'bg-white' : 'bg-slate-300'}`} />
+                    <span className="truncate">{tag.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="p-4 space-y-2">
+        {storageOff ? (
+          <div className="px-4 py-6 text-center text-xs text-slate-500 bg-slate-50 rounded-lg border border-slate-100">
+            <Database className="w-5 h-5 mx-auto mb-2 text-slate-300" />
+            {t('dash.trend.storageHint')}
+          </div>
+        ) : pinned.length === 0 ? (
+          <div className="px-4 py-6 text-center text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
+            {t('dash.trend.empty')}
+          </div>
+        ) : (
+          pinned.map((id) => {
+            const tag = tagById.get(id);
+            if (!tag) return null;
+            const vals = series[id] ?? [];
+            const live = liveValues[id];
+            const isBad = live?.quality === 'Bad';
+            return (
+              <button
+                key={id}
+                onClick={() => onNavigate?.('historian')}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-100 bg-slate-50 hover:border-indigo-200 transition-colors"
+                title={vals.length > 0 ? `${tag.name} · ${Math.min(...vals).toFixed(2)} ~ ${Math.max(...vals).toFixed(2)} ${tag.unit ?? ''}` : tag.name}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${live ? (isBad ? 'bg-rose-500' : 'bg-emerald-500') : 'bg-slate-300'}`} />
+                <div className="w-36 md:w-44 min-w-0 text-left shrink-0">
+                  <div className="text-xs font-bold text-slate-700 truncate">{tag.name}</div>
+                  <div className="text-[10px] text-slate-400 truncate">{chName.get(tag.channelId) ?? tag.channelId}</div>
+                </div>
+                <TrendSpark values={vals} />
+                <div className="w-24 text-right shrink-0">
+                  <span className={`text-base font-bold tabular-nums ${live ? (isBad ? 'text-slate-400' : 'text-slate-900') : 'text-slate-300'}`}>
+                    {live ? formatValue(live.value) : '—'}
+                  </span>
+                  {tag.unit && <span className="text-[10px] text-slate-400 ml-0.5">{tag.unit}</span>}
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** C1 行内走势：面积填充 + 描边，min-max 归一化 */
+function TrendSpark({ values }: { values: number[] }): React.JSX.Element {
+  const w = 200;
+  const h = 30;
+  if (values.length < 2) {
+    return (
+      <svg viewBox={`0 0 ${w} ${h}`} className="flex-1 h-[30px]" preserveAspectRatio="none">
+        <line x1="0" y1={h - 2} x2={w} y2={h - 2} stroke="#e2e8f0" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const span = Math.max(0.0001, max - min);
+  const x = (i: number): number => (i / (values.length - 1)) * w;
+  const y = (v: number): number => h - 2 - ((v - min) / span) * (h - 4);
+  const line = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="flex-1 h-[30px] min-w-0" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="dashTrendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#6366f1" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,${h} ${line} ${w},${h}`} fill="url(#dashTrendFill)" />
+      <polyline points={line} fill="none" stroke="#6366f1" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** P4：加载骨架卡 */
+function SkeletonCard({ className }: { className?: string }): React.JSX.Element {
+  return (
+    <div className={`bg-white rounded-xl border border-slate-100 p-3 ${className ?? ''}`} aria-hidden>
+      <div className="animate-pulse space-y-2">
+        <div className="h-3 w-1/2 bg-slate-200 rounded" />
+        <div className="h-5 w-2/3 bg-slate-200 rounded" />
+        <div className="h-1.5 w-full bg-slate-100 rounded" />
+      </div>
+    </div>
   );
 }

@@ -1,0 +1,40 @@
+<!--
+Factory Bridge 网关 Windows 服务包装配置（WinSW v2，.NET 4.6.1+ 单 exe，免安装）。
+WinSW 下载：https://github.com/winsw/winsw/releases （WinSW-x64.exe）
+使用：
+  1. 将 WinSW-x64.exe 重命名为 factory-bridge-gateway.exe，与本 xml 同目录放入 deploy/windows/
+  2. 按实际路径修改下方 <workingdirectory> 与 <argument>
+  3. 管理员 CMD 执行：install-service.cmd（卸载 uninstall-service.cmd）
+-->
+<service>
+  <id>factory-bridge-gateway</id>
+  <name>Factory Bridge Gateway</name>
+  <description>Factory Bridge IIoT Edge Gateway (REST + WebSocket :8080)</description>
+
+  <executable>node</executable>
+  <argument>--import</argument>
+  <argument>tsx</argument>
+  <argument>src/index.ts</argument>
+
+  <!-- 持久化目录 data/ 按 process.cwd() 解析，必须指向 apps/gateway -->
+  <workingdirectory>D:\factory-bridge\apps\gateway</workingdirectory>
+  <env name="NODE_ENV" value="production" />
+  <env name="GATEWAY_PORT" value="8080" />
+  <env name="TDENGINE_URL" value="http://127.0.0.1:16041" />
+  <env name="TDENGINE_DB" value="factory_bridge" />
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <stoptimeout>15 sec</stoptimeout>
+  <stopparentprocessfirst>false</stopparentprocessfirst>
+
+  <!-- 异常退出自动重启（5 秒退避） -->
+  <onfailure action="restart" delay="5 sec" />
+  <resetfailure>1 hour</resetfailure>
+
+  <log mode="roll-by-size">
+    <logPath>%BASE%\logs</logPath>
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>4</keepFiles>
+  </log>
+</service>

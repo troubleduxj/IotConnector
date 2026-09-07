@@ -1,0 +1,40 @@
+# Factory Bridge 网关 systemd 服务单元（Linux）
+# 安装：
+#   1. 按实际路径修改 User= 与各 /opt/factory-bridge 路径
+#   2. sudo cp deploy/systemd/factory-bridge-gateway.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now factory-bridge-gateway
+# 查看状态/日志：systemctl status factory-bridge-gateway · journalctl -u factory-bridge-gateway -f
+
+[Unit]
+Description=Factory Bridge IIoT Edge Gateway
+Documentation=file:///opt/factory-bridge/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 运行账号建议使用非 root 专用账号；data/ 目录（配置/审计/会话/影子持久化）需对其可写
+User=fbridge
+Group=fbridge
+# 注意：持久化目录 data/ 按 process.cwd() 解析，WorkingDirectory 必须指向 apps/gateway
+WorkingDirectory=/opt/factory-bridge/apps/gateway
+Environment=NODE_ENV=production
+Environment=GATEWAY_PORT=8080
+Environment=TDENGINE_URL=http://127.0.0.1:16041
+Environment=TDENGINE_DB=factory_bridge
+# node --import tsx：生产环境以 tsx 加载器直接运行 TypeScript 入口（与 pnpm start 等价，免去构建步骤）
+ExecStart=/usr/bin/node --import tsx src/index.ts
+Restart=always
+RestartSec=5
+# 崩溃退避；网关自身已对 TDengine/MQTT 不可达做降级，正常情况只在外部强杀时退出
+StartLimitIntervalSec=60
+StartLimitBurst=5
+KillSignal=SIGINT
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/factory-bridge/apps/gateway/data
+
+[Install]
+WantedBy=multi-user.target

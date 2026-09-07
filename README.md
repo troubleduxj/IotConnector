@@ -33,7 +33,7 @@
 [3. 边缘数据清洗与标度变换 (Edge Data Transform: Scale / Offset / Deadband)]
    │
    ▼
-[4. 实时流消息总线 (Redis Stream Buffer & Pipeline)]
+[4. 实时分发 (WS 推送至控制台 + 北向 Sparkplug B 管道)]
    │
    ├──▶ [5. 本地高性能时序持久化 (TDengine STable Schemaless Ingestion)]
    ├──▶ [6. 边缘脚本联动与配方控制 (Python Scripts & Recipe Engine)]
@@ -100,9 +100,12 @@
 ---
 
 ### 5. ⚙️ 系统与网络配置 (System Configuration)
-* **Redis 实时流总线 (Stream Pipeline)**：配置高速内存消息管道，作为本地采集与上层逻辑的解耦中枢。
 * **MQTT 断网续传 (Reliable Outbox)**：开启后，在离线状态下本地缓冲遥测数据，并在网络恢复后可靠顺序推送到云端。
-* **设备影子 (Device Shadow)**：边缘端维持各设备的最新 JSON 状态快照与期望值对比。
+* **设备影子 (Device Shadow)**：边缘端为每位号维护 reported（采集上报）+ desired（写管道期望值）双快照，
+  不一致标记「待收敛」；REST `GET /api/shadow` 查询，同时以 retain QoS1 发布至
+  `<组ID>/shadow/<节点ID>`（订阅即得最新状态，断线入 Outbox 补传）。
+* **真实端点管理**：Web API 状态（端口/OpenAPI 清单）、TDengine 连通实测与建库、
+  诊断导出、恢复出厂（二次确认）均为真实后端操作。
 
 ---
 
@@ -113,23 +116,42 @@
 
 ### 7. 📜 配方管理系统 (Recipe Management)
 * 支持建立与维护多套工艺配方（包含工艺目标值、转速、温度、浓度等参数），支持一键批量下载下发到 PLC，适用于柔性生产与多品种换线。
+* **版本管理**：参数集变更自动递增版本号（v1→v2…），仅改名称/说明不动版本；下发记录持久化（操作人/时间/成功数，最近 200 条）。
+* **导入导出/复制**：JSON 导出（位号 id+名双写，跨网关可导入）、导入（重名 409、位号按 id/名匹配、失败中文明细）、一键复制副本。
 
 ---
 
-### 8. 🐍 边缘脚本扩展引擎 (Python Scripts)
-* 内置 Python 规则脚本编辑器，允许编写复杂的跨设备联动与告警逻辑（如温升超限联锁切断加热棒、启停辅助循环泵等），赋予边缘网关轻量级 SCADA 控制能力。
+### 8. 📜 边缘脚本扩展引擎 (JS 沙箱，决策 D5)
+* 内置 JavaScript 规则脚本编辑器（`node:vm` 沙箱 + 1s 超时 + 白名单 API：`Read/Write/log`），
+  触发方式支持周期 / 位号变化 / 手动；写操作脚本结束后批量下发。
+* **运行监控与崩溃自愈**：执行次数/耗时/错误统计实时展示；连续 3 次失败自动停用脚本
+  （落配置 + system 审计），修复后一键重新启用。
+
+---
+
+### 9. 🆕 近期迭代摘要 (2026-09)
+
+* **存储任务**：周期 / 死区 / 边沿 / **条件表达式**（位号按名引用、白名单校验、上升沿写行）四种触发；
+  运行状态监控（写入数/近 1 分钟速率/最近写入/错误计数）。
+* **采集调度**：每通道帧级 TX/RX/错误/超时率/最近通讯/平均周期延迟；相位错开启动 + 一键重均衡。
+* **连接测试**：六协议真实分步握手；S7 全位号单 PDU 批量探针、OPC UA MonitoredItem 订阅采样探针。
+* **通道管理**：JSON 导入导出（协议参数 schema 校验 + 地址语法预校验）、点位表实时值列（值变化 400ms 高亮）、地址逐键在线校验。
+* **告警**：high/low/deviation/ROC 四类规则、确认机制、四渠道通知（Webhook/钉钉加签/企微/邮件）+ **消息模板变量**。
+* **认证安全**：会话持久化、首登强制改密、全局限速、登录失败 5 次锁定 10 分钟、审计全程落盘。
+* **工程化**：中英双语 i18n（662 键零缺失）、统一 Toast/应用内确认与输入对话框、Vitest 47 例、CI。
 
 ---
 
 ## 🛠️ 技术栈 (Technology Stack)
 
-* **前端框架**: React 18, TypeScript, Vite
+* **前端框架**: React 19, TypeScript, Vite（hash 路由 + 视图级懒加载分包）
 * **可视化图表与动画**: Recharts, Canvas API, Lucide React
 * **样式系统**: Tailwind CSS (现代工业级高对比度/暗色工程主题规范)
 * **工业协议概念与后端模型**:
   * 协议栈：Siemens S7 (RFC1006), Rockwell CIP, Mitsubishi MC 3E/1E, Omron FINS, OPC UA, Modbus TCP, MQTT/Sparkplug B, BACnet/IP, IEC 104
-  * 时序存储引擎：TDengine (STable) / PostgreSQL
-  * 消息中间件：Redis Stream, MQTT (with Outbox & QoS 1/2)
+  * 时序存储引擎：TDengine (STable + 子表)
+  * 消息中间件：MQTT / Sparkplug B (Reliable Outbox, QoS 1)
+  * 脚本沙箱：node:vm（决策 D5）；测试：Vitest（47 例）
 
 ---
 
@@ -147,13 +169,23 @@
    pnpm dev
    ```
 
-3. **（可选）启动 Modbus 模拟器**：让 Dashboard 的 Modbus 通道经真实 TCP 采集到数据：
+3. **（可选）启动协议模拟器**：S7 / Modbus / OPC UA / MELSEC / FINS / EtherNet-IP 六协议模拟器，
+   让各通道经真实 TCP 采集到数据（各模拟器启动脚本见 `apps/gateway/package.json`）：
    ```bash
+   pnpm --filter @iotconnector/gateway s7-sim
    pnpm dev:modbus-sim
+   pnpm --filter @iotconnector/gateway opcua-sim
    ```
 
 4. **访问控制台**：
    在浏览器中打开 `http://localhost:3000`。Dashboard 顶栏徽章显示网关连接状态；"Live Equipment Status" 中的实时位号（pH/温度/压力/转速/电流）由网关推送驱动。
+
+### 生产部署（服务化常驻）
+
+网关支持以系统服务方式常驻（开机自启、崩溃自动拉起、优雅停机落盘）：
+Linux systemd 单元见 `deploy/systemd/`，Windows WinSW 包装见 `deploy/windows/`，
+完整步骤与健康检查/故障排查速查表见 **`deploy/README.md`**。
+演示/试点亦可使用 `docker-compose.yml` 一键栈（网关 + 控制台 nginx + TDengine + 协议模拟器）。
 
 ### 环境变量（网关）
 

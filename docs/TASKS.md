@@ -56,7 +56,7 @@
 | # | 任务 | 优先级 | 工作量 | 说明 |
 |---|---|---|---|---|
 | 19 | docker-compose 一键栈（gateway + console nginx + TDengine + 三模拟器） | P0 | S | 演示与交付基础 |
-| 20 | 网关 Windows 服务 / Linux systemd 打包 | P1 | M | PRD 双平台交付 |
+| 20 | ~~网关 Windows 服务 / Linux systemd 打包~~ | P1 | M | ✅ deploy/：systemd 单元 + WinSW 包装（安装/卸载脚本）+ 部署指南与健康检查/排障速查 |
 | 21 | 北向 MQTT/Sparkplug B 上报 + Reliable Outbox（决策 D7） | P1 | L | PRD FR-M9-03 |
 | 22 | ~~设备影子真实实现~~ | P2 | M | ✅ FR-M9-04（d3d1af2）：reported/desired 双快照 + pending 收敛 + MQTT retain 快照 + REST |
 

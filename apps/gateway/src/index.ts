@@ -365,23 +365,96 @@ async function main(): Promise<void> {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       return reply.code(400).send({ ok: false, error: 'invalid start/end (epoch ms)' });
     }
-    // 目标 ~150 点，吸附到常用粒度
+    // 目标 ~150 点，吸附到常用粒度；桶数上限保护（#存储优化2：防 interval=1 查 30 天打爆网关/库）
     const AUTO_STEPS = [1, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+    const MAX_BUCKETS = 10_000;
     const rawSec = (end - start) / 1000 / 150;
-    const intervalSec = q.interval
+    let intervalSec = q.interval
       ? Math.max(1, Number(q.interval))
       : AUTO_STEPS.find((s) => s >= rawSec) ?? Math.ceil(rawSec);
+    const minSecForCap = Math.ceil((end - start) / 1000 / MAX_BUCKETS);
+    if (intervalSec < minSecForCap) intervalSec = minSecForCap;
 
     const db = process.env.TDENGINE_DB ?? 'factory_bridge';
     const stable = process.env.TDENGINE_STABLE ?? 'st_factory_equipment';
 
-    const series = [];
-    for (const tagId of tagIds) {
-      const tag = getTag(tagId);
-      if (!tag) {
-        series.push({ tagId, error: 'unknown tag' });
+    const series: Array<
+      { tagId: string; error: string } | {
+        tagId: string; name: string; unit: string; dataType: string;
+        engMin: number | null; engMax: number | null; intervalSec: number;
+        points: Array<{ t: string; avg: number; min: number; max: number; n: number }>;
+        stats: { min: number | null; max: number | null; avg: number | null; stdDev: number | null; count: number };
+      }
+    > = [];
+    const known = tagIds.map((id) => ({ id, tag: getTag(id) })).filter((x): x is { id: string; tag: Tag } => Boolean(x.tag));
+    for (const id of tagIds) {
+      if (!known.some((x) => x.id === id)) series.push({ tagId: id, error: 'unknown tag' });
+    }
+
+    // #存储优化2：单条 SQL 取回全部位号（PARTITION BY tag_name），8 位号从 16 条 REST SQL 合并为 2 条
+    const names = known.map((x) => x.tag.name.replace(/'/g, "''"));
+    const seriesByTag = new Map<string, (typeof series)[number]>();
+    if (known.length > 0) {
+      const whereAll = `WHERE tag_name IN (${names.map((n) => `'${n}'`).join(',')}) AND ts >= ${start} AND ts <= ${end}`;
+      const [agg, stats] = await Promise.all([
+        storage.query(
+          `SELECT _wstart, tag_name, AVG(val), MIN(val), MAX(val), COUNT(*) FROM ${db}.${stable} ${whereAll} ` +
+            `INTERVAL(${intervalSec}s) PARTITION BY tag_name`,
+        ),
+        storage.query(
+          `SELECT tag_name, MIN(val), MAX(val), AVG(val), STDDEV(val), COUNT(*) FROM ${db}.${stable} ${whereAll} GROUP BY tag_name`,
+        ),
+      ]);
+      if (agg.code === 0 && stats.code === 0) {
+        const pointsByTag = new Map<string, Array<{ t: string; avg: number; min: number; max: number; n: number }>>();
+        for (const row of (agg.data ?? []) as Array<[number, string, number, number, number, number]>) {
+          const [t, tn, avg, min, max, n] = row;
+          const list = pointsByTag.get(String(tn)) ?? [];
+          list.push({ t: new Date(t).toISOString(), avg, min, max, n });
+          pointsByTag.set(String(tn), list);
+        }
+        for (const row of (stats.data ?? []) as Array<[string, number, number, number, number, number]>) {
+          const [tn, min, max, avg, stdDev, count] = row;
+          const item = known.find((x) => x.tag.name === tn);
+          if (!item) continue;
+          const entry = {
+            tagId: item.id,
+            name: item.tag.name,
+            unit: item.tag.unit,
+            dataType: item.tag.dataType, // Bool: val 已编码 0/1，前端解码显示
+            engMin: item.tag.engMin ?? null,
+            engMax: item.tag.engMax ?? null,
+            intervalSec,
+            points: pointsByTag.get(tn) ?? [],
+            stats: { min, max, avg, stdDev, count },
+          };
+          seriesByTag.set(item.id, entry);
+        }
+        // 统计行缺失但聚合行存在的位号（理论上不发生）兜底：仅点集
+        for (const [tn, pts] of pointsByTag) {
+          const item = known.find((x) => x.tag.name === tn);
+          if (!item || seriesByTag.has(item.id)) continue;
+          seriesByTag.set(item.id, {
+            tagId: item.id, name: item.tag.name, unit: item.tag.unit, dataType: item.tag.dataType,
+            engMin: item.tag.engMin ?? null, engMax: item.tag.engMax ?? null,
+            intervalSec, points: pts,
+            stats: { min: null, max: null, avg: null, stdDev: null, count: 0 },
+          });
+        }
+      } else {
+        // 合并查询失败（老版本语法差异等）→ 退回逐位号查询
+        console.error(`[history] merged query failed (agg ${agg.code}/${agg.msg ?? ''}, stats ${stats.code}/${stats.msg ?? ''}), falling back`);
+      }
+    }
+
+    for (const x of known) {
+      const merged = seriesByTag.get(x.id);
+      if (merged) {
+        series.push(merged);
         continue;
       }
+      // 逐位号回退路径（与旧实现一致）
+      const tag = x.tag;
       const tn = tag.name.replace(/'/g, "''");
       const where = `WHERE tag_name='${tn}' AND ts >= ${start} AND ts <= ${end}`;
       const agg = await storage.query(
@@ -391,7 +464,7 @@ async function main(): Promise<void> {
         `SELECT MIN(val), MAX(val), AVG(val), STDDEV(val), COUNT(*) FROM ${db}.${stable} ${where}`,
       );
       if (agg.code !== 0) {
-        series.push({ tagId, error: agg.msg ?? `TDengine error ${agg.code}` });
+        series.push({ tagId: x.id, error: agg.msg ?? `TDengine error ${agg.code}` });
         continue;
       }
       const points = (agg.data ?? []).map((row) => {
@@ -400,10 +473,10 @@ async function main(): Promise<void> {
       });
       const s = (stats.data?.[0] ?? []) as number[];
       series.push({
-        tagId,
+        tagId: x.id,
         name: tag.name,
         unit: tag.unit,
-        dataType: tag.dataType, // Bool: val 已编码 0/1，前端解码显示
+        dataType: tag.dataType,
         engMin: tag.engMin ?? null,
         engMax: tag.engMax ?? null,
         intervalSec,

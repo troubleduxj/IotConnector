@@ -10,6 +10,7 @@ import {
 } from '../api';
 import { useRuntime } from '../store/runtime';
 import { fetchChannelFrames, type CapturedFrame } from '../api';
+import TagValue from '../components/TagValue';
 import { useI18n } from '../i18n';
 
 /**
@@ -703,14 +704,13 @@ export default function DeviceManagement() {
                             <td className="px-4 py-2.5">
                               {(() => {
                                 const live = liveValues[tag.id];
-                                const isBad = live?.quality === 'Bad';
                                 return (
-                                  <span className="inline-flex items-center gap-1.5" title={live ? `${live.quality} · ${new Date(live.ts).toLocaleTimeString()}` : t('dev.col.waitLive')}>
-                                    <span className={`w-1.5 h-1.5 rounded-full ${live ? (isBad ? 'bg-rose-500' : 'bg-emerald-500') : 'bg-slate-300'}`} />
-                                    <span className={`font-mono font-bold tabular-nums ${live ? (isBad ? 'text-slate-400' : 'text-slate-800') : 'text-slate-300'}`}>
-                                      {live ? (typeof live.value === 'number' ? Number(live.value.toFixed(4)) : String(live.value)) : '—'}
-                                    </span>
-                                  </span>
+                                  <TagValue
+                                    value={live?.value}
+                                    quality={live?.quality}
+                                    ts={live?.ts}
+                                    unit={tag.unit || undefined}
+                                  />
                                 );
                               })()}
                             </td>

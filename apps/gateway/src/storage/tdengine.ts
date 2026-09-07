@@ -88,6 +88,17 @@ export class TDengineWriter {
     if (this.healthTimer) clearInterval(this.healthTimer);
   }
 
+  /** 恢复出厂·清库（#存储优化3）：DROP DATABASE 后重建超级表/告警表；队列数据一并放弃 */
+  async recreateSchema(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.cfg.url) return { ok: false, error: 'storage disabled' };
+    const drop = await this.query(`DROP DATABASE IF EXISTS ${this.cfg.database}`);
+    if (drop.code !== 0) return { ok: false, error: `drop db: ${drop.msg ?? drop.code}` };
+    this.queue = [];
+    this.inited = false;
+    await this.init();
+    return this.inited ? { ok: true } : { ok: false, error: this.error };
+  }
+
   /** 执行 SQL（REST /rest/sql），返回解析后的 JSON；网络异常转为 code=-1（TDengine 不可达降级为存储错误，不打崩进程） */
   async query(sql: string): Promise<{ code: number; data?: unknown[][]; rows?: number; msg?: string; desc?: string }> {
     try {
@@ -109,6 +120,10 @@ export class TDengineWriter {
     try {
       const db = await this.query(`CREATE DATABASE IF NOT EXISTS ${this.cfg.database}`);
       if (db.code !== 0) throw new Error(`create db ${db.code}: ${db.msg ?? ''}`);
+      // 保留策略（#存储优化3）：默认 90 天，env TDENGINE_KEEP_DAYS 覆盖；ALTER 幂等，已有库也生效
+      const keepDays = Math.max(1, Number(process.env.TDENGINE_KEEP_DAYS ?? 90) || 90);
+      const keep = await this.query(`ALTER DATABASE ${this.cfg.database} KEEP ${keepDays}`);
+      if (keep.code !== 0) console.error(`[tdengine] ALTER KEEP ${keepDays}: ${keep.code} ${keep.msg ?? ''}`);
       const stb = await this.query(
         `CREATE STABLE IF NOT EXISTS ${this.cfg.database}.${this.cfg.superTable} ` +
           `(ts TIMESTAMP, val DOUBLE) ` +

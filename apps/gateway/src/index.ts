@@ -14,7 +14,8 @@ import { dispatchAlarm, sendTestMessage } from './notify';
 import { testChannel, type S7ProbeItem } from './engine/testers';
 import { channelCommStats } from './engine/stats';
 import { toNodes7Address } from './engine/drivers/s7';
-import { StorageTaskEngine } from './storage-tasks';
+import { StorageTaskEngine, sanitizeTable } from './storage-tasks';
+import { appendJsonl } from './jsonl';
 import { ScriptEngine } from './scripts';
 import type { Recipe, RecipeDownloadRecord, Script, StorageTask } from '@iotconnector/shared';
 import type { NorthboundConfig } from './northbound/publisher';
@@ -54,8 +55,7 @@ async function main(): Promise<void> {
   const AUDIT_FILE = path.resolve(process.cwd(), 'data', 'audit.jsonl');
   const auditLog = (user: SessionUser, action: string, detail: string): void => {
     try {
-      fs.mkdirSync(path.dirname(AUDIT_FILE), { recursive: true });
-      fs.appendFileSync(AUDIT_FILE, JSON.stringify({ ts: Date.now(), user: user.username, role: user.role, action, detail }) + '\n');
+      appendJsonl(AUDIT_FILE, JSON.stringify({ ts: Date.now(), user: user.username, role: user.role, action, detail }) + '\n');
     } catch {
       /* 审计失败不阻塞业务 */
     }
@@ -66,8 +66,7 @@ async function main(): Promise<void> {
   const ALARM_FILE = path.resolve(process.cwd(), 'data', 'alarms.jsonl');
   const persistAlarmEvent = (event: AlarmEvent): void => {
     try {
-      fs.mkdirSync(path.dirname(ALARM_FILE), { recursive: true });
-      fs.appendFileSync(ALARM_FILE, JSON.stringify(event) + '\n');
+      appendJsonl(ALARM_FILE, JSON.stringify(event) + '\n');
     } catch (e) {
       console.error('[alarms] jsonl append failed:', String(e));
     }
@@ -873,7 +872,14 @@ async function main(): Promise<void> {
       node: process.version,
       platform: `${process.platform}/${process.arch}`,
       port: PORT,
-      storage: { url: process.env.TDENGINE_URL ?? '', db: process.env.TDENGINE_DB ?? 'factory_bridge', state: storage.status.state },
+      storage: {
+        url: process.env.TDENGINE_URL ?? '',
+        db: process.env.TDENGINE_DB ?? 'factory_bridge',
+        state: storage.status.state,
+        queued: storage.status.queued,
+        written: storage.status.written,
+        dropped: storage.status.dropped ?? 0,
+      },
       counts: {
         channels: channels.length,
         tags: tags.length,
@@ -975,7 +981,7 @@ async function main(): Promise<void> {
   app.post('/api/system/factory-reset', async (req, reply) => {
     const actor = requireAuth(req, reply, 'admin');
     if (!actor) return;
-    const { confirm } = (req.body ?? {}) as { confirm?: string };
+    const { confirm, purgeStorage } = (req.body ?? {}) as { confirm?: string; purgeStorage?: boolean };
     if (confirm !== 'RESET') return reply.code(400).send({ ok: false, error: "body.confirm 必须为 'RESET'" });
     const seed = seedConfig();
     // 原地替换数组内容（引擎/发布器持有同一引用，splice 后即刻生效）
@@ -990,8 +996,17 @@ async function main(): Promise<void> {
     storageTaskEngine.sync(config.storageTasks);
     northboundPublisher.applyConfig();
     alarmEngine.setRules(config.alarms ?? []);
-    auditLog(actor, 'system.factory-reset', '配置恢复出厂默认（种子账号口令恢复为 账号+123）');
-    return { ok: true };
+    // #存储优化3：可选清空 TDengine 历史/任务/告警表（DROP DATABASE 后按种子任务重建）
+    let storagePurged = false;
+    let storagePurgeError: string | undefined;
+    if (purgeStorage) {
+      const r = await storage.recreateSchema();
+      storagePurged = r.ok;
+      if (!r.ok) storagePurgeError = r.error;
+    }
+    auditLog(actor, 'system.factory-reset',
+      `配置恢复出厂默认（种子账号口令恢复为 账号+123）${purgeStorage ? (storagePurged ? '；TDengine 历史库已清空' : `；清库失败：${storagePurgeError}`) : ''}`);
+    return { ok: true, storagePurged, storagePurgeError };
   });
 
   app.put('/api/northbound', async (req, reply) => {
@@ -1261,13 +1276,20 @@ async function main(): Promise<void> {
   app.delete('/api/storage-tasks/:id', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');
     if (!actor) return;
+    const { keepTable } = req.query as { keepTable?: string };
     const task = (config.storageTasks ?? []).find((t) => t.id === (req.params as { id: string }).id);
     config.storageTasks = (config.storageTasks ?? []).filter((t) => t.id !== (req.params as { id: string }).id);
     persist();
     storageTaskEngine.sync(config.storageTasks);
     broadcastConfigChanged();
-    if (task) auditLog(actor, 'storage.delete', `${task.name} → ${task.tableName}`);
-    return { ok: true };
+    // #存储优化3：默认同时 DROP 目标表（防止孤儿表无限累积）；?keepTable=1 保留数据
+    let tableDropped = false;
+    if (task && keepTable !== '1') {
+      const drop = await storage.query(`DROP TABLE IF EXISTS ${process.env.TDENGINE_DB ?? 'factory_bridge'}.${sanitizeTable(task.tableName)}`);
+      tableDropped = drop.code === 0;
+    }
+    if (task) auditLog(actor, 'storage.delete', `${task.name} → ${task.tableName}${keepTable === '1' ? '（保留数据表）' : tableDropped ? '（已删数据表）' : '（表删除失败/库离线，稍后可手动清理）'}`);
+    return { ok: true, tableDropped };
   });
 
   // ===== 配方 CRUD + 下发（PRD M6）=====

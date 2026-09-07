@@ -17,7 +17,7 @@ interface CompiledExpr {
   error?: string;
 }
 
-function sanitizeTable(name: string): string {
+export function sanitizeTable(name: string): string {
   const t = name.replace(/[^A-Za-z0-9_]/g, '_');
   return /^[A-Za-z_]/.test(t) ? t : `t_${t}`;
 }

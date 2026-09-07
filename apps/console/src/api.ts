@@ -738,7 +738,7 @@ export interface SystemInfo {
   node: string;
   platform: string;
   port: number;
-  storage: { url: string; db: string; state: string };
+  storage: { url: string; db: string; state: string; queued?: number; written?: number; dropped?: number };
   counts: { channels: number; tags: number; alarms: number; storageTasks: number; recipes: number; scripts: number };
 }
 
@@ -751,8 +751,8 @@ export const testDbConnection = async (): Promise<{ ok: boolean; version?: strin
 export const initDb = async (): Promise<{ ok: boolean; code?: number; error?: string }> =>
   (await apiFetch('/api/system/db-init', { method: 'POST' })).json() as Promise<{ ok: boolean; code?: number; error?: string }>;
 
-export const factoryReset = async (): Promise<Response> =>
-  apiFetch('/api/system/factory-reset', jsonPost({ confirm: 'RESET' }));
+export const factoryReset = async (purgeStorage = false): Promise<Response> =>
+  apiFetch('/api/system/factory-reset', jsonPost({ confirm: 'RESET', purgeStorage }));
 
 export const fetchNorthbound = async (): Promise<{ config: NorthboundConfig; status: NorthboundStatus }> =>
   (await apiFetch('/api/northbound')).json() as Promise<{ config: NorthboundConfig; status: NorthboundStatus }>;

@@ -30,6 +30,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
   const [dbResult, setDbResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
+  const [resetPurge, setResetPurge] = useState(false);
   const { t } = useI18n();
   useEffect(() => {
     fetchMe().then(async (u) => {
@@ -98,14 +99,18 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
   const runFactoryReset = async (): Promise<void> => {
     setResetBusy(true);
     try {
-      const res = await factoryReset();
+      const res = await factoryReset(resetPurge);
       if (!res.ok) {
         const err = ((await res.json().catch(() => ({}))) as { error?: string }).error;
         toast(err ?? t('sys.info.resetFail'), false);
         return;
       }
-      toast(t('sys.info.resetDone'));
+      const body = (await res.json().catch(() => ({}))) as { storagePurged?: boolean; storagePurgeError?: string };
+      if (resetPurge && body.storagePurged) toast(t('sys.info.resetDonePurge'));
+      else if (resetPurge && !body.storagePurged) toast(`${t('sys.info.resetDone')} (${t('sys.info.purgeFail')}: ${body.storagePurgeError ?? '?'})`, false);
+      else toast(t('sys.info.resetDone'));
       setResetConfirm('');
+      setResetPurge(false);
     } finally {
       setResetBusy(false);
     }
@@ -391,6 +396,22 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                 </div>
               </div>
 
+              {/* #存储优化：管道运行计数（写入/排队/丢弃） */}
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="px-3 py-2 bg-emerald-50/60 border border-emerald-100 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.db.written')}</div>
+                  <div className="font-mono font-bold text-emerald-700">{(sysInfo?.storage.written ?? 0).toLocaleString()}</div>
+                </div>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.db.queued')}</div>
+                  <div className="font-mono font-bold text-slate-700">{sysInfo?.storage.queued ?? 0}</div>
+                </div>
+                <div className={`px-3 py-2 rounded-md border ${(sysInfo?.storage.dropped ?? 0) > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.db.dropped')}</div>
+                  <div className={`font-mono font-bold ${(sysInfo?.storage.dropped ?? 0) > 0 ? 'text-rose-700' : 'text-slate-700'}`}>{sysInfo?.storage.dropped ?? 0}</div>
+                </div>
+              </div>
+
               {dbResult && (
                 <div className={`px-3 py-2 rounded-md text-xs font-medium border ${
                   dbResult.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
@@ -496,6 +517,10 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                       >
                         {t('sys.users.cancel')}
                       </button>
+                      <label className="flex items-center gap-1.5 w-full text-[11px] text-slate-600 cursor-pointer select-none">
+                        <input type="checkbox" checked={resetPurge} onChange={(e) => setResetPurge(e.target.checked)} className="accent-rose-600" />
+                        {t('sys.info.purgeStorage')}
+                      </label>
                       <span className="w-full text-[11px] text-rose-500">{t('sys.info.resetWarn')}</span>
                     </div>
                   )}

@@ -128,7 +128,21 @@ export interface NotificationConfig {
   dingtalk: DingTalkConfig;
   wecom: WecomConfig;
   email: EmailConfig;
+  /** #12 消息标题模板（email 主题等）；缺省用 DEFAULT_NOTIFY_TEMPLATE.title */
+  titleTemplate?: string;
+  /** #12 消息正文模板（webhook message/钉钉/企微 markdown/邮件正文）；缺省用 DEFAULT_NOTIFY_TEMPLATE.body */
+  bodyTemplate?: string;
 }
+
+/** #12 模板可用变量：{tagName} {channel} {kind} {kindText} {state} {stateText} {value} {threshold} {message} {time} */
+export const NOTIFY_TEMPLATE_VARIABLES = [
+  'tagName', 'channel', 'kind', 'kindText', 'state', 'stateText', 'value', 'threshold', 'message', 'time',
+] as const;
+
+export const DEFAULT_NOTIFY_TEMPLATE = {
+  title: '[FactoryBridge 告警] {tagName} {stateText}',
+  body: '位号 {tagName}（通道 {channel}）{kindText}，阈值 {threshold}，当前值 {value}。{message}',
+} as const;
 
 export interface DingTalkConfig {
   enabled: boolean;

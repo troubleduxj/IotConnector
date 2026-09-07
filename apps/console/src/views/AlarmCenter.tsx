@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Bell, Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Save, Send, Trash2, X,
 } from 'lucide-react';
-import type { NotificationConfig } from '@iotconnector/shared';
+import { DEFAULT_NOTIFY_TEMPLATE, NOTIFY_TEMPLATE_VARIABLES, type NotificationConfig } from '@iotconnector/shared';
 import {
   ackAlarm, createAlarm, deleteAlarm, fetchAlarmHistory, fetchAlarms, fetchGatewayTags,
   saveNotifications, testNotificationChannel, updateAlarm,
@@ -673,6 +673,41 @@ function NotifyConfigTab({
             </div>
           </div>
         ))}
+      </div>
+
+      {/* #12 消息模板：全渠道共用，标题（email 主题）+ 正文（webhook message/钉钉/企微 markdown） */}
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-2.5 bg-slate-50 flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-800">{t('alarms.tpl.title')}</span>
+        </div>
+        <div className="p-4 space-y-3">
+          <div>
+            <label className={label}>{t('alarms.tpl.subject')}</label>
+            <input
+              value={cfg.titleTemplate ?? ''}
+              onChange={(e) => onChange({ ...cfg, titleTemplate: e.target.value })}
+              placeholder={DEFAULT_NOTIFY_TEMPLATE.title}
+              className={field}
+            />
+          </div>
+          <div>
+            <label className={label}>{t('alarms.tpl.body')}</label>
+            <textarea
+              value={cfg.bodyTemplate ?? ''}
+              onChange={(e) => onChange({ ...cfg, bodyTemplate: e.target.value })}
+              placeholder={DEFAULT_NOTIFY_TEMPLATE.body}
+              rows={3}
+              className={`${field} resize-y leading-relaxed`}
+            />
+            <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+              {t('alarms.tpl.hint')}
+              {NOTIFY_TEMPLATE_VARIABLES.map((v) => (
+                <code key={v} className="mx-0.5 px-1 py-0.5 bg-slate-100 rounded text-indigo-600 font-mono">{`{${v}}`}</code>
+              ))}
+            </p>
+          </div>
+          <p className="text-[10px] text-slate-400">{t('alarms.tpl.emptyHint')}</p>
+        </div>
       </div>
 
       <div className="flex justify-end">

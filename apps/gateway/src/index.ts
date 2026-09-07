@@ -712,6 +712,9 @@ async function main(): Promise<void> {
     if (b.dingtalk) notifications.dingtalk = b.dingtalk;
     if (b.wecom) notifications.wecom = b.wecom;
     if (b.email) notifications.email = b.email;
+    // #12 消息模板（空串归一为 undefined → 使用默认模板）
+    notifications.titleTemplate = b.titleTemplate?.trim() || undefined;
+    notifications.bodyTemplate = b.bodyTemplate?.trim() || undefined;
     persist();
     const chans = [
       notifications.webhookUrl && 'webhook',
@@ -719,7 +722,7 @@ async function main(): Promise<void> {
       notifications.wecom?.enabled && 'wecom',
       notifications.email?.enabled && 'email',
     ].filter(Boolean).join('+') || '(无渠道)';
-    auditLog(actor, 'notify.update', `enabled=${notifications.enabled} 渠道=${chans}`);
+    auditLog(actor, 'notify.update', `enabled=${notifications.enabled} 渠道=${chans}${b.titleTemplate !== undefined ? ' 模板已更新' : ''}`);
     return notifications;
   });
 

@@ -10,6 +10,7 @@ import {
 } from '../api';
 import { useRuntime } from '../store/runtime';
 import { fetchChannelFrames, type CapturedFrame } from '../api';
+import { useI18n } from '../i18n';
 
 /**
  * 设备与通道管理（PRD M2）：通道/位号配置 CRUD 直连网关 REST，
@@ -21,6 +22,7 @@ const DATA_TYPES = ['Bool', 'Int16', 'UInt16', 'Int32', 'Float', 'Double', 'Stri
 
 export default function DeviceManagement() {
   const { channels: channelStatus, connect } = useRuntime();
+  const { t } = useI18n();
   const [channels, setChannels] = useState<GatewayChannel[]>([]);
   const [tags, setTags] = useState<GatewayTag[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -95,9 +97,9 @@ export default function DeviceManagement() {
         params: draft.params,
       });
       await loadConfig();
-      showToast(`通道 "${draft.name}" 已保存并热生效。`);
+      showToast(t('dev.toast.channelSaved', { name: draft.name }));
     } catch (e) {
-      showToast(`保存失败：${String(e)}`);
+      showToast(t('dev.toast.saveFailed', { err: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -105,12 +107,12 @@ export default function DeviceManagement() {
 
   const removeChannel = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(`确认删除通道 "${selected.name}" 及其 ${selectedTags.length} 个位号？`)) return;
+    if (!window.confirm(t('dev.confirm.deleteChannel', { name: selected.name, n: selectedTags.length }))) return;
     setBusy(true);
     try {
       await deleteChannel(selected.id);
       await loadConfig();
-      showToast(`通道 "${selected.name}" 已删除。`);
+      showToast(t('dev.toast.channelDeleted', { name: selected.name }));
     } finally {
       setBusy(false);
     }
@@ -135,9 +137,9 @@ export default function DeviceManagement() {
       setIsAddOpen(false);
       await loadConfig();
       setSelectedId(created.id);
-      showToast(`通道 "${created.name}" 已创建并连接。`);
+      showToast(t('dev.toast.channelCreated', { name: created.name }));
     } catch (e) {
-      showToast(`创建失败：${String(e)}`);
+      showToast(t('dev.toast.createFailed', { err: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -152,9 +154,9 @@ export default function DeviceManagement() {
     try {
       const result = await testChannelConnection(draft.id);
       setTestResult(result);
-      showToast(result.ok ? '连接测试通过。' : '连接测试失败。');
+      showToast(result.ok ? t('dev.toast.connTestOk') : t('dev.toast.connTestFail'));
     } catch (e) {
-      showToast(`测试失败：${String(e)}`);
+      showToast(t('dev.toast.testFailed', { err: String(e) }));
     } finally {
       setTestBusy(false);
     }
@@ -179,7 +181,7 @@ export default function DeviceManagement() {
     if (!tagModal) return;
     const validation = validateAddress((selected?.protocol ?? 'Modbus TCP') as Protocol, tagModal.draft.address);
     if (!validation.ok) {
-      setTagAddrError(validation.error ?? '地址不合法');
+      setTagAddrError(validation.error ?? t('dev.addrInvalid'));
       return;
     }
     setTagAddrError(null);
@@ -189,19 +191,19 @@ export default function DeviceManagement() {
       else await updateTag(tagModal.draft.id, tagModal.draft);
       setTagModal(null);
       await loadConfig();
-      showToast('位号已保存并热生效。');
+      showToast(t('dev.toast.tagSaved'));
     } catch (e) {
-      showToast(`保存失败：${String(e)}`);
+      showToast(t('dev.toast.saveFailed', { err: String(e) }));
     } finally {
       setBusy(false);
     }
   };
 
   const removeTag = async (id: string, name: string): Promise<void> => {
-    if (!window.confirm(`确认删除位号 "${name}"？`)) return;
+    if (!window.confirm(t('dev.confirm.deleteTag', { name }))) return;
     await deleteTag(id);
     await loadConfig();
-    showToast(`位号 "${name}" 已删除。`);
+    showToast(t('dev.toast.tagDeleted', { name }));
   };
 
   // ===== 位号 CSV 导入 / 导出 =====
@@ -217,7 +219,7 @@ export default function DeviceManagement() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(`已导出 ${selectedTags.length} 个位号。`);
+    showToast(t('dev.toast.exported', { n: selectedTags.length }));
   };
 
   const importTagsCsv = (file: File): void => {
@@ -227,7 +229,7 @@ export default function DeviceManagement() {
       const content = String(event.target?.result ?? '');
       const lines = content.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length <= 1) {
-        showToast('CSV 为空或缺少数据行。');
+        showToast(t('dev.toast.csvEmpty'));
         return;
       }
       let imported = 0;
@@ -243,7 +245,7 @@ export default function DeviceManagement() {
             unit: parts[3] ?? '',
             scale: Number(parts[4]) || 1,
             offset: Number(parts[5]) || 0,
-            description: parts[6] ?? 'CSV 导入',
+            description: parts[6] ?? t('dev.csvImportDesc'),
           });
           imported += 1;
         } catch {
@@ -251,7 +253,7 @@ export default function DeviceManagement() {
         }
       }
       await loadConfig();
-      showToast(`成功导入 ${imported} 个位号。`);
+      showToast(t('dev.toast.imported', { n: imported }));
     };
     reader.readAsText(file);
   };
@@ -284,14 +286,14 @@ export default function DeviceManagement() {
 
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">设备与通道管理</h2>
-          <p className="text-sm text-slate-500 mt-1">通道配置直连网关，保存即持久化并热生效。</p>
+          <h2 className="text-lg font-bold text-slate-800">{t('dev.title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('dev.subtitle')}</p>
         </div>
         <button
           onClick={() => setIsAddOpen(true)}
           className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
         >
-          <Plus className="w-4 h-4 mr-2" /> 新增通道
+          <Plus className="w-4 h-4 mr-2" /> {t('dev.addChannel')}
         </button>
       </div>
 
@@ -301,7 +303,7 @@ export default function DeviceManagement() {
           <div className="p-4 border-b border-slate-100 bg-slate-50/70">
             <div className="flex items-center justify-between mb-2">
               <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                <Network className="w-4 h-4 text-indigo-600" /> 工业通道 ({channels.length})
+                <Network className="w-4 h-4 text-indigo-600" /> {t('dev.channelList', { n: channels.length })}
               </span>
             </div>
             <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px]">
@@ -313,7 +315,7 @@ export default function DeviceManagement() {
                     protocolFilter === chip ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  {chip === 'All' ? '全部' : chip}
+                  {chip === 'All' ? t('dev.filter.all') : chip}
                 </button>
               ))}
             </div>
@@ -337,7 +339,7 @@ export default function DeviceManagement() {
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span className="text-[10px] font-mono text-slate-400">
-                      {channel.host}:{channel.port} · {tags.filter((t) => t.channelId === channel.id).length} 位号
+                      {channel.host}:{channel.port} · {t('dev.tagCount', { n: tags.filter((t) => t.channelId === channel.id).length })}
                     </span>
                     <span className="flex items-center gap-1 text-[10px] font-semibold">
                       <span
@@ -346,7 +348,7 @@ export default function DeviceManagement() {
                         }`}
                       />
                       <span className={st === 'online' ? 'text-green-600' : st === 'offline' || st === 'error' ? 'text-rose-500' : 'text-slate-400'}>
-                        {st === 'online' ? '在线' : st === 'connecting' ? '连接中' : st === 'disabled' ? '停用' : '离线'}
+                        {st === 'online' ? t('dev.status.online') : st === 'connecting' ? t('dev.status.connecting') : st === 'disabled' ? t('dev.status.disabled') : t('dev.status.offline')}
                       </span>
                     </span>
                   </div>
@@ -359,7 +361,7 @@ export default function DeviceManagement() {
         {/* 详情面板 */}
         <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {!draft || !selected ? (
-            <div className="p-12 text-center text-slate-400 text-sm">选择左侧通道查看配置。</div>
+            <div className="p-12 text-center text-slate-400 text-sm">{t('dev.selectChannelHint')}</div>
           ) : (
             <>
               {/* 头部 */}
@@ -382,12 +384,12 @@ export default function DeviceManagement() {
                       draft.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
                     }`}
                   >
-                    {draft.enabled ? '启用中' : '已停用'}
+                    {draft.enabled ? t('dev.state.enabled') : t('dev.state.disabled')}
                   </button>
                   <button
                     onClick={() => void removeChannel()}
                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                    title="删除通道"
+                    title={t('dev.tip.deleteChannel')}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -396,7 +398,7 @@ export default function DeviceManagement() {
                     disabled={busy}
                     className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
                   >
-                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存并生效
+                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('dev.saveAndApply')}
                   </button>
                 </div>
               </div>
@@ -411,7 +413,7 @@ export default function DeviceManagement() {
                       activeTab === tab ? 'text-indigo-600 border-indigo-600' : 'text-slate-500 hover:text-slate-700 border-transparent'
                     }`}
                   >
-                    {tab === 'connection' ? '连接参数' : tab === 'tags' ? `位号映射 (${selectedTags.length})` : '报文诊断'}
+                    {tab === 'connection' ? t('dev.tab.connection') : tab === 'tags' ? t('dev.tab.tags', { n: selectedTags.length }) : t('dev.tab.diagnostics')}
                   </button>
                 ))}
               </div>
@@ -421,7 +423,7 @@ export default function DeviceManagement() {
                   {/* 基础字段 */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">目标地址 / 主机</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.host')}</label>
                       <input
                         value={draft.host}
                         onChange={(e) => setDraft({ ...draft, host: e.target.value })}
@@ -429,7 +431,7 @@ export default function DeviceManagement() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">端口</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.common.port')}</label>
                       <input
                         value={draft.port}
                         onChange={(e) => setDraft({ ...draft, port: Number(e.target.value) })}
@@ -437,7 +439,7 @@ export default function DeviceManagement() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">采集周期 (ms)</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.pollInterval')}</label>
                       <input
                         value={draft.pollIntervalMs}
                         onChange={(e) => setDraft({ ...draft, pollIntervalMs: Number(e.target.value) })}
@@ -445,7 +447,7 @@ export default function DeviceManagement() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">运行状态</label>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.runState')}</label>
                       <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm font-mono text-slate-600">
                         {statusOf(draft.id)}
                       </div>
@@ -456,7 +458,7 @@ export default function DeviceManagement() {
                   <div className="pt-2 border-t border-slate-100">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                        {draft.protocol} 驱动选项
+                        {t('dev.driverOptions', { protocol: draft.protocol })}
                       </h4>
                       <button
                         onClick={() => void runConnectionTest()}
@@ -464,7 +466,7 @@ export default function DeviceManagement() {
                         className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 disabled:opacity-60"
                       >
                         {testBusy ? <Loader2 className="w-3 h-3 animate-spin text-indigo-600" /> : <Play className="w-3 h-3 text-emerald-600" />}
-                        {testBusy ? '测试中…' : '测试连接'}
+                        {testBusy ? t('dev.connTest.testing') : t('dev.connTest.run')}
                       </button>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -492,7 +494,7 @@ export default function DeviceManagement() {
                                   value ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-50 text-slate-500 border-slate-200'
                                 }`}
                               >
-                                {value ? '是' : '否'}
+                                {value ? t('dev.common.yes') : t('dev.common.no')}
                               </button>
                             ) : (
                               <input
@@ -524,7 +526,7 @@ export default function DeviceManagement() {
                     >
                       <div className={`px-4 py-2 font-bold flex items-center gap-2 ${testResult.ok ? 'text-emerald-800' : 'text-rose-800'}`}>
                         {testResult.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-                        连接测试{testResult.ok ? '通过' : '失败'}
+                        {testResult.ok ? t('dev.connTest.resultOk') : t('dev.connTest.resultFail')}
                       </div>
                       <div className="divide-y divide-white/60">
                         {testResult.steps.map((step, i) => (
@@ -544,8 +546,7 @@ export default function DeviceManagement() {
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs text-slate-500">
-                      捕获 {selected.name} 通道的真实 TCP 字节流（环形缓冲 200 帧）。
-                      当前驱动支持：Modbus TCP / MELSEC（其余驱动接入后自动启用）。
+                      {t('dev.diag.captureHint', { name: selected.name })}
                     </p>
                     <div className="flex items-center gap-2">
                       <button
@@ -554,7 +555,7 @@ export default function DeviceManagement() {
                           framesPaused ? 'bg-slate-100 text-slate-500 border-slate-200' : 'bg-emerald-50 text-emerald-700 border-emerald-300'
                         }`}
                       >
-                        {framesPaused ? '已暂停' : '实时捕获中'}
+                        {framesPaused ? t('dev.diag.paused') : t('dev.diag.live')}
                       </button>
                       <button
                         onClick={() => {
@@ -563,13 +564,13 @@ export default function DeviceManagement() {
                         }}
                         className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
                       >
-                        清空
+                        {t('dev.diag.clear')}
                       </button>
                     </div>
                   </div>
                   <div className="rounded-lg bg-slate-900 p-4 min-h-[320px] max-h-[420px] overflow-y-auto font-mono text-[11px] leading-5">
                     {frames.length === 0 ? (
-                      <div className="text-slate-500">等待报文…（采集运行时每周期产生 TX/RX 帧）</div>
+                      <div className="text-slate-500">{t('dev.diag.waiting')}</div>
                     ) : (
                       frames.map((f, i) => (
                         <div key={i} className="flex items-start gap-2 py-0.5 border-b border-slate-800/60">
@@ -592,7 +593,7 @@ export default function DeviceManagement() {
                     <div className="relative w-64">
                       <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                       <input
-                        placeholder="搜索位号、地址…"
+                        placeholder={t('dev.tags.searchPlaceholder')}
                         value={tagSearch}
                         onChange={(e) => setTagSearch(e.target.value)}
                         className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
@@ -601,13 +602,13 @@ export default function DeviceManagement() {
                     <div className="flex items-center gap-2">
                       <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importTagsCsv(f); if (fileInputRef.current) fileInputRef.current.value = ''; }} />
                       <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50">
-                        <Upload className="w-3.5 h-3.5 mr-1" /> 导入 CSV
+                        <Upload className="w-3.5 h-3.5 mr-1" /> {t('dev.tags.importCsv')}
                       </button>
                       <button onClick={exportTagsCsv} className="flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50">
-                        <Download className="w-3.5 h-3.5 mr-1" /> 导出 CSV
+                        <Download className="w-3.5 h-3.5 mr-1" /> {t('dev.tags.exportCsv')}
                       </button>
                       <button onClick={openTagAdd} className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700">
-                        <Plus className="w-3.5 h-3.5 mr-1" /> 新增位号
+                        <Plus className="w-3.5 h-3.5 mr-1" /> {t('dev.tags.addTag')}
                       </button>
                     </div>
                   </div>
@@ -616,12 +617,12 @@ export default function DeviceManagement() {
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase font-bold tracking-wider border-b border-slate-200">
-                          <th className="px-4 py-2.5">位号名</th>
-                          <th className="px-4 py-2.5">地址</th>
-                          <th className="px-4 py-2.5">类型</th>
-                          <th className="px-4 py-2.5">单位</th>
-                          <th className="px-4 py-2.5">标度</th>
-                          <th className="px-4 py-2.5 text-right">操作</th>
+                          <th className="px-4 py-2.5">{t('dev.col.name')}</th>
+                          <th className="px-4 py-2.5">{t('dev.col.address')}</th>
+                          <th className="px-4 py-2.5">{t('dev.col.type')}</th>
+                          <th className="px-4 py-2.5">{t('dev.common.unit')}</th>
+                          <th className="px-4 py-2.5">{t('dev.col.scale')}</th>
+                          <th className="px-4 py-2.5 text-right">{t('dev.col.actions')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -638,17 +639,17 @@ export default function DeviceManagement() {
                               ×{tag.scale} {tag.offset !== 0 ? `${tag.offset > 0 ? '+' : ''}${tag.offset}` : ''}
                             </td>
                             <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                              <button onClick={() => setTagModal({ mode: 'edit', draft: { ...tag } })} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 mr-1" title="编辑">
+                              <button onClick={() => setTagModal({ mode: 'edit', draft: { ...tag } })} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 mr-1" title={t('dev.tip.edit')}>
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                              <button onClick={() => void removeTag(tag.id, tag.name)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50" title="删除">
+                              <button onClick={() => void removeTag(tag.id, tag.name)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50" title={t('dev.tip.delete')}>
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </td>
                           </tr>
                         ))}
                         {filteredTagList.length === 0 && (
-                          <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">暂无位号，点击右上角新增。</td></tr>
+                          <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{t('dev.tags.empty')}</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -666,22 +667,22 @@ export default function DeviceManagement() {
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
               <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Radio className="w-4 h-4 text-indigo-600" /> 新增通道
+                <Radio className="w-4 h-4 text-indigo-600" /> {t('dev.addChannel')}
               </h3>
               <button onClick={() => setIsAddOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">通道名称 *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.channelName')}</label>
                 <input
                   value={newChannel.name}
                   onChange={(e) => setNewChannel({ ...newChannel, name: e.target.value })}
-                  placeholder="如 R0023_S7_1200"
+                  placeholder={t('dev.field.channelNamePlaceholder')}
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">协议</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.protocol')}</label>
                 <select
                   value={newChannel.protocol}
                   onChange={(e) => {
@@ -692,14 +693,14 @@ export default function DeviceManagement() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-medium bg-slate-50"
                 >
                   {Object.values(PROTOCOL_CONFIGS).map((m) => (
-                    <option key={m.name} value={m.name}>{m.name}（默认端口 {m.defaultPort}）</option>
+                    <option key={m.name} value={m.name}>{t('dev.protocolDefaultPort', { name: m.name, port: m.defaultPort })}</option>
                   ))}
                 </select>
                 <p className="text-[11px] text-slate-400 mt-1">{PROTOCOL_CONFIGS[newChannel.protocol].description}</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">主机地址</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.hostAddress')}</label>
                   <input
                     value={newChannel.host}
                     onChange={(e) => setNewChannel({ ...newChannel, host: e.target.value })}
@@ -707,7 +708,7 @@ export default function DeviceManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">端口</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.common.port')}</label>
                   <input
                     value={newChannel.port}
                     onChange={(e) => setNewChannel({ ...newChannel, port: Number(e.target.value) })}
@@ -717,17 +718,17 @@ export default function DeviceManagement() {
               </div>
               <div className="px-3 py-2 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-700 flex items-start gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                创建后通道立即按协议默认参数连接；专属参数可在保存前于连接参数页调整。
+                {t('dev.addChannelHint')}
               </div>
             </div>
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3">
-              <button onClick={() => setIsAddOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md">取消</button>
+              <button onClick={() => setIsAddOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md">{t('dev.common.cancel')}</button>
               <button
                 onClick={() => void addChannel()}
                 disabled={busy || !newChannel.name.trim()}
                 className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-md flex items-center"
               >
-                {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />} 创建并连接
+                {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />} {t('dev.createAndConnect')}
               </button>
             </div>
           </div>
@@ -739,12 +740,12 @@ export default function DeviceManagement() {
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-              <h3 className="font-semibold text-slate-800">{tagModal.mode === 'add' ? '新增位号' : '编辑位号'}</h3>
+              <h3 className="font-semibold text-slate-800">{tagModal.mode === 'add' ? t('dev.tags.addTag') : t('dev.tags.editTag')}</h3>
               <button onClick={() => setTagModal(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 grid grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
               <div className="col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">位号名 *（通道内唯一）</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.tagName')}</label>
                 <input
                   value={tagModal.draft.name}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, name: e.target.value } })}
@@ -753,9 +754,9 @@ export default function DeviceManagement() {
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                  协议地址 *
+                  {t('dev.field.protocolAddress')}
                   <span className="ml-2 text-[10px] text-slate-400 font-normal">
-                    语法：{meta?.addressSyntaxHelp}
+                    {t('dev.field.addressSyntax', { syntax: meta?.addressSyntaxHelp ?? '' })}
                   </span>
                 </label>
                 <input
@@ -773,7 +774,7 @@ export default function DeviceManagement() {
                 )}
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">数据类型</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.dataType')}</label>
                 <select
                   value={tagModal.draft.dataType}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, dataType: e.target.value } })}
@@ -783,7 +784,7 @@ export default function DeviceManagement() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">单位</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.common.unit')}</label>
                 <input
                   value={tagModal.draft.unit}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, unit: e.target.value } })}
@@ -791,7 +792,7 @@ export default function DeviceManagement() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">标度（工程值 = 原始 × scale + offset）</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.scale')}</label>
                 <input
                   value={tagModal.draft.scale}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, scale: Number(e.target.value) } })}
@@ -799,7 +800,7 @@ export default function DeviceManagement() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">偏移</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.offset')}</label>
                 <input
                   value={tagModal.draft.offset}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, offset: Number(e.target.value) } })}
@@ -807,7 +808,7 @@ export default function DeviceManagement() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">工程量程下限（归一化用）</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.engMin')}</label>
                 <input
                   value={tagModal.draft.engMin ?? ''}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, engMin: e.target.value === '' ? undefined : Number(e.target.value) } })}
@@ -815,7 +816,7 @@ export default function DeviceManagement() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">工程量程上限</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.engMax')}</label>
                 <input
                   value={tagModal.draft.engMax ?? ''}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, engMax: e.target.value === '' ? undefined : Number(e.target.value) } })}
@@ -823,7 +824,7 @@ export default function DeviceManagement() {
                 />
               </div>
               <div className="col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">描述</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.description')}</label>
                 <input
                   value={tagModal.draft.description ?? ''}
                   onChange={(e) => setTagModal({ ...tagModal, draft: { ...tagModal.draft, description: e.target.value } })}
@@ -832,13 +833,13 @@ export default function DeviceManagement() {
               </div>
             </div>
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3">
-              <button onClick={() => setTagModal(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md">取消</button>
+              <button onClick={() => setTagModal(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md">{t('dev.common.cancel')}</button>
               <button
                 onClick={() => void submitTag()}
                 disabled={busy || !tagModal.draft.name || !tagModal.draft.address}
                 className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-md flex items-center"
               >
-                {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} 保存并热生效
+                {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} {t('dev.saveHotReload')}
               </button>
             </div>
           </div>

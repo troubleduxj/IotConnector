@@ -4,11 +4,12 @@ import {
   fetchStorageTasks, createStorageTask, updateStorageTask, deleteStorageTask,
   fetchGatewayTags, type StorageTask, type GatewayTag,
 } from '../api';
+import { useI18n } from '../i18n';
 
 /** 存储规则（PRD M4）：存储任务 CRUD + 触发器（周期/死区/边沿），由网关执行写入。 */
 
-const emptyTask = (): Omit<StorageTask, 'id'> => ({
-  name: '新存储任务',
+const emptyTask = (name: string): Omit<StorageTask, 'id'> => ({
+  name,
   enabled: true,
   tableName: 'task_new',
   trigger: { mode: 'cycle', intervalMs: 5000 },
@@ -16,6 +17,7 @@ const emptyTask = (): Omit<StorageTask, 'id'> => ({
 });
 
 export default function DataStorage() {
+  const { t } = useI18n();
   const [tasks, setTasks] = useState<StorageTask[]>([]);
   const [tags, setTags] = useState<GatewayTag[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export default function DataStorage() {
       if (selected) await updateStorageTask(draft.id, draft);
       else await createStorageTask(draft);
       await load();
-      showToast('存储任务已保存并生效。');
+      showToast(t('stor.toastSaved'));
     } finally {
       setBusy(false);
     }
@@ -56,10 +58,10 @@ export default function DataStorage() {
 
   const remove = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(`确认删除任务 "${selected.name}"？`)) return;
+    if (!window.confirm(t('stor.confirmDelete', { name: selected.name }))) return;
     await deleteStorageTask(selected.id);
     await load();
-    showToast('已删除。');
+    showToast(t('stor.toastDeleted'));
   };
 
   return (
@@ -68,14 +70,14 @@ export default function DataStorage() {
 
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">存储规则</h2>
-          <p className="text-sm text-slate-500 mt-1">存储任务由网关执行：周期快照 / 死区触发 / 边沿快照，写入 TDengine 独立表。</p>
+          <h2 className="text-lg font-bold text-slate-800">{t('stor.title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('stor.subtitle')}</p>
         </div>
         <button
-          onClick={() => { void createStorageTask(emptyTask()).then((created) => load().then(() => setSelectedId(created.id))); }}
+          onClick={() => { void createStorageTask(emptyTask(t('stor.defaultTaskName'))).then((created) => load().then(() => setSelectedId(created.id))); }}
           className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700"
         >
-          <Plus className="w-4 h-4 mr-2" /> 新增任务
+          <Plus className="w-4 h-4 mr-2" /> {t('stor.newTask')}
         </button>
       </div>
 
@@ -83,7 +85,7 @@ export default function DataStorage() {
         <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50/70">
             <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-              <Database className="w-4 h-4 text-indigo-600" /> 存储任务 ({tasks.length})
+              <Database className="w-4 h-4 text-indigo-600" /> {t('stor.taskCount', { n: tasks.length })}
             </span>
           </div>
           <div className="divide-y divide-slate-100">
@@ -98,17 +100,17 @@ export default function DataStorage() {
                   <span className={`w-2 h-2 rounded-full ${task.enabled ? 'bg-green-500' : 'bg-slate-300'}`} />
                 </div>
                 <div className="text-[10px] font-mono text-slate-400 mt-1">
-                  {task.tableName} · {task.trigger.mode === 'cycle' ? `周期 ${task.trigger.intervalMs}ms` : task.trigger.mode === 'deadband' ? `死区 ±${task.trigger.deadband}` : `沿触发 (${task.trigger.edge})`}
+                  {task.tableName} · {task.trigger.mode === 'cycle' ? t('stor.triggerCycle', { ms: task.trigger.intervalMs }) : task.trigger.mode === 'deadband' ? t('stor.triggerDeadband', { db: task.trigger.deadband }) : t('stor.triggerEdge', { edge: task.trigger.edge })}
                 </div>
               </button>
             ))}
-            {tasks.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">暂无任务，点击右上角新增。</div>}
+            {tasks.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">{t('stor.emptyTasks')}</div>}
           </div>
         </div>
 
         <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {!draft ? (
-            <div className="p-12 text-center text-slate-400 text-sm">选择左侧任务。</div>
+            <div className="p-12 text-center text-slate-400 text-sm">{t('stor.selectPrompt')}</div>
           ) : (
             <div className="p-6 space-y-5">
               <div className="flex items-center justify-between">
@@ -122,22 +124,22 @@ export default function DataStorage() {
                     onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
                     className={`px-2.5 py-1 rounded-md text-xs font-bold border ${draft.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
                   >
-                    {draft.enabled ? '启用中' : '已停用'}
+                    {draft.enabled ? t('stor.enabled') : t('stor.disabled')}
                   </button>
                   <button onClick={() => void remove()} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md"><Trash2 className="w-4 h-4" /></button>
                   <button onClick={() => void save()} disabled={busy} className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60">
-                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存并生效
+                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('stor.saveApply')}
                   </button>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">目标表名（自动建表）</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.tableNameLabel')}</label>
                   <input value={draft.tableName} onChange={(e) => setDraft({ ...draft, tableName: e.target.value })} className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">触发模式</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.triggerMode')}</label>
                   <select
                     value={draft.trigger.mode}
                     onChange={(e) => {
@@ -150,16 +152,16 @@ export default function DataStorage() {
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-medium bg-slate-50"
                   >
-                    <option value="cycle">周期快照</option>
-                    <option value="deadband">死区触发（变化 ≥ 死区）</option>
-                    <option value="edge">边沿快照（位号上升/下降沿）</option>
+                    <option value="cycle">{t('stor.modeCycle')}</option>
+                    <option value="deadband">{t('stor.modeDeadband')}</option>
+                    <option value="edge">{t('stor.modeEdge')}</option>
                   </select>
                 </div>
               </div>
 
               {draft.trigger.mode === 'cycle' && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">周期 (ms，最小 200)</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.intervalLabel')}</label>
                   <input
                     value={draft.trigger.intervalMs ?? 5000}
                     onChange={(e) => setDraft({ ...draft, trigger: { mode: 'cycle', intervalMs: Math.max(200, Number(e.target.value)) } })}
@@ -170,13 +172,13 @@ export default function DataStorage() {
               {draft.trigger.mode === 'deadband' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">监视位号</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.monitorTag')}</label>
                     <select value={draft.trigger.tagId ?? ''} onChange={(e) => setDraft({ ...draft, trigger: { mode: 'deadband', tagId: e.target.value, deadband: draft.trigger.deadband ?? 0.5 } })} className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
                       {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">死区（绝对值）</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.deadbandLabel')}</label>
                     <input value={draft.trigger.deadband ?? 0.5} onChange={(e) => setDraft({ ...draft, trigger: { mode: 'deadband', tagId: draft.trigger.tagId ?? tags[0]?.id ?? '', deadband: Number(e.target.value) } })} className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono" />
                   </div>
                 </div>
@@ -184,16 +186,16 @@ export default function DataStorage() {
               {draft.trigger.mode === 'edge' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">监视位号（布尔）</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.monitorTagBool')}</label>
                     <select value={draft.trigger.tagId ?? ''} onChange={(e) => setDraft({ ...draft, trigger: { mode: 'edge', tagId: e.target.value, edge: draft.trigger.edge ?? 'rising' } })} className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
                       {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">沿</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.edgeLabel')}</label>
                     <select value={draft.trigger.edge ?? 'rising'} onChange={(e) => setDraft({ ...draft, trigger: { mode: 'edge', tagId: draft.trigger.tagId ?? tags[0]?.id ?? '', edge: e.target.value as 'rising' | 'falling' } })} className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-medium">
-                      <option value="rising">上升沿（false→true）</option>
-                      <option value="falling">下降沿（true→false）</option>
+                      <option value="rising">{t('stor.edgeRising')}</option>
+                      <option value="falling">{t('stor.edgeFalling')}</option>
                     </select>
                   </div>
                 </div>
@@ -202,13 +204,13 @@ export default function DataStorage() {
               <div className="pt-2 border-t border-slate-100">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5" /> 列映射（列名 ← 位号当前值）
+                    <Zap className="w-3.5 h-3.5" /> {t('stor.mappingTitle')}
                   </h4>
                   <button
                     onClick={() => setDraft({ ...draft, mappings: [...draft.mappings, { column: `col${draft.mappings.length + 1}`, tagId: tags[0]?.id ?? '' }] })}
                     className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                   >
-                    <Plus className="w-3 h-3" /> 加列
+                    <Plus className="w-3 h-3" /> {t('stor.addColumn')}
                   </button>
                 </div>
                 <div className="space-y-2">
@@ -240,7 +242,7 @@ export default function DataStorage() {
                       </button>
                     </div>
                   ))}
-                  {draft.mappings.length === 0 && <div className="text-xs text-slate-400 py-2">尚未配置映射列。</div>}
+                  {draft.mappings.length === 0 && <div className="text-xs text-slate-400 py-2">{t('stor.noMappings')}</div>}
                 </div>
               </div>
             </div>

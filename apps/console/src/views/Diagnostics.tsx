@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchAlarms, fetchGatewayTags, writeTagValue, createAlarm, updateAlarm, deleteAlarm, type AlarmRule, type GatewayTag } from '../api';
 import { useRuntime } from '../store/runtime';
+import { useI18n } from '../i18n';
 import { Search, Send, X, Bell, Trash2, Check, Loader2 } from 'lucide-react';
 
 /**
@@ -12,6 +13,7 @@ type WriteTarget = { tag: GatewayTag };
 type AlarmTarget = { tag: GatewayTag };
 
 export default function Diagnose() {
+  const { t } = useI18n();
   const [tags, setTags] = useState<GatewayTag[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const { liveValues, status, connect } = useRuntime();
@@ -67,7 +69,7 @@ export default function Diagnose() {
     } else if (tag.dataType !== 'String') {
       value = Number(writeValue);
       if (Number.isNaN(value)) {
-        setWriteResult({ ok: false, msg: '数值格式不合法' });
+        setWriteResult({ ok: false, msg: t('diag.invalidNumber') });
         return;
       }
     }
@@ -76,8 +78,8 @@ export default function Diagnose() {
     setWriteBusy(false);
     setWriteResult(
       result.ok
-        ? { ok: true, msg: `已下发到控制器（${tag.name} = ${value}）` }
-        : { ok: false, msg: `写入失败：${result.error ?? 'unknown'}` },
+        ? { ok: true, msg: t('diag.writeSent', { name: tag.name, value: String(value) }) }
+        : { ok: false, msg: t('diag.writeFailed', { error: result.error ?? 'unknown' }) },
     );
   };
 
@@ -132,7 +134,7 @@ export default function Diagnose() {
             <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="按位号名或通道过滤…"
+              placeholder={t('diag.filterPlaceholder')}
               className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -144,7 +146,7 @@ export default function Diagnose() {
                 status === 'live' ? 'bg-green-500 animate-pulse' : status === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-500'
               }`}
             />
-            {status === 'live' ? `${tags.length} 位号 · 实时推送中` : status === 'connecting' ? '连接网关…' : '网关离线'}
+            {status === 'live' ? t('diag.liveCount', { n: tags.length }) : status === 'connecting' ? t('diag.connecting') : t('diag.offline')}
           </div>
         </div>
 
@@ -152,13 +154,13 @@ export default function Diagnose() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-[11px] uppercase font-bold tracking-wider">
-                <th className="px-6 py-3 border-b border-slate-200">通道</th>
-                <th className="px-6 py-3 border-b border-slate-200">位号</th>
-                <th className="px-6 py-3 border-b border-slate-200">地址</th>
-                <th className="px-6 py-3 border-b border-slate-200">当前值</th>
-                <th className="px-6 py-3 border-b border-slate-200">类型</th>
-                <th className="px-6 py-3 border-b border-slate-200">质量</th>
-                <th className="px-6 py-3 border-b border-slate-200 text-right">操作</th>
+                <th className="px-6 py-3 border-b border-slate-200">{t('diag.col.channel')}</th>
+                <th className="px-6 py-3 border-b border-slate-200">{t('diag.col.tag')}</th>
+                <th className="px-6 py-3 border-b border-slate-200">{t('diag.col.address')}</th>
+                <th className="px-6 py-3 border-b border-slate-200">{t('diag.col.value')}</th>
+                <th className="px-6 py-3 border-b border-slate-200">{t('diag.col.type')}</th>
+                <th className="px-6 py-3 border-b border-slate-200">{t('diag.col.quality')}</th>
+                <th className="px-6 py-3 border-b border-slate-200 text-right">{t('diag.col.actions')}</th>
               </tr>
             </thead>
             <tbody className="text-sm text-slate-600">
@@ -184,14 +186,14 @@ export default function Diagnose() {
                       <button
                         onClick={() => openAlarms(tag)}
                         className="text-slate-400 hover:text-amber-600 transition-colors p-1.5 rounded-md hover:bg-amber-50 mr-1"
-                        title="告警规则"
+                        title={t('diag.alarmRules')}
                       >
                         <Bell className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => openWrite(tag)}
                         className="text-slate-400 hover:text-indigo-600 transition-colors p-1.5 rounded-md hover:bg-indigo-50"
-                        title="写入"
+                        title={t('diag.write')}
                       >
                         <Send className="w-4 h-4" />
                       </button>
@@ -202,7 +204,7 @@ export default function Diagnose() {
               {filteredTags.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-slate-500 text-sm">
-                    {tags.length === 0 ? '尚未加载位号（网关未连接？）' : `没有匹配 "${searchTerm}" 的位号`}
+                    {tags.length === 0 ? t('diag.noTagsLoaded') : t('diag.noMatch', { q: searchTerm })}
                   </td>
                 </tr>
               )}
@@ -216,14 +218,14 @@ export default function Diagnose() {
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-              <h3 className="font-semibold text-slate-800">写入位号值</h3>
+              <h3 className="font-semibold text-slate-800">{t('diag.writeTitle')}</h3>
               <button onClick={() => setWriteTarget(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">位号</label>
+                <label className="block text-xs font-medium text-slate-500 mb-1">{t('diag.label.tag')}</label>
                 <div className="text-sm font-mono font-medium text-slate-900">
                   {writeTarget.tag.name}
                   {writeTarget.tag.unit && <span className="ml-1 text-slate-400">({writeTarget.tag.unit})</span>}
@@ -233,11 +235,11 @@ export default function Diagnose() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">当前值</label>
+                <label className="block text-xs font-medium text-slate-500 mb-1">{t('diag.label.currentValue')}</label>
                 <div className="text-sm text-slate-700 font-mono">{formatLive(writeTarget.tag)}</div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">新值</label>
+                <label className="block text-xs font-medium text-slate-500 mb-1">{t('diag.label.newValue')}</label>
                 {writeTarget.tag.dataType === 'Bool' ? (
                   <select
                     value={writeValue}
@@ -258,7 +260,7 @@ export default function Diagnose() {
                   />
                 )}
                 <p className="text-[11px] text-slate-400 mt-1.5">
-                  写入为危险操作：经网关下发到真实控制器（S7/Modbus/OPC UA），生效后可在图表中观察。
+                  {t('diag.writeWarning')}
                 </p>
               </div>
               {writeResult && (
@@ -277,7 +279,7 @@ export default function Diagnose() {
                 onClick={() => setWriteTarget(null)}
                 className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md transition-colors"
               >
-                关闭
+                {t('diag.close')}
               </button>
               <button
                 onClick={() => void submitWrite()}
@@ -285,7 +287,7 @@ export default function Diagnose() {
                 className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-md transition-colors flex items-center"
               >
                 {writeBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                确认写入
+                {t('diag.confirmWrite')}
               </button>
             </div>
           </div>
@@ -298,7 +300,7 @@ export default function Diagnose() {
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
               <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Bell className="w-4 h-4 text-amber-500" /> 告警规则
+                <Bell className="w-4 h-4 text-amber-500" /> {t('diag.alarmRules')}
               </h3>
               <button
                 onClick={() => setAlarmTarget(null)}
@@ -316,10 +318,10 @@ export default function Diagnose() {
                     <div key={rule.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
                       <div className="text-xs">
                         <span className={`font-bold ${rule.kind === 'high' ? 'text-rose-600' : 'text-blue-600'}`}>
-                          {rule.kind === 'high' ? '越上限' : '越下限'}
+                          {rule.kind === 'high' ? t('diag.kind.high') : t('diag.kind.low')}
                         </span>
                         <span className="font-mono ml-1">{rule.threshold}</span>
-                        <span className="text-slate-400 ml-2">回差 {rule.hysteresis}</span>
+                        <span className="text-slate-400 ml-2">{t('diag.hysteresis')} {rule.hysteresis}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <button
@@ -328,12 +330,12 @@ export default function Diagnose() {
                             rule.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
                           }`}
                         >
-                          {rule.enabled ? '启用' : '停用'}
+                          {rule.enabled ? t('diag.enabled') : t('diag.disabled')}
                         </button>
                         <button
                           onClick={() => void deleteAlarm(rule.id).then(loadAlarmRules)}
                           className="p-1 text-slate-400 hover:text-rose-600"
-                          title="删除"
+                          title={t('diag.delete')}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -344,24 +346,24 @@ export default function Diagnose() {
               )}
 
               <div className="pt-2 border-t border-slate-100">
-                <div className="text-xs font-semibold text-slate-600 mb-2">新建规则</div>
+                <div className="text-xs font-semibold text-slate-600 mb-2">{t('diag.newRule')}</div>
                 <div className="flex items-center gap-2">
                   <select
                     value={alarmKind}
                     onChange={(e) => setAlarmKind(e.target.value as 'high' | 'low')}
                     className="px-2 py-1.5 border border-slate-300 rounded-md text-xs font-semibold"
                   >
-                    <option value="high">越上限 &gt;</option>
-                    <option value="low">越下限 &lt;</option>
+                    <option value="high">{t('diag.kind.high')} &gt;</option>
+                    <option value="low">{t('diag.kind.low')} &lt;</option>
                   </select>
                   <input
                     type="text"
-                    placeholder="阈值"
+                    placeholder={t('diag.threshold')}
                     value={alarmThreshold}
                     onChange={(e) => setAlarmThreshold(e.target.value)}
                     className="w-24 px-2 py-1.5 border border-slate-300 rounded-md text-xs font-mono"
                   />
-                  <span className="text-[11px] text-slate-400">回差</span>
+                  <span className="text-[11px] text-slate-400">{t('diag.hysteresis')}</span>
                   <input
                     type="text"
                     value={alarmHyst}

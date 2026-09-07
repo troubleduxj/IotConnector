@@ -747,7 +747,10 @@ async function main(): Promise<void> {
     return { ok: true, frames: getFrames(id, Math.min(200, Number(q.limit ?? 100)), dir) };
   });
 
-  app.get('/api/alarms/history', async (req) => {
+  app.get('/api/alarms/history', async (req, reply) => {
+    if (!storage.enabled) {
+      return reply.code(503).send({ ok: false, error: 'TDengine storage disabled (TDENGINE_URL not set)', total: 0, events: [] });
+    }
     const q = (req.query ?? {}) as { tagId?: string; state?: string; start?: string; end?: string; limit?: string; offset?: string };
     const limit = Math.min(200, Math.max(1, Number(q.limit ?? 50)));
     const offset = Math.max(0, Number(q.offset ?? 0));

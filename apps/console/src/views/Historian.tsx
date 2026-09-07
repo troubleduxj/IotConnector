@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { fetchHistory, fetchGatewayTags, type GatewayTag, type HistorySeries } from '../api';
 import { useRuntime } from '../store/runtime';
+import { useI18n } from '../i18n';
 import {
   Calendar, Download, Search, RefreshCw, Layers, CheckSquare, Square,
   X, Filter, Eye, EyeOff, BarChart2, TrendingUp, Sliders, Image, FileSpreadsheet,
@@ -63,6 +64,7 @@ function presetSpanMs(preset: TimePreset, customStart: string, customEnd: string
 }
 
 export default function Historian() {
+  const { t } = useI18n();
   // Tag Selection & Search
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>(['1', '2', '5']); // Default: pH, Temp, Speed
   const [searchQuery, setSearchQuery] = useState('');
@@ -281,16 +283,16 @@ export default function Historian() {
   const handleSelectQuickGroup = (type: 'all' | 'reactors' | 'drives' | 'clear') => {
     if (type === 'all') {
       setSelectedTagIds(gatewayTags.slice(0, 6).map(t => t.id));
-      showToast('已载入前 6 个工艺位号。');
+      showToast(t('hist.toast.top6'));
     } else if (type === 'reactors') {
       setSelectedTagIds(gatewayTags.filter(t => t.channelId.includes('s7-01')).map(t => t.id));
-      showToast('已选择反应釜 R0021 参数。');
+      showToast(t('hist.toast.reactor'));
     } else if (type === 'drives') {
       setSelectedTagIds(gatewayTags.filter(t => t.channelId.includes('mb-01')).map(t => t.id));
-      showToast('已选择传动与电机位号。');
+      showToast(t('hist.toast.drives'));
     } else {
       setSelectedTagIds(gatewayTags.length ? [gatewayTags[0].id] : []);
-      showToast('已重置为单个位号。');
+      showToast(t('hist.toast.reset'));
     }
   };
 
@@ -777,7 +779,7 @@ export default function Historian() {
           {/* 分页控件 */}
           <div className="px-3 py-2 border-t border-slate-100 bg-white flex items-center justify-between text-[11px]">
             <span className="font-mono text-slate-400">
-              {filteredAvailableTags.length} 个位号 · 第 {safeTagPage + 1} / {tagTotalPages} 页
+              {t('hist.pagination', { n: filteredAvailableTags.length, page: safeTagPage + 1, total: tagTotalPages })}
             </span>
             <div className="flex items-center gap-1">
               <button
@@ -847,12 +849,12 @@ export default function Historian() {
           {dataError && (
             <div className="mb-3 px-3 py-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
               <AlertTriangle className="w-3.5 h-3.5" />
-              <span>历史查询失败：{dataError}（请确认网关 TDengine 存储已启用且运行中）</span>
+              <span>{t('hist.queryFailed', { error: dataError })}</span>
             </div>
           )}
           {!isLoading && !dataError && historyData && chartData.length === 0 && (
             <div className="mb-3 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-500">
-              所选时间窗内无历史数据（新写入的数据约需数秒聚合后可见）。
+              {t('hist.noData')}
             </div>
           )}
 

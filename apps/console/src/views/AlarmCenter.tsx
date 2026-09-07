@@ -84,10 +84,11 @@ export default function AlarmCenter() {
       offset: p * HISTORY_PAGE_SIZE,
     })
       .then((res) => {
-        setEvents(res.events);
-        setHistoryTotal(res.total);
+        setEvents(res.events ?? []);
+        setHistoryTotal(res.total ?? 0);
         setPage(p);
       })
+      .catch(() => {})
       .finally(() => setHistoryLoading(false));
   };
 
@@ -126,16 +127,16 @@ export default function AlarmCenter() {
     try {
       const saved = await saveNotifications(notify);
       setNotify(saved);
-      showToast('通知配置已保存。');
+      showToast(t('alarms.notify.savedToast'));
     } finally {
       setNotifyBusy(false);
     }
   };
 
   const testNotify = async (channel: string): Promise<void> => {
-    setNotifyTest({ channel, ok: true, msg: '发送中…' });
+    setNotifyTest({ channel, ok: true, msg: t('alarms.notify.testing') });
     const res = await testNotificationChannel(channel);
-    setNotifyTest({ channel, ok: res.ok, msg: res.ok ? '测试消息已发送' : res.error ?? '发送失败' });
+    setNotifyTest({ channel, ok: res.ok, msg: res.ok ? t('alarms.notify.testOk') : res.error ?? t('alarms.notify.testFail') });
   };
 
   const showToastMsg = (msg: string): void => {
@@ -167,7 +168,7 @@ export default function AlarmCenter() {
   };
 
   const removeRule = async (rule: AlarmRule): Promise<void> => {
-    if (!window.confirm(`确认删除规则 "${tagName(rule.tagId)} ${rule.kind === 'high' ? '>' : '<'} ${rule.threshold}"？`)) return;
+    if (!window.confirm(t('alarms.confirmDelete', { rule: `${tagName(rule.tagId)} ${rule.kind === 'high' ? '>' : '<'} ${rule.threshold}` }))) return;
     await deleteAlarm(rule.id);
     setRules((prev) => prev.filter((r) => r.id !== rule.id));
     fetchAlarms().then((d) => setActive(d.active)).catch(() => {});
@@ -213,7 +214,7 @@ export default function AlarmCenter() {
                       onClick={() => void ackAlarm(a.id).then(() => fetchAlarms().then((d) => { setRules(d.rules); setActive(d.active); }).catch(() => {}))}
                       className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-rose-600 border border-rose-300 hover:bg-rose-100"
                     >
-                      确认
+                      {t('alarms.ack')}
                     </button>
                   )}
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">ACTIVE</span>
@@ -229,9 +230,9 @@ export default function AlarmCenter() {
         <div className="px-6 border-b border-slate-200 flex gap-1">
           {(
             [
-              ['rules', `告警规则 (${rules.length})`],
-              ['history', `历史事件 (${historyTotal})`],
-              ['notify', '通知配置'],
+              ['rules', t('alarms.tabRules', { n: rules.length })],
+              ['history', t('alarms.tabHistory', { n: historyTotal })],
+              ['notify', t('alarms.tabNotify')],
             ] as Array<[Tab, string]>
           ).map(([key, label]) => (
             <button
@@ -250,7 +251,7 @@ export default function AlarmCenter() {
         {tab === 'rules' && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <p className="text-xs text-slate-500">限值告警（越上限/越下限）+ 回差消抖。规则由网关实时评估。</p>
+              <p className="text-xs text-slate-500">{t('alarms.rulesHint')}</p>
               <button
                 onClick={() =>
                   setRuleModal({
@@ -261,18 +262,18 @@ export default function AlarmCenter() {
                 disabled={tags.length === 0}
                 className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-50"
               >
-                <Plus className="w-3.5 h-3.5 mr-1" /> 新增规则
+                <Plus className="w-3.5 h-3.5 mr-1" /> {t('alarms.addRule')}
               </button>
             </div>
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase font-bold border-b border-slate-200">
-                  <th className="px-4 py-2.5">位号</th>
-                  <th className="px-4 py-2.5">规则</th>
-                  <th className="px-4 py-2.5">回差</th>
-                  <th className="px-4 py-2.5">状态</th>
-                  <th className="px-4 py-2.5">说明</th>
-                  <th className="px-4 py-2.5 text-right">操作</th>
+                  <th className="px-4 py-2.5">{t('alarms.col.tag')}</th>
+                  <th className="px-4 py-2.5">{t('alarms.col.rule')}</th>
+                  <th className="px-4 py-2.5">{t('alarms.col.hysteresis')}</th>
+                  <th className="px-4 py-2.5">{t('alarms.col.state')}</th>
+                  <th className="px-4 py-2.5">{t('alarms.col.desc')}</th>
+                  <th className="px-4 py-2.5 text-right">{t('alarms.col.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -287,18 +288,18 @@ export default function AlarmCenter() {
                     <td className="px-4 py-2.5 font-mono text-slate-500">±{rule.hysteresis}</td>
                     <td className="px-4 py-2.5">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${rule.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                        {rule.enabled ? <Check className="w-3 h-3" /> : null} {rule.enabled ? '启用' : '停用'}
+                        {rule.enabled ? <Check className="w-3 h-3" /> : null} {rule.enabled ? t('alarms.enabled') : t('alarms.disabled')}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-slate-500">{rule.message ?? '—'}</td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       <button onClick={() => void toggleRule(rule)} className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 mr-3">
-                        {rule.enabled ? '停用' : '启用'}
+                        {rule.enabled ? t('alarms.disable') : t('alarms.enable')}
                       </button>
-                      <button onClick={() => setRuleModal({ mode: 'edit', draft: { ...rule } })} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 mr-1" title="编辑">
+                      <button onClick={() => setRuleModal({ mode: 'edit', draft: { ...rule } })} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 mr-1" title={t('alarms.edit')}>
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => void removeRule(rule)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50" title="删除">
+                      <button onClick={() => void removeRule(rule)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50" title={t('alarms.delete')}>
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
@@ -338,24 +339,24 @@ export default function AlarmCenter() {
                 onChange={(e) => setFilterRange(e.target.value as RangeFilter)}
                 className="px-2 py-1.5 border border-slate-300 rounded-md text-xs font-medium"
               >
-                <option value="">时间：全部</option>
-                <option value="1h">近 1 小时</option>
-                <option value="24h">近 24 小时</option>
-                <option value="7d">近 7 天</option>
+                <option value="">{t('alarms.filter.time')}：{t('alarms.filter.all')}</option>
+                <option value="1h">{t('alarms.range.1h')}</option>
+                <option value="24h">{t('alarms.range.24h')}</option>
+                <option value="7d">{t('alarms.range.7d')}</option>
               </select>
               {historyLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />}
-              <span className="ml-auto text-xs text-slate-400 font-mono">共 {historyTotal} 条</span>
+              <span className="ml-auto text-xs text-slate-400 font-mono">{t('alarms.totalCount', { n: historyTotal })}</span>
             </div>
 
             <div style={{ minHeight: HISTORY_MIN_H }}>
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="bg-slate-50/70 text-slate-500 text-[10px] uppercase font-bold border-b border-slate-200">
-                    <th className="px-6 py-2.5">时间</th>
-                    <th className="px-6 py-2.5">位号</th>
-                    <th className="px-6 py-2.5">事件</th>
-                    <th className="px-6 py-2.5 text-right">值 / 阈值</th>
-                    <th className="px-6 py-2.5">说明</th>
+                    <th className="px-6 py-2.5">{t('alarms.col.time')}</th>
+                    <th className="px-6 py-2.5">{t('alarms.col.tag')}</th>
+                    <th className="px-6 py-2.5">{t('alarms.col.event')}</th>
+                    <th className="px-6 py-2.5 text-right">{t('alarms.col.valueThreshold')}</th>
+                    <th className="px-6 py-2.5">{t('alarms.col.desc')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -368,9 +369,9 @@ export default function AlarmCenter() {
                           e.state === 'Active' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'
                         }`}>
                           {e.state === 'Active' ? <Bell className="w-3 h-3" /> : <Check className="w-3 h-3" />}
-                          {e.state === 'Active' ? '触发' : '已恢复'}
+                          {e.state === 'Active' ? t('alarms.state.triggered') : t('alarms.state.cleared')}
                         </span>
-                        <span className="ml-2 text-slate-400">{e.kind === 'high' ? '越上限' : '越下限'}</span>
+                        <span className="ml-2 text-slate-400">{e.kind === 'high' ? t('alarms.kind.high') : t('alarms.kind.low')}</span>
                       </td>
                       <td className="px-6 py-2.5 text-right font-mono">
                         <span className="font-bold text-slate-800">{e.value.toFixed(2)}</span>
@@ -394,7 +395,7 @@ export default function AlarmCenter() {
               >
                 <ChevronLeft className="w-3.5 h-3.5" /> {t('alarms.prev')}
               </button>
-              <span className="font-mono text-slate-500">第 {page + 1} 页 / 共 {totalPages} 页</span>
+              <span className="font-mono text-slate-500">{t('alarms.pageInfo', { current: page + 1, total: totalPages })}</span>
               <button
                 onClick={() => queryHistory(page + 1)}
                 disabled={(page + 1) * HISTORY_PAGE_SIZE >= historyTotal || historyLoading}
@@ -424,12 +425,12 @@ export default function AlarmCenter() {
         <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-              <h3 className="font-semibold text-slate-800">{ruleModal.mode === 'add' ? '新增告警规则' : '编辑告警规则'}</h3>
+              <h3 className="font-semibold text-slate-800">{ruleModal.mode === 'add' ? t('alarms.modal.add') : t('alarms.modal.edit')}</h3>
               <button onClick={() => setRuleModal(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">位号 *</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.col.tag')} *</label>
                 <select
                   value={ruleModal.draft.tagId}
                   onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, tagId: e.target.value } })}
@@ -440,18 +441,18 @@ export default function AlarmCenter() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">类型</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.field.kind')}</label>
                   <select
                     value={ruleModal.draft.kind}
                     onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, kind: e.target.value as 'high' | 'low' } })}
                     className="w-full px-2 py-2 border border-slate-300 rounded-md text-sm font-semibold"
                   >
-                    <option value="high">越上限 &gt;</option>
-                    <option value="low">越下限 &lt;</option>
+                    <option value="high">{t('alarms.kind.high')} &gt;</option>
+                    <option value="low">{t('alarms.kind.low')} &lt;</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">阈值 *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.field.threshold')} *</label>
                   <input
                     value={ruleModal.draft.threshold}
                     onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, threshold: Number(e.target.value) } })}
@@ -459,7 +460,7 @@ export default function AlarmCenter() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">回差</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.col.hysteresis')}</label>
                   <input
                     value={ruleModal.draft.hysteresis}
                     onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, hysteresis: Number(e.target.value) } })}
@@ -468,7 +469,7 @@ export default function AlarmCenter() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">说明</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.col.desc')}</label>
                 <input
                   value={ruleModal.draft.message ?? ''}
                   onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, message: e.target.value } })}
@@ -477,13 +478,13 @@ export default function AlarmCenter() {
               </div>
             </div>
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3">
-              <button onClick={() => setRuleModal(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md">取消</button>
+              <button onClick={() => setRuleModal(null)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-md">{t('alarms.cancel')}</button>
               <button
                 onClick={() => void submitRule()}
                 disabled={ruleBusy}
                 className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 rounded-md flex items-center"
               >
-                {ruleBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} 保存
+                {ruleBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />} {t('alarms.save')}
               </button>
             </div>
           </div>
@@ -504,6 +505,7 @@ function NotifyConfigTab({
   onTest: (channel: string) => void;
   testResult: { channel: string; ok: boolean; msg: string } | null;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const field = 'w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500';
   const label = 'block text-xs font-semibold text-slate-600 mb-1.5';
 
@@ -526,14 +528,14 @@ function NotifyConfigTab({
                   enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
                 }`}
               >
-                {enabled ? '启用' : '停用'}
+                {enabled ? t('alarms.enabled') : t('alarms.disabled')}
               </button>
             )}
             <button
               onClick={() => onTest(key)}
               className="flex items-center px-2 py-0.5 text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 rounded"
             >
-              <Send className="w-3 h-3 mr-0.5" /> 测试
+              <Send className="w-3 h-3 mr-0.5" /> {t('alarms.test')}
             </button>
           </div>
         </div>
@@ -543,7 +545,7 @@ function NotifyConfigTab({
             {test.ok ? '✓ ' : '✗ '}{test.msg}
           </div>
         )}
-        {!enabled && key !== 'webhook' && <div className="px-4 py-1.5 text-[10px] text-slate-400 bg-slate-50">渠道已停用</div>}
+        {!enabled && key !== 'webhook' && <div className="px-4 py-1.5 text-[10px] text-slate-400 bg-slate-50">{t('alarms.channelDisabled')}</div>}
       </div>
     );
   };
@@ -552,8 +554,8 @@ function NotifyConfigTab({
     <div className="p-6 space-y-5">
       <div className="px-4 py-3 rounded-lg bg-indigo-50/60 border border-indigo-100 flex items-center justify-between">
         <div>
-          <div className="text-sm font-bold text-slate-800">告警通知总开关</div>
-          <div className="text-[11px] text-slate-500">活动告警（触发）按下方各渠道开关分发推送；恢复事件不推送。</div>
+          <div className="text-sm font-bold text-slate-800">{t('alarms.notify.master')}</div>
+          <div className="text-[11px] text-slate-500">{t('alarms.notify.masterHint')}</div>
         </div>
         <button
           onClick={() => onChange({ ...cfg, enabled: !cfg.enabled })}
@@ -561,23 +563,23 @@ function NotifyConfigTab({
             cfg.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
           }`}
         >
-          {cfg.enabled ? '已启用' : '已停用'}
+          {cfg.enabled ? t('alarms.notify.on') : t('alarms.notify.off')}
         </button>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {channelCard('webhook', '通用 Webhook', (
+        {channelCard('webhook', t('alarms.channel.webhook'), (
           <div>
-            <label className={label}>Webhook 地址</label>
+            <label className={label}>{t('alarms.field.webhookUrl')}</label>
             <input value={cfg.webhookUrl} onChange={(e) => onChange({ ...cfg, webhookUrl: e.target.value })} placeholder="https://…" className={field} />
-            <p className="text-[10px] text-slate-400 mt-1">POST JSON：{`{ event, tagName, kind, value, threshold, message }`}</p>
+            <p className="text-[10px] text-slate-400 mt-1">{t('alarms.field.postJson')}{`{ event, tagName, kind, value, threshold, message }`}</p>
           </div>
         ))}
 
-        {channelCard('dingtalk', '钉钉机器人（支持加签）', (
+        {channelCard('dingtalk', t('alarms.channel.dingtalk'), (
           <div className="space-y-2">
             <div>
-              <label className={label}>Webhook 地址</label>
+              <label className={label}>{t('alarms.field.webhookUrl')}</label>
               <input
                 value={cfg.dingtalk.webhookUrl}
                 onChange={(e) => onChange({ ...cfg, dingtalk: { ...cfg.dingtalk, webhookUrl: e.target.value } })}
@@ -586,7 +588,7 @@ function NotifyConfigTab({
               />
             </div>
             <div>
-              <label className={label}>加签密钥（可选）</label>
+              <label className={label}>{t('alarms.field.secret')}</label>
               <input
                 value={cfg.dingtalk.secret}
                 onChange={(e) => onChange({ ...cfg, dingtalk: { ...cfg.dingtalk, secret: e.target.value } })}
@@ -597,9 +599,9 @@ function NotifyConfigTab({
           </div>
         ))}
 
-        {channelCard('wecom', '企业微信机器人', (
+        {channelCard('wecom', t('alarms.channel.wecom'), (
           <div>
-            <label className={label}>Webhook 地址</label>
+            <label className={label}>{t('alarms.field.webhookUrl')}</label>
             <input
               value={cfg.wecom.webhookUrl}
               onChange={(e) => onChange({ ...cfg, wecom: { ...cfg.wecom, webhookUrl: e.target.value } })}
@@ -609,14 +611,14 @@ function NotifyConfigTab({
           </div>
         ))}
 
-        {channelCard('email', '邮件（SMTP）', (
+        {channelCard('email', t('alarms.channel.email'), (
           <div className="grid grid-cols-2 gap-2">
             <div className="col-span-2">
-              <label className={label}>SMTP 主机</label>
+              <label className={label}>{t('alarms.field.smtpHost')}</label>
               <input value={cfg.email.host} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, host: e.target.value } })} placeholder="smtp.example.com" className={field} />
             </div>
             <div>
-              <label className={label}>端口</label>
+              <label className={label}>{t('alarms.field.port')}</label>
               <input value={cfg.email.port} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, port: Number(e.target.value) } })} className={field} />
             </div>
             <div>
@@ -629,15 +631,15 @@ function NotifyConfigTab({
               </button>
             </div>
             <div>
-              <label className={label}>账号</label>
+              <label className={label}>{t('alarms.field.username')}</label>
               <input value={cfg.email.username} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, username: e.target.value } })} className={field} />
             </div>
             <div>
-              <label className={label}>口令</label>
+              <label className={label}>{t('alarms.field.password')}</label>
               <input type="password" value={cfg.email.password} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, password: e.target.value } })} className={field} />
             </div>
             <div className="col-span-2">
-              <label className={label}>收件人（逗号分隔）</label>
+              <label className={label}>{t('alarms.field.recipients')}</label>
               <input value={cfg.email.to} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, to: e.target.value } })} placeholder="a@x.com, b@x.com" className={field} />
             </div>
           </div>
@@ -650,7 +652,7 @@ function NotifyConfigTab({
           disabled={busy}
           className="flex items-center px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
         >
-          {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存通知配置
+          {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('alarms.notify.save')}
         </button>
       </div>
     </div>

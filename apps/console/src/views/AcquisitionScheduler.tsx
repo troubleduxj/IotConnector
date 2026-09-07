@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Timer } from 'lucide-react';
 import { fetchScheduler, type SchedulerStats } from '../api';
+import { useI18n } from '../i18n';
 
 /** 采集调度（PRD M3）：真实引擎指标 —— 每通道采样率/状态/错误与全局吞吐。 */
 
@@ -13,6 +14,7 @@ function barColor(ratio: number): string {
 export default function AcquisitionScheduler() {
   const [stats, setStats] = useState<SchedulerStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     const load = (): void => {
@@ -24,27 +26,27 @@ export default function AcquisitionScheduler() {
   }, []);
 
   const kpis = [
-    { label: '采样总吞吐', value: `${stats?.rateHz ?? 0} /s` },
-    { label: '在线通道', value: `${stats?.onlineChannels ?? 0} / ${stats?.channels.length ?? 0}` },
-    { label: '累计采样', value: stats ? stats.totalSamples.toLocaleString() : '—' },
-    { label: '运行时长', value: stats ? `${Math.floor(stats.uptimeSec / 60)} 分` : '—' },
+    { label: t('sched.kpiThroughput'), value: `${stats?.rateHz ?? 0} /s` },
+    { label: t('sched.kpiOnline'), value: `${stats?.onlineChannels ?? 0} / ${stats?.channels.length ?? 0}` },
+    { label: t('sched.kpiSamples'), value: stats ? stats.totalSamples.toLocaleString() : '—' },
+    { label: t('sched.kpiUptime'), value: stats ? t('sched.minutes', { n: Math.floor(stats.uptimeSec / 60) }) : '—' },
   ];
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">采集调度</h2>
-          <p className="text-sm text-slate-500 mt-1">引擎实时指标：每通道采样率、周期利用率与错误（3 秒自动刷新）。</p>
+          <h2 className="text-lg font-bold text-slate-800">{t('sched.title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('sched.subtitle')}</p>
         </div>
         <span className="flex items-center gap-2 text-sm font-semibold text-slate-600">
           <span className={`w-2 h-2 rounded-full ${stats ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-          {stats ? 'Scheduler Active' : '加载中…'}
+          {stats ? 'Scheduler Active' : t('sched.loading')}
         </span>
       </div>
 
       {error && (
-        <div className="px-4 py-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">指标加载失败：{error}</div>
+        <div className="px-4 py-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">{t('sched.loadError', { error })}</div>
       )}
 
       {/* KPI */}
@@ -64,12 +66,12 @@ export default function AcquisitionScheduler() {
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-            <Timer className="w-4 h-4 text-indigo-600" /> 通道采集负载（周期利用率）
+            <Timer className="w-4 h-4 text-indigo-600" /> {t('sched.channelLoad')}
           </h3>
           <div className="flex items-center gap-4 text-[11px] font-medium text-slate-500">
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-indigo-500" /> 顺畅 (&lt;50%)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400" /> 偏高 (50-80%)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-rose-500" /> 饱和 (&gt;80%)</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-indigo-500" /> {t('sched.legendOk')}</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-amber-400" /> {t('sched.legendHigh')}</span>
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-rose-500" /> {t('sched.legendSaturated')}</span>
           </div>
         </div>
         <div className="p-6 space-y-4">
@@ -91,7 +93,7 @@ export default function AcquisitionScheduler() {
                     </span>
                   </div>
                   <span className="font-mono text-slate-500">
-                    {c.rateHz} samples/s · 周期 {c.pollIntervalMs}ms · {c.tags} 位号
+                    {t('sched.channelStats', { rate: c.rateHz, period: c.pollIntervalMs, tags: c.tags })}
                     {c.lastError ? <span className="text-rose-500 ml-2">{c.lastError.slice(0, 40)}</span> : null}
                   </span>
                 </div>
@@ -102,7 +104,7 @@ export default function AcquisitionScheduler() {
             );
           })}
           {(!stats || stats.channels.length === 0) && (
-            <div className="text-xs text-slate-400 py-6 text-center">暂无通道数据。</div>
+            <div className="text-xs text-slate-400 py-6 text-center">{t('sched.noChannels')}</div>
           )}
         </div>
       </div>

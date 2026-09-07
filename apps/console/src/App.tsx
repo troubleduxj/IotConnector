@@ -28,7 +28,7 @@ import { Toaster } from './components/Toast';
 
 type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'alarms' | 'scripts' | 'settings';
 
-const ROLE_LABEL: Record<string, string> = { admin: '管理员', engineer: '工程师', operator: '操作员' };
+const ROLE_KEYS: Record<string, string> = { admin: 'role.admin', engineer: 'role.engineer', operator: 'role.operator' };
 
 export default function App(): React.JSX.Element {
   return (
@@ -195,7 +195,7 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
             <button
               onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
               className="flex items-center gap-1.5 px-2 py-1.5 text-xs font-bold text-slate-500 hover:text-indigo-600 border border-slate-200 rounded-md hover:border-indigo-300 transition-colors"
-              title="切换语言 / Switch language"
+              title={t('header.switchLang')}
             >
               <Languages className="w-4 h-4" />
               {t('header.lang')}
@@ -206,7 +206,7 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
               </div>
               <div className="hidden sm:block leading-tight">
                 <div className="text-xs font-bold text-slate-800">{user.username}</div>
-                <div className="text-[10px] text-slate-400">{ROLE_LABEL[user.role] ?? user.role}</div>
+                <div className="text-[10px] text-slate-400">{user.role in ROLE_KEYS ? t(ROLE_KEYS[user.role]) : user.role}</div>
               </div>
               <button
                 onClick={() => void doLogout()}

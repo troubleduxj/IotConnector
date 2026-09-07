@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2 } from 'lucide-react';
 import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus } from '../api';
+import { useI18n } from '../i18n';
 
 interface NotificationConfig {
   enabled: boolean;
@@ -20,6 +21,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [northbound, setNorthbound] = useState<NorthboundConfig | null>(null);
   const [nbStatus, setNbStatus] = useState<NorthboundStatus | null>(null);
   const [nbBusy, setNbBusy] = useState(false);
+  const { t } = useI18n();
   const showToastMsg = (msg: string): void => {
     window.dispatchEvent(new CustomEvent('fb-toast', { detail: { message: msg, ok: true } }));
   };
@@ -50,7 +52,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
       const d = await saveNorthbound(northbound);
       setNorthbound(d.config);
       setNbStatus(d.status);
-      showToastMsg('北向 MQTT 配置已保存并生效。');
+      showToastMsg(t('sys.nb.saved'));
     } finally {
       setNbBusy(false);
     }
@@ -62,7 +64,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(notify),
     });
-    setNotifyToast('通知配置已保存。');
+    setNotifyToast(t('sys.notify.saved'));
     setTimeout(() => setNotifyToast(null), 2500);
   };
 
@@ -321,10 +323,10 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
             <div className="flex items-center gap-3">
               <div className="p-2 bg-teal-100 text-teal-600 rounded-lg"><Wifi className="w-5 h-5" /></div>
               <div>
-                <h3 className="font-bold text-slate-800">北向 MQTT（Sparkplug B）</h3>
+                <h3 className="font-bold text-slate-800">{t('sys.nb.title')}</h3>
                 <p className="text-[11px] text-slate-400">
-                  spBv1.0 发布：NBIRTH/DBIRTH/DDATA/NDEATH + Reliable Outbox
-                  {nbStatus && ` · 队列 ${nbStatus.queued} · 已发布 ${nbStatus.published}`}
+                  {t('sys.nb.publishLine')}
+                  {nbStatus && t('sys.nb.queueStatus', { queued: nbStatus.queued, published: nbStatus.published })}
                 </p>
               </div>
             </div>
@@ -334,7 +336,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
                 northbound?.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
               }`}
             >
-              {northbound?.enabled ? '已启用' : '已停用'}
+              {northbound?.enabled ? t('sys.nb.enabled') : t('sys.nb.disabled')}
             </button>
           </div>
           {northbound && (
@@ -368,11 +370,11 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
               </div>
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[11px] text-slate-400 font-mono">
-                  {nbStatus?.connected ? '已连接 Broker' : nbStatus?.lastError ? `错误：${nbStatus.lastError}` : '未连接'}
+                  {nbStatus?.connected ? t('sys.nb.connected') : nbStatus?.lastError ? t('sys.nb.error', { error: nbStatus.lastError }) : t('sys.nb.disconnected')}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => void rebirthNorthbound().then(() => showToastMsg('已触发 REBIRTH（重新广播 BIRTH）。'))}
+                    onClick={() => void rebirthNorthbound().then(() => showToastMsg(t('sys.nb.rebirthToast')))}
                     className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
                   >
                     REBIRTH
@@ -382,7 +384,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
                     disabled={nbBusy}
                     className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
                   >
-                    {nbBusy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存并生效
+                    {nbBusy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('sys.nb.saveApply')}
                   </button>
                 </div>
               </div>

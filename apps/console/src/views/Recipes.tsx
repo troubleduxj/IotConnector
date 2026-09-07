@@ -4,10 +4,12 @@ import {
   fetchRecipes, createRecipe, updateRecipe, deleteRecipe, downloadRecipe,
   fetchGatewayTags, type Recipe, type GatewayTag, type DownloadResultItem,
 } from '../api';
+import { useI18n } from '../i18n';
 
 /** 配方管理（PRD M6）：位号绑定参数集 + 批量下发（下发前显示 diff，逐项回报结果）。 */
 
 export default function Recipes() {
+  const { t } = useI18n();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [tags, setTags] = useState<GatewayTag[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -42,7 +44,7 @@ export default function Recipes() {
       if (selected) await updateRecipe(draft.id, draft);
       else await createRecipe(draft);
       await load();
-      showToast('配方已保存。');
+      showToast(t('rec.toastSaved'));
     } finally {
       setBusy(false);
     }
@@ -50,10 +52,10 @@ export default function Recipes() {
 
   const remove = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(`确认删除配方 "${selected.name}"？`)) return;
+    if (!window.confirm(t('rec.confirmDelete', { name: selected.name }))) return;
     await deleteRecipe(selected.id);
     await load();
-    showToast('已删除。');
+    showToast(t('rec.toastDeleted'));
   };
 
   const doDownload = async (): Promise<void> => {
@@ -62,7 +64,7 @@ export default function Recipes() {
       const tag = tags.find((t) => t.id === it.tagId);
       return `${tag?.name ?? it.tagId}: ${it.value}`;
     });
-    if (!window.confirm(`确认将配方 "${draft.name}" 下发到控制器？\n\n${lines.join('\n')}`)) return;
+    if (!window.confirm(t('rec.confirmDownload', { name: draft.name, lines: lines.join('\n') }))) return;
     setBusy(true);
     try {
       const res = await downloadRecipe(draft.id);
@@ -73,8 +75,8 @@ export default function Recipes() {
   };
 
   const currentValue = (id: string): string => {
-    const t = tags.find((tg) => tg.id === id);
-    return t ? `${t.name} 当前值可见于参数诊断页` : '';
+    const tag = tags.find((tg) => tg.id === id);
+    return tag ? t('rec.currentValueHint', { name: tag.name }) : '';
   };
 
   return (
@@ -83,21 +85,21 @@ export default function Recipes() {
 
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">配方管理</h2>
-          <p className="text-sm text-slate-500 mt-1">位号绑定参数集，一键批量下发到控制器（下发前二次确认）。</p>
+          <h2 className="text-lg font-bold text-slate-800">{t('rec.title')}</h2>
+          <p className="text-sm text-slate-500 mt-1">{t('rec.subtitle')}</p>
         </div>
         <button
-          onClick={() => { void createRecipe({ name: '新配方', description: '', items: [] }).then((r) => load().then(() => setSelectedId(r.id))); }}
+          onClick={() => { void createRecipe({ name: t('rec.defaultRecipeName'), description: '', items: [] }).then((r) => load().then(() => setSelectedId(r.id))); }}
           className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700"
         >
-          <Plus className="w-4 h-4 mr-2" /> 新增配方
+          <Plus className="w-4 h-4 mr-2" /> {t('rec.newRecipe')}
         </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50/70">
-            <span className="font-bold text-slate-800 text-sm">配方库 ({recipes.length})</span>
+            <span className="font-bold text-slate-800 text-sm">{t('rec.libraryCount', { n: recipes.length })}</span>
           </div>
           <div className="divide-y divide-slate-100">
             {recipes.map((recipe) => (
@@ -107,16 +109,16 @@ export default function Recipes() {
                 className={`w-full text-left p-3.5 transition-colors ${recipe.id === selectedId ? 'bg-indigo-50/50 border-l-2 border-indigo-500' : 'hover:bg-slate-50 border-l-2 border-transparent'}`}
               >
                 <div className="font-bold text-xs text-slate-800">{recipe.name}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5 truncate">{recipe.description || '—'} · {recipe.items.length} 参数</div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">{recipe.description || '—'} · {t('rec.paramCount', { n: recipe.items.length })}</div>
               </button>
             ))}
-            {recipes.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">暂无配方。</div>}
+            {recipes.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">{t('rec.emptyRecipes')}</div>}
           </div>
         </div>
 
         <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {!draft ? (
-            <div className="p-12 text-center text-slate-400 text-sm">选择左侧配方。</div>
+            <div className="p-12 text-center text-slate-400 text-sm">{t('rec.selectPrompt')}</div>
           ) : (
             <div className="p-6 space-y-5">
               <div className="flex items-center justify-between">
@@ -128,10 +130,10 @@ export default function Recipes() {
                 <div className="flex items-center gap-2">
                   <button onClick={() => void remove()} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md"><Trash2 className="w-4 h-4" /></button>
                   <button onClick={() => void save()} disabled={busy} className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60">
-                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 保存
+                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('rec.save')}
                   </button>
                   <button onClick={() => void doDownload()} disabled={busy || draft.items.length === 0} className="flex items-center px-3.5 py-1.5 bg-slate-800 text-white text-xs font-bold rounded-md hover:bg-slate-700 disabled:opacity-60">
-                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />} 下发到控制器
+                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />} {t('rec.download')}
                   </button>
                 </div>
               </div>
@@ -139,18 +141,18 @@ export default function Recipes() {
               <input
                 value={draft.description}
                 onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-                placeholder="配方说明"
+                placeholder={t('rec.descriptionPlaceholder')}
                 className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
               />
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">参数集（位号 → 目标值）</h4>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('rec.paramSetTitle')}</h4>
                   <button
                     onClick={() => setDraft({ ...draft, items: [...draft.items, { tagId: tags[0]?.id ?? '', value: 0 }] })}
                     className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
                   >
-                    <Plus className="w-3 h-3" /> 加参数
+                    <Plus className="w-3 h-3" /> {t('rec.addParam')}
                   </button>
                 </div>
                 <div className="space-y-2">
@@ -183,7 +185,7 @@ export default function Recipes() {
                       </button>
                     </div>
                   ))}
-                  {draft.items.length === 0 && <div className="text-xs text-slate-400 py-2">尚未配置参数。</div>}
+                  {draft.items.length === 0 && <div className="text-xs text-slate-400 py-2">{t('rec.noParams')}</div>}
                 </div>
               </div>
 
@@ -191,7 +193,7 @@ export default function Recipes() {
                 <div className={`rounded-lg border overflow-hidden text-xs ${downloadResults.ok ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                   <div className="px-4 py-2 font-bold flex items-center gap-2 text-slate-800">
                     {downloadResults.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-amber-600" />}
-                    下发完成（{downloadResults.results.filter((r) => r.ok).length}/{downloadResults.results.length} 成功）
+                    {t('rec.downloadSummary', { ok: downloadResults.results.filter((r) => r.ok).length, total: downloadResults.results.length })}
                   </div>
                   <div className="divide-y divide-white/60">
                     {downloadResults.results.map((r, i) => (
@@ -206,7 +208,7 @@ export default function Recipes() {
                 </div>
               )}
 
-              <p className="text-[11px] text-slate-400">提示：参数的当前值可在「参数诊断」页查看；下发前会显示完整 diff 供确认。</p>
+              <p className="text-[11px] text-slate-400">{t('rec.hint')}</p>
               {currentValue('') && null}
             </div>
           )}

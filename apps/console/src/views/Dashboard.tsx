@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { mockTags } from '../data';
+import { useI18n } from '../i18n';
 import { useRuntime } from '../store/runtime';
 import { ackAlarm, fetchAlarms, type AlarmsResponse } from '../api';
 import { Server, Activity, AlertTriangle, CheckCircle, Bell } from 'lucide-react';
@@ -11,6 +12,7 @@ function formatValue(v: number | string | boolean): string {
 }
 
 export default function Dashboard() {
+  const { t } = useI18n();
   const { liveValues, channels, status, lastUpdateTs, connect } = useRuntime();
   const [alarms, setAlarms] = useState<AlarmsResponse | null>(null);
 
@@ -68,7 +70,7 @@ export default function Dashboard() {
             {activeAlarms.length}
           </div>
           <div className="text-amber-600/80 text-xs mt-2">
-            {activeAlarms.length > 0 ? '活动告警待处理' : 'Bad 质量位号'}
+            {activeAlarms.length > 0 ? t('dash.kpi.alarmsPending') : t('dash.kpi.badQualityTags')}
           </div>
         </div>
       </div>
@@ -85,14 +87,14 @@ export default function Dashboard() {
               </span>
             )}
           </h3>
-          <span className="text-xs text-slate-400 font-mono">规则 {alarms?.rules.length ?? 0} 条</span>
+          <span className="text-xs text-slate-400 font-mono">{t('dash.alarms.ruleCount', { n: alarms?.rules.length ?? 0 })}</span>
         </div>
         <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
             <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Active</div>
             {activeAlarms.length === 0 ? (
               <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
-                无活动告警 ✓
+                {t('dash.alarms.emptyActive')}
               </div>
             ) : (
               <div className="space-y-2">
@@ -101,10 +103,10 @@ export default function Dashboard() {
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-rose-800 truncate">
                         {a.tagName} <span className="font-mono">{a.kind === 'high' ? '>' : '<'} {a.threshold}</span>
-                        {a.ack && <span className="ml-1.5 text-[10px] text-slate-500 font-normal">已确认({a.ack.user})</span>}
+                        {a.ack && <span className="ml-1.5 text-[10px] text-slate-500 font-normal">{t('dash.alarms.ackedBy', { user: a.ack.user })}</span>}
                       </div>
                       <div className="text-[10px] text-rose-500 font-mono">
-                        当前 {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}
+                        {t('dash.alarms.currentValue', { value: a.value.toFixed(2), time: new Date(a.ts).toLocaleTimeString() })}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -113,7 +115,7 @@ export default function Dashboard() {
                           onClick={() => void ackAlarm(a.id).then(() => fetchAlarms().then(setAlarms).catch(() => {}))}
                           className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-rose-600 border border-rose-300 hover:bg-rose-100"
                         >
-                          确认
+                          {t('dash.alarms.ack')}
                         </button>
                       )}
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
@@ -129,14 +131,14 @@ export default function Dashboard() {
             <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Recent Events</div>
             {recentAlarms.length === 0 ? (
               <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
-                暂无事件
+                {t('dash.alarms.noEvents')}
               </div>
             ) : (
               <div className="space-y-1.5 max-h-32 overflow-y-auto">
                 {recentAlarms.map((a) => (
                   <div key={a.id} className="px-3 py-1.5 rounded-md bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px]">
                     <span className={`font-bold ${a.state === 'Active' ? 'text-rose-600' : 'text-slate-500'}`}>
-                      {a.tagName} {a.state === 'Active' ? '触发' : '已恢复'}
+                      {a.tagName} {a.state === 'Active' ? t('dash.alarms.triggered') : t('dash.alarms.recovered')}
                     </span>
                     <span className="font-mono text-slate-400">
                       {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}

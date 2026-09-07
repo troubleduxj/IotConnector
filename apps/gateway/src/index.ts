@@ -403,6 +403,7 @@ async function main(): Promise<void> {
         tagId,
         name: tag.name,
         unit: tag.unit,
+        dataType: tag.dataType, // Bool: val 已编码 0/1，前端解码显示
         engMin: tag.engMin ?? null,
         engMax: tag.engMax ?? null,
         intervalSec,

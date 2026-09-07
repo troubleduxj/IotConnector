@@ -52,6 +52,8 @@ interface TagStat {
   quality: 'Good' | 'Uncertain' | 'Bad' | 'NoData';
   /** #5 数据超出工程量程时记录量程文本（如 "[0, 100]"） */
   outOfRange?: string;
+  /** Bool 位号（val 已编码 0/1，展示层解码 false/true） */
+  isBool?: boolean;
 }
 
 /** #5 自定义位号组合预设（localStorage 持久化，最多保留 8 个） */
@@ -274,6 +276,7 @@ export default function Historian() {
         tagId: tag.id,
         name: series.name ?? tag.name,
         unit: series.unit ?? tag.unit,
+        isBool: (series.dataType ?? tag.dataType) === 'Bool',
         color: tag.color,
         min: Number((st.min ?? 0).toFixed(2)),
         max: Number((st.max ?? 0).toFixed(2)),
@@ -1084,6 +1087,8 @@ export default function Historian() {
                 const tagMeta = activeTags.find(t => t.id === stat.tagId);
                 const delta = Number((stat.max - stat.min).toFixed(2));
 
+                const fmtVal = (v: number): string | number =>
+                  stat.isBool ? (v >= 0.5 ? 'true' : 'false') : v;
                 return (
                   <tr key={stat.tagId} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-4 font-bold flex items-center gap-2">
@@ -1097,17 +1102,17 @@ export default function Historian() {
                       {stat.unit || '-'}
                     </td>
                     <td className={`py-3 px-4 text-right font-mono font-bold ${stat.quality === 'Bad' ? 'text-slate-400' : 'text-indigo-600'}`}>
-                      {stat.current}
+                      {fmtVal(stat.current)}
                     </td>
                     <td className="py-3 px-4 text-right font-mono text-emerald-700" title={stat.outOfRange ? t('hist.range.cell', { range: stat.outOfRange }) : undefined}>
-                      {stat.min}
+                      {fmtVal(stat.min)}
                     </td>
                     <td className={`py-3 px-4 text-right font-mono ${stat.outOfRange ? 'text-amber-700 font-bold' : 'text-rose-700'}`}>
                       {stat.outOfRange && <AlertTriangle className="w-3 h-3 inline mr-1 -mt-0.5 text-amber-500" />}
-                      {stat.max}
+                      {fmtVal(stat.max)}
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-semibold text-slate-800">
-                      {stat.avg}
+                      {stat.isBool ? '—' : stat.avg}
                     </td>
                     <td className="py-3 px-4 text-right font-mono text-slate-600">
                       ±{stat.stdDev}

@@ -42,6 +42,7 @@ export class TDengineWriter {
   private queue: PendingPoint[] = [];
   private state: StorageStatus['state'];
   private written = 0;
+  private dropped = 0;
   private error?: string;
   private flushTimer?: NodeJS.Timeout;
   private healthTimer?: NodeJS.Timeout;
@@ -70,6 +71,7 @@ export class TDengineWriter {
       state: this.state,
       queued: this.queue.length,
       written: this.written,
+      dropped: this.dropped,
       error: this.error,
     };
   }
@@ -148,17 +150,27 @@ export class TDengineWriter {
   }
 
   enqueue(update: TagValueUpdate, tag: Tag): void {
-    if (!this.cfg.url || typeof update.value !== 'number') return;
+    if (!this.cfg.url) return;
+    // Bool 编码 0/1 入 DOUBLE 超级表（data_type TAG 区分，查询侧还原）；String 无法入 DOUBLE 表，计数丢弃
+    let numeric: number;
+    if (typeof update.value === 'number') numeric = update.value;
+    else if (typeof update.value === 'boolean') numeric = update.value ? 1 : 0;
+    else {
+      this.dropped += 1;
+      return;
+    }
     this.queue.push({
       child: childTableName(tag.name),
       tagName: escTag(tag.name),
       channel: escTag(tag.channelId),
       dataType: tag.dataType,
-      value: update.value,
+      value: numeric,
       ts: update.ts,
     });
     if (this.queue.length > TDengineWriter.MAX_QUEUE) {
-      this.queue.splice(0, this.queue.length - TDengineWriter.MAX_QUEUE);
+      const excess = this.queue.length - TDengineWriter.MAX_QUEUE;
+      this.queue.splice(0, excess);
+      this.dropped += excess;
       this.error = 'queue overflow, dropped oldest points';
     }
   }

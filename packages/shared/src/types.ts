@@ -86,6 +86,8 @@ export interface StorageStatus {
   queued: number;
   /** 累计写入点数 */
   written: number;
+  /** 因无法入库被丢弃的点数（非数值非布尔、队列溢出） */
+  dropped?: number;
   error?: string;
 }
 

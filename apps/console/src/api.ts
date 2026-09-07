@@ -58,6 +58,8 @@ export interface HistorySeries {
   tagId: string;
   name?: string;
   unit?: string;
+  /** Bool 位号 val 已编码 0/1，展示层解码为 false/true */
+  dataType?: string;
   engMin?: number | null;
   engMax?: number | null;
   intervalSec?: number;

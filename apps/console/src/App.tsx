@@ -3,21 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import {
   LayoutDashboard, Activity, FileSpreadsheet, LineChart, Code, Server, Settings, Database, Timer,
-  Menu, X, Bell, LogOut, Languages,
+  Menu, X, Bell, LogOut, Languages, Loader2,
 } from 'lucide-react';
-import Dashboard from './views/Dashboard';
-import DeviceManagement from './views/DeviceManagement';
-import Diagnostics from './views/Diagnostics';
-import Recipes from './views/Recipes';
-import Historian from './views/Historian';
-import Scripts from './views/Scripts';
-import SystemConfiguration from './views/SystemConfiguration';
-import DataStorage from './views/DataStorage';
-import AcquisitionScheduler from './views/AcquisitionScheduler';
-import AlarmCenter from './views/AlarmCenter';
+// 视图懒加载分包（PRD §12 工程整改）：首屏只打入口包，各视图按需加载
+const Dashboard = React.lazy(() => import('./views/Dashboard'));
+const DeviceManagement = React.lazy(() => import('./views/DeviceManagement'));
+const Diagnostics = React.lazy(() => import('./views/Diagnostics'));
+const Recipes = React.lazy(() => import('./views/Recipes'));
+const Historian = React.lazy(() => import('./views/Historian'));
+const Scripts = React.lazy(() => import('./views/Scripts'));
+const SystemConfiguration = React.lazy(() => import('./views/SystemConfiguration'));
+const DataStorage = React.lazy(() => import('./views/DataStorage'));
+const AcquisitionScheduler = React.lazy(() => import('./views/AcquisitionScheduler'));
+const AlarmCenter = React.lazy(() => import('./views/AlarmCenter'));
 import Login from './views/Login';
 import ForceChangePassword from './views/ForceChangePassword';
 import { fetchMe, logout, type ConsoleUser } from './api';
@@ -27,6 +28,14 @@ import { I18nProvider, useI18n, type Lang } from './i18n';
 import { Toaster } from './components/Toast';
 
 type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'alarms' | 'scripts' | 'settings';
+
+const VALID_VIEWS: View[] = ['dashboard', 'devices', 'scheduler', 'storage', 'diagnostics', 'recipes', 'historian', 'alarms', 'scripts', 'settings'];
+
+/** hash 路由（#/alarms 深链）：刷新/分享链接直达对应视图 */
+function viewFromHash(): View {
+  const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
+  return (VALID_VIEWS as string[]).includes(h) ? (h as View) : 'dashboard';
+}
 
 const ROLE_KEYS: Record<string, string> = { admin: 'role.admin', engineer: 'role.engineer', operator: 'role.operator' };
 
@@ -65,9 +74,20 @@ function Shell(): React.JSX.Element {
 
 function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }): React.JSX.Element {
   const { t, lang, setLang } = useI18n();
-  const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [currentView, setCurrentViewState] = useState<View>(viewFromHash);
   const [dbType, setDbType] = useState('TDengine'); // Default to TDengine to showcase the integration
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const onHash = (): void => setCurrentViewState(viewFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const setCurrentView = (v: View): void => {
+    window.location.hash = v === 'dashboard' ? '/' : `/${v}`;
+    setCurrentViewState(v);
+  };
 
   const navigation = [
     { id: 'dashboard', name: t('nav.dashboard'), icon: LayoutDashboard },
@@ -221,10 +241,21 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
         </header>
         <div className="flex-1 overflow-auto p-8">
           <div className="max-w-7xl mx-auto flex flex-col gap-6">
-            {renderView()}
+            <Suspense fallback={<ViewFallback />}>
+              {renderView()}
+            </Suspense>
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+/** 懒加载视图切换时的占位 */
+function ViewFallback(): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-center py-24 text-slate-400">
+      <Loader2 className="w-6 h-6 animate-spin" />
     </div>
   );
 }

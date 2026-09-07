@@ -89,7 +89,7 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
   const renderView = (): React.JSX.Element => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onNavigate={(v) => setCurrentView(v)} />;
       case 'devices':
         return <DeviceManagement />;
       case 'scheduler':

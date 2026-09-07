@@ -1,81 +1,276 @@
-import React, { useEffect, useState } from 'react';
-import { mockTags } from '../data';
-import { useI18n } from '../i18n';
+/**
+ * 仪表盘（PRD FR-M1，P1+P2 重构）：全真实数据，无 mock。
+ * A 区：运行总览 KPI（采集吞吐走势 / 在线通道点阵 / 位号质量 / 活动告警 / 存储管道）
+ * B 区：通道健康带 —— 仅展示已创建通道（配置 × /api/scheduler × WS channel-status）
+ * C 区：告警速览（活动告警：类型图标 + 持续时长 + 确认；最近事件）
+ * D 区：位号总览 —— 按通道分组的真实位号网格，WS 实时值
+ * 数据源：/api/config、/api/scheduler（3s）、/api/alarms（WS alarmSeq 触发）、WS tags-batch/storage-status
+ */
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Activity, AlertTriangle, ArrowDown, ArrowUp, Bell, CheckCircle, ChevronRight, Database, Server,
+} from 'lucide-react';
+import {
+  ackAlarm, fetchAlarms, fetchConfig, fetchScheduler,
+  type AlarmsResponse, type GatewayChannel, type GatewayTag, type SchedulerStats,
+} from '../api';
+import { PROTOCOL_CONFIGS, type Protocol } from '@iotconnector/shared';
 import { useRuntime } from '../store/runtime';
-import { ackAlarm, fetchAlarms, type AlarmsResponse } from '../api';
-import { Server, Activity, AlertTriangle, CheckCircle, Bell } from 'lucide-react';
+import { useI18n } from '../i18n';
 
-/** 按数据类型格式化：整数不带小数，浮点 2 位（UI 规范 §3.3） */
-function formatValue(v: number | string | boolean): string {
-  if (typeof v === 'number') return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
-  return String(v);
+export type DashboardNavTarget = 'devices' | 'diagnostics' | 'alarms' | 'historian';
+
+/** 时长格式化：zh「2分14秒」/ en「2m 14s」；超 1h 显示「1h 5m」 */
+function fmtDuration(ms: number, lang: string): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (lang === 'zh') return h > 0 ? `${h}小时${m}分` : `${m}分${sec}秒`;
+  return h > 0 ? `${h}h ${m}m` : `${m}m ${sec}s`;
 }
 
-export default function Dashboard() {
-  const { t } = useI18n();
-  const { liveValues, channels, status, lastUpdateTs, connect } = useRuntime();
+function formatValue(v: number | string | boolean): string {
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return '—';
+    return Number.isInteger(v) ? v.toLocaleString('en-US') : v.toFixed(2);
+  }
+  return v;
+}
+
+/** 从 WS channel-status detail（如「OK 12ms」）提取往返时延；其余格式（如 OPC UA 订阅描述）不视为时延 */
+function parseLatency(detail?: string): string | null {
+  const m = detail?.match(/OK (\d+)\s*ms/);
+  return m ? `${m[1]}ms` : null;
+}
+
+/** 从协议固定色板（text-x border-y bg-z）中取边框色类 */
+function protocolBorderCls(protocol: string): string {
+  const cls = PROTOCOL_CONFIGS[protocol as Protocol]?.color ?? '';
+  return cls.split(' ').find((c) => c.startsWith('border-')) ?? 'border-slate-300';
+}
+
+function protocolChipCls(protocol: string): string {
+  return PROTOCOL_CONFIGS[protocol as Protocol]?.color ?? 'text-slate-600 border-slate-300 bg-slate-50';
+}
+
+/** 协议徽章短名（去尾注，如「EtherNet/IP (Rockwell)」→「EtherNet/IP」） */
+function protocolShortName(protocol: string): string {
+  return (PROTOCOL_CONFIGS[protocol as Protocol]?.name ?? protocol).replace(/\s+\([^)]*\)$/, '');
+}
+
+/** 通道实时状态：WS 优先，调度指标兜底 */
+function channelState(
+  chId: string,
+  wsChannels: Record<string, { state: string }>,
+  sched?: SchedulerStats,
+): string {
+  return wsChannels[chId]?.state ?? sched?.channels.find((c) => c.id === chId)?.state ?? 'offline';
+}
+
+export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNavTarget) => void }): React.JSX.Element {
+  const { t, lang } = useI18n();
+  const { liveValues, channels: wsChannels, storage, status: wsStatus, alarmSeq, connect } = useRuntime();
+
+  const [config, setConfig] = useState<{ channels: GatewayChannel[]; tags: GatewayTag[] } | null>(null);
+  const [sched, setSched] = useState<SchedulerStats | null>(null);
   const [alarms, setAlarms] = useState<AlarmsResponse | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const rateRing = useRef<number[]>([]); // 吞吐迷你走势（最近 40 个 3s 采样）
+
+  const loadAlarms = (): void => { fetchAlarms().then(setAlarms).catch(() => {}); };
+  const loadSched = (): void => {
+    fetchScheduler()
+      .then((s) => {
+        setSched(s);
+        const ring = rateRing.current;
+        ring.push(s.rateHz);
+        if (ring.length > 40) ring.splice(0, ring.length - 40);
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     connect();
-  }, [connect]);
-
-  // 告警刷新：WS 实时推送触发即时刷新 + 5s 轮询兜底（PRD FR-M1-04）
-  const alarmSeq = useRuntime((s) => s.alarmSeq);
-  useEffect(() => {
-    const load = (): void => { fetchAlarms().then(setAlarms).catch(() => {}); };
-    load();
-    const timer = setInterval(load, 5000);
+    fetchConfig().then(setConfig).catch(() => {});
+    loadAlarms();
+    loadSched();
+    const timer = setInterval(loadSched, 3000);
     return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   useEffect(() => {
-    if (alarmSeq > 0) fetchAlarms().then(setAlarms).catch(() => {});
+    if (alarmSeq > 0) loadAlarms();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alarmSeq]);
 
   const activeAlarms = alarms?.active ?? [];
-  const recentAlarms = (alarms?.history ?? []).slice(0, 6);
+  // 持续时长跳动：仅存在活动告警时开启 1s 刷新
+  useEffect(() => {
+    if (activeAlarms.length === 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [activeAlarms.length]);
 
-  const activeTags = mockTags.length;
-  const goodQualityTags = mockTags.filter((t) => liveValues[t.id]?.quality !== 'Bad').length;
-  const warnings = activeTags - goodQualityTags;
-  const onlineChannels = Object.values(channels).filter((c) => c.state === 'online').length;
+  const channels = config?.channels ?? [];
+  const allTags = config?.tags ?? [];
+  const tagsByChannel = useMemo(() => {
+    const m = new Map<string, GatewayTag[]>();
+    for (const tag of allTags) {
+      const list = m.get(tag.channelId) ?? [];
+      list.push(tag);
+      m.set(tag.channelId, list);
+    }
+    return m;
+  }, [allTags]);
+
+  const enabledChannels = channels.filter((c) => c.enabled);
+  const onlineCount = enabledChannels.filter((c) => channelState(c.id, wsChannels, sched ?? undefined) === 'online').length;
+  const goodTags = allTags.filter((tg) => liveValues[tg.id]?.quality !== 'Bad' && liveValues[tg.id] !== undefined).length;
+  const badTags = allTags.filter((tg) => liveValues[tg.id]?.quality === 'Bad').length;
+  const longestAlarm = activeAlarms.length > 0
+    ? activeAlarms.reduce((a, b) => (now - a.ts > now - b.ts ? a : b))
+    : null;
+  const storageState = storage?.state ?? null;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.monitoredTags')}</div>
+      {/* ===== A 区：运行总览 KPI ===== */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+        {/* 采集吞吐 + 迷你走势 */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.throughput')}</div>
+            <Activity className="w-4 h-4 text-indigo-500" />
+          </div>
+          <div className="text-2xl font-bold tabular-nums">{sched ? sched.rateHz.toFixed(1) : '—'}<span className="text-sm text-slate-400 font-medium"> /s</span></div>
+          <Sparkline values={rateRing.current} />
+          <div className="text-indigo-600 text-xs mt-1">{t('dash.kpi.totalSamples', { n: sched?.totalSamples ?? 0 })}</div>
+        </div>
+
+        {/* 在线通道（点阵） */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.onlineChannels')}</div>
             <Server className="w-4 h-4 text-slate-400" />
           </div>
-          <div className="text-3xl font-bold">{activeTags}</div>
-          <div className="text-indigo-600 text-xs mt-2">{t('dash.kpi.activeConnections')}</div>
+          <div className="text-2xl font-bold tabular-nums">
+            {onlineCount}<span className="text-sm text-slate-400 font-medium"> / {enabledChannels.length}</span>
+          </div>
+          <div className="flex flex-wrap gap-1 mt-2.5">
+            {enabledChannels.map((c) => {
+              const st = channelState(c.id, wsChannels, sched ?? undefined);
+              return (
+                <span
+                  key={c.id}
+                  title={`${c.name} · ${t(st === 'online' ? 'dash.channels.online' : st === 'connecting' ? 'dash.channels.connecting' : 'dash.channels.offline')}`}
+                  className={`w-2.5 h-2.5 rounded-full ${st === 'online' ? 'bg-emerald-500' : st === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400'}`}
+                />
+              );
+            })}
+            {enabledChannels.length === 0 && <span className="text-slate-400 text-xs">—</span>}
+          </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.goodQuality')}</div>
+        {/* 监测位号 + 质量分布 */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.monitoredTags')}</div>
             <CheckCircle className="w-4 h-4 text-slate-400" />
           </div>
-          <div className="text-3xl font-bold">{goodQualityTags}</div>
-          <div className="text-green-600 text-xs mt-2">{t('dash.kpi.optimalRange')}</div>
+          <div className="text-2xl font-bold tabular-nums">{allTags.length}</div>
+          <div className="text-xs mt-2">
+            <span className="text-emerald-600 font-semibold">{goodTags} ✓</span>
+            <span className="text-slate-300 mx-1">·</span>
+            <span className={badTags > 0 ? 'text-rose-600 font-semibold' : 'text-slate-400 font-semibold'}>{badTags} ✗</span>
+          </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.warnings')}</div>
-            <AlertTriangle className="w-4 h-4 text-amber-500" />
+        {/* 活动告警 + 持续最长 */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.activeAlarms')}</div>
+            <Bell className={`w-4 h-4 ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-slate-400'}`} />
           </div>
-          <div className={`text-3xl font-bold ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-amber-500'}`}>
+          <div className={`text-2xl font-bold tabular-nums ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-slate-700'}`}>
             {activeAlarms.length}
           </div>
-          <div className="text-amber-600/80 text-xs mt-2">
-            {activeAlarms.length > 0 ? t('dash.kpi.alarmsPending') : t('dash.kpi.badQualityTags')}
+          <div className="text-xs mt-2 text-slate-500">
+            {longestAlarm ? t('dash.alarms.longest', { d: fmtDuration(now - longestAlarm.ts, lang) }) : t('dash.alarms.emptyActive')}
+          </div>
+        </div>
+
+        {/* 存储管道 */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.storage')}</div>
+            <Database className="w-4 h-4 text-slate-400" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              storageState === 'online' ? 'bg-emerald-500' : storageState === 'offline' ? 'bg-amber-400' : 'bg-slate-300'
+            }`} />
+            <span className="text-lg font-bold">
+              {storageState ? t(`dash.storage.state.${storageState}`) : '—'}
+            </span>
+          </div>
+          <div className="text-xs mt-2 text-slate-500">
+            {storage ? t('dash.storage.queue', { queued: storage.queued, written: storage.written }) : '—'}
           </div>
         </div>
       </div>
 
-      {/* 告警面板（PRD FR-M1-04） */}
+      {/* ===== B 区：通道健康带（仅已创建通道） ===== */}
+      <div>
+        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">{t('dash.channels.title')}</div>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {channels.map((ch) => {
+            const sc = sched?.channels.find((s) => s.id === ch.id);
+            const st = channelState(ch.id, wsChannels, sched ?? undefined);
+            const latency = parseLatency(wsChannels[ch.id]?.detail);
+            const expectedHz = sc && sc.tags > 0 ? sc.tags / Math.max(0.2, ch.pollIntervalMs / 1000) : 0;
+            const ratio = ch.enabled && expectedHz > 0 ? Math.min(1, sc!.rateHz / expectedHz) : 0;
+            // 负载语义：贴近期望周期（≥80%）即健康；仅明显欠采计时预警
+            const loadCls = ratio >= 0.8 ? 'bg-emerald-500' : ratio >= 0.3 ? 'bg-amber-500' : 'bg-slate-300';
+            return (
+              <button
+                key={ch.id}
+                onClick={() => onNavigate?.('devices')}
+                className={`text-left bg-white p-3 rounded-xl border border-slate-200 shadow-sm border-l-4 ${protocolBorderCls(ch.protocol)} transition-colors hover:border-slate-300 ${ch.enabled ? '' : 'opacity-55'}`}
+              >
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <span className="text-sm font-bold text-slate-800 truncate">{ch.name}</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${ch.enabled ? (st === 'online' ? 'bg-emerald-500' : st === 'connecting' ? 'bg-amber-400 animate-pulse' : 'bg-rose-400') : 'bg-slate-300'}`} />
+                </div>
+                <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border ${protocolChipCls(ch.protocol)}`}>
+                  {protocolShortName(ch.protocol)}
+                </span>
+                <div className="mt-2 text-[11px] text-slate-500 tabular-nums">
+                  {sc ? t('dash.channels.cardStats', { tags: sc.tags, rate: sc.rateHz.toFixed(1), period: ch.pollIntervalMs }) : `${tagsByChannel.get(ch.id)?.length ?? 0} ${lang === 'zh' ? '位号' : 'tags'}`}
+                </div>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <div className="flex-1 h-1 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${loadCls}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
+                  </div>
+                  <span className="text-[10px] text-slate-400 tabular-nums w-16 text-right">
+                    {latency ?? t('dash.channels.load', { p: Math.round(ratio * 100) })}
+                  </span>
+                </div>
+                {!ch.enabled && <div className="mt-1 text-[10px] text-slate-400 font-semibold">{t('dash.channels.disabled')}</div>}
+              </button>
+            );
+          })}
+          {channels.length === 0 && (
+            <div className="col-span-full text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-4">
+              {wsStatus === 'offline' ? t('dash.grid.offline') : t('dash.grid.connecting')}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ===== C 区：告警速览 ===== */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <h3 className="font-semibold text-slate-800 flex items-center">
@@ -87,9 +282,18 @@ export default function Dashboard() {
               </span>
             )}
           </h3>
-          <span className="text-xs text-slate-400 font-mono">{t('dash.alarms.ruleCount', { n: alarms?.rules.length ?? 0 })}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-400 font-mono">{t('dash.alarms.ruleCount', { n: alarms?.rules.length ?? 0 })}</span>
+            <button
+              onClick={() => onNavigate?.('alarms')}
+              className="flex items-center gap-0.5 text-xs font-bold text-indigo-600 hover:text-indigo-700"
+            >
+              {t('dash.alarms.viewAll')} <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
         <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 活动告警 */}
           <div>
             <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">{t('dash.alarms.activeCol')}</div>
             {activeAlarms.length === 0 ? (
@@ -101,43 +305,46 @@ export default function Dashboard() {
                 {activeAlarms.map((a) => (
                   <div key={a.id} className="px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between">
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-rose-800 truncate">
+                      <div className="text-xs font-bold text-rose-800 truncate flex items-center gap-1">
+                        {a.kind === 'high' ? <ArrowUp className="w-3.5 h-3.5 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 shrink-0 text-blue-500" />}
                         {a.tagName} <span className="font-mono">{a.kind === 'high' ? '>' : '<'} {a.threshold}</span>
                         {a.ack && <span className="ml-1.5 text-[10px] text-slate-500 font-normal">{t('dash.alarms.ackedBy', { user: a.ack.user })}</span>}
                       </div>
-                      <div className="text-[10px] text-rose-500 font-mono">
+                      <div className="text-[10px] text-rose-500 font-mono mt-0.5">
                         {t('dash.alarms.currentValue', { value: a.value.toFixed(2), time: new Date(a.ts).toLocaleTimeString() })}
+                        <span className="ml-2 text-rose-400">{t('dash.alarms.duration', { d: fmtDuration(now - a.ts, lang) })}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {!a.ack && (
                         <button
-                          onClick={() => void ackAlarm(a.id).then(() => fetchAlarms().then(setAlarms).catch(() => {}))}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-white text-rose-600 border border-rose-300 hover:bg-rose-100"
+                          onClick={() => void ackAlarm(a.id).then(loadAlarms).catch(() => {})}
+                          className="px-2 py-1 text-[11px] font-bold text-rose-700 bg-white border border-rose-300 rounded-md hover:bg-rose-100 transition-colors"
                         >
                           {t('dash.alarms.ack')}
                         </button>
                       )}
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
-                        ACTIVE
-                      </span>
                     </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
+          {/* 最近事件 */}
           <div>
             <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">{t('dash.alarms.recentEvents')}</div>
-            {recentAlarms.length === 0 ? (
+            {(alarms?.history ?? []).length === 0 ? (
               <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
                 {t('dash.alarms.noEvents')}
               </div>
             ) : (
-              <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                {recentAlarms.map((a) => (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {(alarms?.history ?? []).slice(0, 8).map((a) => (
                   <div key={a.id} className="px-3 py-1.5 rounded-md bg-slate-50 border border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className={`font-bold ${a.state === 'Active' ? 'text-rose-600' : 'text-slate-500'}`}>
+                    <span className={`font-bold flex items-center gap-1 ${a.state === 'Active' ? 'text-rose-600' : 'text-slate-500'}`}>
+                      {a.state === 'Active'
+                        ? <AlertTriangle className="w-3 h-3 shrink-0" />
+                        : <CheckCircle className="w-3 h-3 shrink-0 text-emerald-500" />}
                       {a.tagName} {a.state === 'Active' ? t('dash.alarms.triggered') : t('dash.alarms.recovered')}
                     </span>
                     <span className="font-mono text-slate-400">
@@ -151,69 +358,93 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <h3 className="font-semibold text-slate-800 flex items-center">
-            <Activity className="w-5 h-5 mr-2 text-slate-500" />
-            {t('dash.grid.title')}
-          </h3>
-          <div className="flex items-center gap-2 text-xs font-medium">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                status === 'live'
-                  ? 'bg-green-500 animate-pulse'
-                  : status === 'connecting'
-                    ? 'bg-amber-400 animate-pulse'
-                    : 'bg-slate-300'
-              }`}
-            />
-            <span className="text-slate-500">
-              {status === 'live'
-                ? t('dash.grid.onlineInfo', { n: onlineChannels, time: lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—' })
-                : status === 'connecting'
-                  ? t('dash.grid.connecting')
-                  : t('dash.grid.offline')}
-            </span>
-          </div>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {mockTags.map((tag) => {
-              const live = liveValues[tag.id];
-              const value = live ? live.value : tag.value;
-              const isBad = live?.quality === 'Bad';
-              return (
-                <div key={tag.id} className="p-4 rounded-lg border border-slate-100 bg-slate-50 flex flex-col">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-semibold text-slate-400">{tag.channel}</span>
-                    {live && (
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${isBad ? 'bg-rose-500' : 'bg-green-500'}`}
-                        title={isBad ? t('dash.grid.badQuality') : t('dash.grid.live', { q: live.quality })}
-                      />
-                    )}
-                  </div>
-                  <span className="font-medium text-slate-700 truncate" title={tag.name}>
-                    {tag.name.split('.')[1] || tag.name}
-                  </span>
-                  <div
-                    className={`mt-2 text-2xl font-bold flex items-baseline ${isBad ? 'text-slate-400' : 'text-slate-900'}`}
-                  >
-                    {typeof value === 'boolean' ? (
-                      <span className={value ? 'text-green-600' : 'text-slate-400'}>{value ? 'TRUE' : 'FALSE'}</span>
-                    ) : (
-                      <span className="font-mono tabular-nums">{formatValue(value)}</span>
-                    )}
-                    {tag.type === 'number' && tag.name.includes('Temperature') && (
-                      <span className="ml-1 text-sm text-slate-500 font-normal">°C</span>
-                    )}
-                  </div>
+      {/* ===== D 区：位号总览（按通道分组，真实位号 + WS 实时值） ===== */}
+      <div className="space-y-3">
+        <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('dash.grid.title')}</div>
+        {channels.map((ch) => {
+          const chTags = tagsByChannel.get(ch.id) ?? [];
+          const st = channelState(ch.id, wsChannels, sched ?? undefined);
+          const latency = parseLatency(wsChannels[ch.id]?.detail);
+          const online = st === 'online';
+          return (
+            <div key={ch.id} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <button
+                onClick={() => onNavigate?.('devices')}
+                className="w-full px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-left hover:bg-slate-100 transition-colors"
+              >
+                <span className={`w-1 h-4 rounded-full ${protocolBorderCls(ch.protocol)} border-l-2`} />
+                <span className="text-sm font-bold text-slate-800">{ch.name}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${protocolChipCls(ch.protocol)}`}>
+                  {protocolShortName(ch.protocol)}
+                </span>
+                <span className={`text-[11px] font-semibold ${online ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  {online ? t('dash.channels.online') : ch.enabled ? t('dash.channels.offline') : t('dash.channels.disabled')}
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                  {latency ? t('dash.grid.channelMeta', { ms: ch.pollIntervalMs, lat: latency }) : `${ch.pollIntervalMs}ms`}
+                </span>
+                <span className="text-[11px] text-slate-400">{t('dev.tagCount', { n: chTags.length })}</span>
+                <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
+              </button>
+              {chTags.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-slate-400">{t('dash.grid.noTags')}</div>
+              ) : (
+                <div className="p-3 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+                  {chTags.map((tag) => {
+                    const live = liveValues[tag.id];
+                    const isBad = live?.quality === 'Bad';
+                    const suffix = tag.name.includes('.') ? tag.name.split('.').slice(1).join('.') : tag.name;
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() => onNavigate?.('diagnostics')}
+                        className={`text-left p-2.5 rounded-lg border flex flex-col ${isBad ? 'border-rose-200 bg-rose-50/60' : 'border-slate-100 bg-slate-50'} ${!ch.enabled ? 'opacity-50' : ''} hover:border-indigo-200 transition-colors`}
+                        title={tag.description || tag.name}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-semibold text-slate-600 truncate">{suffix}</span>
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${live ? (isBad ? 'bg-rose-500' : 'bg-emerald-500') : 'bg-slate-300'}`}
+                            title={live ? live.quality : t('dash.grid.waitLive')}
+                          />
+                        </div>
+                        <div className={`mt-1 text-lg font-bold tabular-nums flex items-baseline gap-1 ${live ? (isBad ? 'text-slate-400' : 'text-slate-900') : 'text-slate-300'}`}>
+                          <span className="truncate">{live ? formatValue(live.value) : '—'}</span>
+                          {tag.unit && <span className="text-[11px] text-slate-400 font-normal">{tag.unit}</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              )}
+            </div>
+          );
+        })}
+        {channels.length === 0 && (
+          <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-4">
+            {t('dash.grid.connecting')}
           </div>
-        </div>
+        )}
       </div>
     </div>
+  );
+}
+
+/** 迷你走势（吞吐）：纯 SVG polyline，无图表库 */
+function Sparkline({ values }: { values: number[] }): React.JSX.Element {
+  const w = 120;
+  const h = 26;
+  if (values.length < 2) {
+    return <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-[26px] mt-1" preserveAspectRatio="none"><line x1="0" y1={h - 2} x2={w} y2={h - 2} stroke="#e2e8f0" strokeWidth="1.5" /></svg>;
+  }
+  const max = Math.max(...values, 0.1);
+  const min = Math.min(...values, 0);
+  const span = Math.max(0.01, max - min);
+  const pts = values
+    .map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`)
+    .join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-[26px] mt-1" preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke="#6366f1" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }

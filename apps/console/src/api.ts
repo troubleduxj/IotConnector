@@ -226,6 +226,35 @@ export async function deleteChannel(id: string): Promise<void> {
   await apiFetch(`/api/channels/${id}`, { method: 'DELETE' });
 }
 
+/** 通道配置导出（FR-M2-05）：JSON 下载（含点位表），返回文件名 */
+export async function exportChannelConfig(id: string, fallbackName: string): Promise<void> {
+  const res = await apiFetch(`/api/channels/${id}/export`);
+  if (!res.ok) throw new Error('export channel failed');
+  const blob = await res.blob();
+  const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = m?.[1] ?? `${fallbackName}.channel.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/** 通道配置导入（FR-M2-05）：服务端做协议参数 schema 校验 + 点位地址语法校验 */
+export async function importChannelConfig(
+  bundle: unknown,
+): Promise<{ channel: GatewayChannel; importedTags: number }> {
+  const res = await apiFetch('/api/channels/import', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(bundle),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; details?: string[] };
+    throw new Error([body.error, ...(body.details ?? []).slice(0, 5)].filter(Boolean).join('\n'));
+  }
+  return (await res.json()) as { channel: GatewayChannel; importedTags: number };
+}
+
 export async function createTag(tag: Omit<GatewayTag, 'id'>): Promise<GatewayTag> {
   const res = await apiFetch('/api/tags', {
     method: 'POST',

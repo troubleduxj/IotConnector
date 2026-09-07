@@ -71,12 +71,24 @@
     "zh": {
       "dev.col.liveValue": "实时值",
       "dev.col.waitLive": "等待采集…",
-      "dev.addrValid": "地址格式合法"
+      "dev.addrValid": "地址格式合法",
+      "dev.importChannel": "导入通道",
+      "dev.exportFailed": "导出失败",
+      "dev.importBadFormat": "文件格式非法：缺少 channel.name（非 FactoryBridge 通道导出文件）",
+      "dev.importDone": "已导入通道 {name}（{n} 点位）",
+      "dev.importFailed": "导入失败",
+      "dev.tip.exportChannel": "导出通道配置（JSON，含点位表）"
     },
     "en": {
       "dev.col.liveValue": "Live value",
       "dev.col.waitLive": "Waiting…",
-      "dev.addrValid": "Address format valid"
+      "dev.addrValid": "Address format valid",
+      "dev.importChannel": "Import channel",
+      "dev.exportFailed": "Export failed",
+      "dev.importBadFormat": "Invalid file: channel.name missing (not a FactoryBridge channel export)",
+      "dev.importDone": "Imported channel {name} ({n} tags)",
+      "dev.importFailed": "Import failed",
+      "dev.tip.exportChannel": "Export channel config (JSON with tag table)"
     }
   }
 }

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { PROTOCOL_CONFIGS, getParamSchema, validateAddress, type Protocol } from '@iotconnector/shared';
 import {
-  createChannel, createTag, deleteChannel, deleteTag, fetchConfig, testChannelConnection,
+  createChannel, createTag, deleteChannel, deleteTag, exportChannelConfig, fetchConfig, importChannelConfig, testChannelConnection,
   updateChannel, updateTag, type ChannelTestResult, type GatewayChannel, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
@@ -123,6 +123,29 @@ export default function DeviceManagement() {
       showToast(t('dev.toast.channelDeleted', { name: selected.name }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // ===== 通道配置导出/导入（FR-M2-05）：JSON 含点位表，导入走服务端 schema/地址校验 =====
+  const doExportChannel = async (): Promise<void> => {
+    if (!selected) return;
+    try {
+      await exportChannelConfig(selected.id, selected.name);
+    } catch {
+      showToast(t('dev.exportFailed'));
+    }
+  };
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const doImportChannel = async (file: File): Promise<void> => {
+    try {
+      const bundle = JSON.parse(await file.text()) as { channel?: { name?: string } };
+      if (!bundle.channel?.name) throw new Error(t('dev.importBadFormat'));
+      const r = await importChannelConfig(bundle);
+      showToast(t('dev.importDone', { name: r.channel.name, n: r.importedTags }));
+      await loadConfig();
+      setSelectedId(r.channel.id);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : t('dev.importFailed'));
     }
   };
 
@@ -297,12 +320,31 @@ export default function DeviceManagement() {
           <h2 className="text-lg font-bold text-slate-800">{t('dev.title')}</h2>
           <p className="text-sm text-slate-500 mt-1">{t('dev.subtitle')}</p>
         </div>
-        <button
-          onClick={() => setIsAddOpen(true)}
-          className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
-        >
-          <Plus className="w-4 h-4 mr-2" /> {t('dev.addChannel')}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void doImportChannel(f);
+              e.target.value = '';
+            }}
+          />
+          <button
+            onClick={() => importFileRef.current?.click()}
+            className="flex items-center px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+          >
+            <Upload className="w-4 h-4 mr-2" /> {t('dev.importChannel')}
+          </button>
+          <button
+            onClick={() => setIsAddOpen(true)}
+            className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
+          >
+            <Plus className="w-4 h-4 mr-2" /> {t('dev.addChannel')}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -397,6 +439,13 @@ export default function DeviceManagement() {
                     }`}
                   >
                     {draft.enabled ? t('dev.state.enabled') : t('dev.state.disabled')}
+                  </button>
+                  <button
+                    onClick={() => void doExportChannel()}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title={t('dev.tip.exportChannel')}
+                  >
+                    <Download className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => void removeChannel()}

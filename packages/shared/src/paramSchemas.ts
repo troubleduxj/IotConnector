@@ -140,3 +140,36 @@ export const PROTOCOL_PARAM_SCHEMAS: Partial<Record<Protocol, ParamField[]>> = {
 export function getParamSchema(protocol: Protocol): ParamField[] {
   return PROTOCOL_PARAM_SCHEMAS[protocol] ?? [];
 }
+
+/**
+ * 按协议参数 schema 校验通道 params（FR-M2-05 导入校验 / 通道创建共用）。
+ * schema 未覆盖的协议（如 MELSEC/FINS/ENIP 驱动仅消费 host/port）返回 ok。
+ */
+export function validateChannelParams(
+  protocol: Protocol,
+  params: Record<string, unknown>,
+): { ok: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const schema = getParamSchema(protocol);
+  for (const field of schema) {
+    const v = params[field.key];
+    if (field.required && (v === undefined || v === null || v === '')) {
+      errors.push(`${field.label}: 必填`);
+      continue;
+    }
+    if (v === undefined || v === null || v === '') continue;
+    if (field.type === 'number') {
+      const n = Number(v);
+      if (Number.isNaN(n)) errors.push(`${field.label}: 须为数字（当前 ${String(v)}）`);
+      else {
+        if (field.min !== undefined && n < field.min) errors.push(`${field.label}: 不得小于 ${field.min}`);
+        if (field.max !== undefined && n > field.max) errors.push(`${field.label}: 不得大于 ${field.max}`);
+      }
+    } else if (field.type === 'select' && field.options && !field.options.some((o) => o.value === String(v))) {
+      errors.push(`${field.label}: 非法选项 ${String(v)}（可选 ${field.options.map((o) => o.value).join('/')}）`);
+    } else if (field.type === 'boolean' && typeof v !== 'boolean') {
+      errors.push(`${field.label}: 须为布尔值`);
+    }
+  }
+  return { ok: errors.length === 0, errors };
+}

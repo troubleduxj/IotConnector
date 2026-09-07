@@ -5,6 +5,7 @@ import type { ClientMessage, ServerMessage } from '@iotconnector/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AlarmEvent, AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
+import { PROTOCOL_CONFIGS, validateAddress, validateChannelParams } from '@iotconnector/shared';
 import { Engine } from './engine/engine';
 import { loadConfig, saveConfig, seedConfig } from './config';
 import { AlarmEngine } from './alarms';
@@ -412,6 +413,85 @@ async function main(): Promise<void> {
     broadcastConfigChanged();
     auditLog(actor, 'channel.update', `${channel.name}: ${changes.join(' ') || '(无变更)'}`);
     return channel;
+  });
+
+  // 通道配置导出（FR-M2-05）：JSON 下载，含通道全部参数与点位表
+  app.get('/api/channels/:id/export', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
+    if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
+    const bundle = {
+      format: 'factorybridge-channel@1',
+      exportedAt: new Date().toISOString(),
+      channel,
+      tags: tags.filter((tg) => tg.channelId === channel.id),
+    };
+    auditLog(actor, 'channel.export', `${channel.name}（${bundle.tags.length} 点位）`);
+    return reply
+      .header('content-disposition', `attachment; filename="${channel.name.replace(/[^A-Za-z0-9_-]/g, '_')}.channel.json"`)
+      .send(bundle);
+  });
+
+  // 通道配置导入（FR-M2-05）：协议参数 schema 校验 + 点位地址语法校验，id 冲突自动重发
+  app.post('/api/channels/import', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as { channel?: Partial<Channel>; tags?: Array<Partial<Tag>> };
+    const src = b.channel;
+    if (!src?.name || !src?.protocol) return reply.code(400).send({ ok: false, error: 'channel.name & channel.protocol required' });
+    if (!(src.protocol in PROTOCOL_CONFIGS)) return reply.code(400).send({ ok: false, error: `未知协议: ${src.protocol}` });
+    const dup = channels.find((c) => c.name === src.name && c.id !== src.id);
+    if (dup) return reply.code(409).send({ ok: false, error: `通道名已存在: ${src.name}` });
+    const params = (src.params ?? {}) as Channel['params'];
+    const pv = validateChannelParams(src.protocol, params as Record<string, unknown>);
+    if (!pv.ok) return reply.code(400).send({ ok: false, error: '协议参数校验失败', details: pv.errors });
+    const port = Number(src.port ?? 502);
+    if (!src.host || Number.isNaN(port) || port < 1 || port > 65535) {
+      return reply.code(400).send({ ok: false, error: 'host/port 非法（port 1~65535）' });
+    }
+    // 点位地址按协议语法预校验
+    const tagErrors: string[] = [];
+    for (const tg of b.tags ?? []) {
+      if (!tg.name || !tg.address) { tagErrors.push(`点位缺 name/address: ${tg.name ?? '?'}`); continue; }
+      const av = validateAddress(src.protocol, tg.address);
+      if (!av.ok) tagErrors.push(`${tg.name}: ${av.error ?? '地址非法'}`);
+    }
+    if (tagErrors.length > 0) return reply.code(400).send({ ok: false, error: '点位地址校验失败', details: tagErrors.slice(0, 20) });
+
+    const channel: Channel = {
+      id: channels.some((c) => c.id === src.id) ? `ch_${Date.now()}` : (src.id ?? `ch_${Date.now()}`),
+      name: src.name,
+      protocol: src.protocol,
+      host: src.host,
+      port,
+      enabled: src.enabled ?? true,
+      pollIntervalMs: Math.max(50, Number(src.pollIntervalMs ?? 1000)),
+      params,
+    };
+    channels.push(channel);
+    let n = 0;
+    for (const tg of b.tags ?? []) {
+      tags.push({
+        id: `tg_${Date.now()}_${n}`,
+        channelId: channel.id,
+        name: tg.name!,
+        address: tg.address!,
+        dataType: tg.dataType ?? 'Float',
+        unit: tg.unit ?? '',
+        scale: Number(tg.scale ?? 1),
+        offset: Number(tg.offset ?? 0),
+        engMin: tg.engMin,
+        engMax: tg.engMax,
+        description: tg.description,
+      });
+      n += 1;
+    }
+    persist();
+    void engine.reloadChannel(channel.id);
+    broadcastConfigChanged();
+    auditLog(actor, 'channel.import', `${channel.name} (${channel.protocol} ${channel.host}:${channel.port}) + ${n} 点位`);
+    return reply.code(201).send({ channel, importedTags: n });
   });
 
   // 真实连接测试（FR-M2-04）：临时连接执行协议握手序列，不干扰采集驱动

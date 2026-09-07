@@ -165,6 +165,20 @@ export async function fetchGatewayTags(): Promise<GatewayTag[]> {
   return (await res.json()) as GatewayTag[];
 }
 
+/** #22 / FR-M9-04 设备影子：reported = 真实上报值，desired = 写管道期望值 */
+export interface TagShadow {
+  tagId: string;
+  name: string;
+  channel: string;
+  reported?: { value: number | string | boolean; quality: string; ts: number };
+  desired?: { value: number | string | boolean; ts: number; by: string };
+  /** pending = 期望值与上报值不一致（待收敛） */
+  state: 'reported' | 'pending';
+}
+
+export const fetchShadow = async (): Promise<{ shadows: TagShadow[]; pending: number }> =>
+  (await apiFetch('/api/shadow')).json() as Promise<{ shadows: TagShadow[]; pending: number }>;
+
 export async function writeTagValue(
   tagId: string,
   value: number | string | boolean,

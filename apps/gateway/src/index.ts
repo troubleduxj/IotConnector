@@ -19,6 +19,7 @@ import { ScriptEngine } from './scripts';
 import type { Recipe, RecipeDownloadRecord, Script, StorageTask } from '@iotconnector/shared';
 import type { NorthboundConfig } from './northbound/publisher';
 import { NorthboundPublisher } from './northbound/publisher';
+import { DeviceShadow } from './northbound/shadow';
 import { AuthStore, hashPassword, type Role, type SessionUser } from './auth';
 import { TDengineWriter } from './storage/tdengine';
 
@@ -117,6 +118,29 @@ async function main(): Promise<void> {
   northboundPublisher.loadPersisted();
   northboundPublisher.start();
 
+  // ===== 设备影子（FR-M9-04 / TASKS #22）=====
+  const deviceShadow = new DeviceShadow({
+    path: path.join(STATE_DIR, 'shadow.json'),
+    read: (p) => fs.readFileSync(p, 'utf-8'),
+    write: (p, data) => {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, JSON.stringify(data, null, 2));
+    },
+  });
+  deviceShadow.loadPersisted();
+  // 影子变化 → 节流 3s 发布 MQTT retain 快照（断线自动入 Outbox）
+  let shadowPublishTimer: NodeJS.Timeout | undefined;
+  deviceShadow.onChange = () => {
+    if (shadowPublishTimer) return;
+    shadowPublishTimer = setTimeout(() => {
+      shadowPublishTimer = undefined;
+      void northboundPublisher.publishShadow(deviceShadow.snapshot((id) => {
+        const tg = tags.find((x) => x.id === id);
+        return tg ? { name: tg.name, channel: channels.find((c) => c.id === tg.channelId)?.name ?? tg.channelId } : undefined;
+      })).catch(() => undefined);
+    }, 3000);
+  };
+
   // 会话持久化：重启不掉线
   const SESSION_FILE = path.resolve(process.cwd(), 'data', 'sessions.json');
   try {
@@ -155,6 +179,7 @@ async function main(): Promise<void> {
     (key) => tags.find((t) => t.name === key || t.id === key),
     async (tagId, value) => {
       const r = await engine.write(tagId, value);
+      if (r.ok) deviceShadow.setDesired(tagId, value, 'script'); // 影子期望值（FR-M9-04，脚本来源）
       if (!r.ok) throw new Error(r.error);
     },
   );
@@ -221,6 +246,8 @@ async function main(): Promise<void> {
       byChannel.set(tag.channelId, list);
     }
     for (const [channelId, list] of byChannel) northboundPublisher.enqueueChannelData(channelId, list);
+    // 设备影子 reported（FR-M9-04）：随采集批次更新
+    for (const v of values) deviceShadow.setReported(v.id, v.value, v.quality, v.ts);
   };
   engine.onStatus = (status) => broadcast({ type: 'channel-status', status });
 
@@ -302,9 +329,19 @@ async function main(): Promise<void> {
     const tag = getTag(id);
     const prev = engine.snapshot().find((s) => s.id === id)?.value;
     const result = await engine.write(id, value);
+    if (result.ok) deviceShadow.setDesired(id, value, actor.username); // 影子期望值（FR-M9-04）
     // FR-M5-03 写入审计：谁、何时、哪个位号、旧值→新值、结果
     auditLog(actor, 'tag.write', `${tag?.name ?? id}: ${String(prev ?? '—')} → ${String(value)}${result.ok ? '' : ' 失败 ' + (result.error ?? '')}`);
     return result;
+  });
+
+  // 设备影子（FR-M9-04）：全量快照（reported vs desired）
+  app.get('/api/shadow', async () => {
+    const meta = (id: string) => {
+      const tg = tags.find((x) => x.id === id);
+      return tg ? { name: tg.name, channel: channels.find((c) => c.id === tg.channelId)?.name ?? tg.channelId } : undefined;
+    };
+    return { shadows: deviceShadow.snapshot(meta), pending: deviceShadow.pendingCount(meta) };
   });
 
   /**
@@ -538,6 +575,7 @@ async function main(): Promise<void> {
     channels.splice(i, 1);
     const kept = tags.filter((t) => t.channelId !== id);
     const removedCount = tags.length - kept.length;
+    for (const t of tags) if (t.channelId === id) deviceShadow.clearTag(t.id); // 影子残留修剪
     tags.splice(0, tags.length, ...kept);
     alarmEngine.setRules(alarmEngine.getRules().filter((r) => kept.some((t) => t.id === r.tagId)));
     persist();
@@ -610,6 +648,7 @@ async function main(): Promise<void> {
     alarmEngine.setRules(alarmEngine.getRules().filter((r) => r.tagId !== id));
     persist();
     engine.removeTagRuntime(id);
+    deviceShadow.clearTag(id); // 影子残留修剪（FR-M9-04）
     void engine.reloadChannel(tag.channelId);
     broadcastConfigChanged();
     auditLog(actor, 'tag.delete', `${tag.name} (${tag.address})`);
@@ -782,6 +821,7 @@ async function main(): Promise<void> {
         '/api/auth/me': { get: { summary: '当前会话用户' } },
         '/api/tags': { get: { summary: '位号配置列表' } },
         '/api/tags/live': { get: { summary: '位号实时值快照' } },
+        '/api/shadow': { get: { summary: '设备影子快照（reported vs desired，FR-M9-04）' } },
         '/api/tags/{id}/write': { post: { summary: '下行写值（审计留痕）' } },
         '/api/history': { get: { summary: '历史查询（TDengine 聚合）' } },
         '/api/alarms': { get: { summary: '告警事件' }, post: { summary: '新建告警规则' } },
@@ -1215,6 +1255,7 @@ async function main(): Promise<void> {
         continue;
       }
       const r = await engine.write(item.tagId, item.value);
+      if (r.ok) deviceShadow.setDesired(item.tagId, item.value, actor.username); // 影子期望值（FR-M9-04）
       auditLog(actor, 'recipe.download', `${recipe.name}: ${tag.name} = ${item.value} ${r.ok ? '成功' : '失败 ' + (r.error ?? '')}`);
       results.push({ tagId: item.tagId, name: tag.name, value: item.value, ok: r.ok, error: r.error });
     }
@@ -1417,6 +1458,7 @@ async function main(): Promise<void> {
   console.log(`[gateway] channels: ${config.channels.length}, tags: ${config.tags.length}, storage: ${storage.status.state}`);
 
   const shutdown = async (): Promise<void> => {
+    deviceShadow.flush();
     northboundPublisher.stop();
     await engine.stop();
     storage.stop();

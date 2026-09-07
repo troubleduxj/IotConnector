@@ -252,6 +252,20 @@ export class NorthboundPublisher {
   private channelName(channelId: string): string {
     return this.channelsProvider().find((c) => c.id === channelId)?.name ?? channelId;
   }
+
+  // ===== 设备影子（FR-M9-04 / TASKS #22）=====
+
+  /**
+   * 影子快照以 retain 发布（订阅即得最新状态，等价"查询"）。
+   * 断线时同样进 Reliable Outbox，重连后按序补传。
+   */
+  async publishShadow(shadows: unknown): Promise<void> {
+    const cfg = this.getConfig();
+    if (!cfg.enabled) return;
+    const topic = `${cfg.groupId}/shadow/${cfg.edgeNodeId}`;
+    const payload = Buffer.from(JSON.stringify({ ts: Date.now(), shadow: shadows }));
+    await this.publishWithOutbox(topic, new Uint8Array(payload), 1);
+  }
   // ===== 发布 + Reliable Outbox =====
 
   private async publishWithOutbox(topic: string, payload: Uint8Array, qos: 0 | 1): Promise<void> {

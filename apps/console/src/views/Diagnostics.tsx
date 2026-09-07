@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchAlarms, fetchGatewayTags, writeTagValue, createAlarm, updateAlarm, deleteAlarm, type AlarmRule, type GatewayTag } from '../api';
+import { fetchAlarms, fetchGatewayTags, fetchShadow, writeTagValue, createAlarm, updateAlarm, deleteAlarm, type AlarmRule, type GatewayTag, type TagShadow } from '../api';
 import { useRuntime } from '../store/runtime';
 import { useI18n } from '../i18n';
 import { alarmKindColorCls } from '../components/alarmKind';
-import { Search, Send, X, Bell, Trash2, Check, Loader2 } from 'lucide-react';
+import { Search, Send, X, Bell, Trash2, Check, Loader2, Copy } from 'lucide-react';
 
 /**
  * 在线参数诊断（PRD M5）：真实位号表 + WS 实时值 + 类型感知写入 + 告警规则管理。
@@ -39,6 +39,28 @@ export default function Diagnose() {
     connect();
     loadTags();
   }, [connect]);
+
+  // ===== #22 设备影子（FR-M9-04）：reported vs desired =====
+  const [shadows, setShadows] = useState<TagShadow[]>([]);
+  const [shadowPending, setShadowPending] = useState(0);
+  const [shadowSearch, setShadowSearch] = useState('');
+
+  const loadShadow = (): void => {
+    fetchShadow().then((d) => { setShadows(d.shadows); setShadowPending(d.pending); }).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    loadShadow();
+    const timer = setInterval(loadShadow, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const filteredShadows = useMemo(
+    () => shadows.filter((s) =>
+      s.name.toLowerCase().includes(shadowSearch.toLowerCase()) ||
+      s.channel.toLowerCase().includes(shadowSearch.toLowerCase())),
+    [shadows, shadowSearch],
+  );
 
   const loadAlarmRules = (): void => {
     fetchAlarms().then((d) => setAlarmRules(d.rules)).catch(() => setAlarmRules([]));
@@ -211,6 +233,86 @@ export default function Diagnose() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* ===== #22 设备影子（FR-M9-04）===== */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+          <div className="flex items-center gap-2.5">
+            <Copy className="w-4 h-4 text-indigo-600" />
+            <h3 className="font-bold text-slate-800 text-sm">{t('diag.shadow.title')}</h3>
+            {shadowPending > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                {t('diag.shadow.pendingBadge', { n: shadowPending })}
+              </span>
+            )}
+          </div>
+          <div className="relative w-56">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder={t('diag.shadow.search')}
+              value={shadowSearch}
+              onChange={(e) => setShadowSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 text-[11px] uppercase font-bold tracking-wider">
+                <th className="px-6 py-2.5 border-b border-slate-200">{t('diag.col.tag')}</th>
+                <th className="px-6 py-2.5 border-b border-slate-200">{t('diag.col.channel')}</th>
+                <th className="px-6 py-2.5 border-b border-slate-200">{t('diag.shadow.reported')}</th>
+                <th className="px-6 py-2.5 border-b border-slate-200">{t('diag.shadow.desired')}</th>
+                <th className="px-6 py-2.5 border-b border-slate-200">{t('diag.shadow.state')}</th>
+              </tr>
+            </thead>
+            <tbody className="text-sm text-slate-600">
+              {filteredShadows.map((s) => (
+                <tr key={s.tagId} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                  <td className="px-6 py-2.5 font-mono font-medium text-slate-900 text-[12px]">{s.name}</td>
+                  <td className="px-6 py-2.5 font-mono text-[12px] text-slate-500">{s.channel}</td>
+                  <td className="px-6 py-2.5 font-mono text-[12px]">
+                    {s.reported ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${s.reported.quality === 'Bad' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                        <span className="text-slate-800 font-semibold">{String(s.reported.value)}</span>
+                        <span className="text-slate-400 text-[10px]">{new Date(s.reported.ts).toLocaleTimeString()}</span>
+                      </span>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-6 py-2.5 font-mono text-[12px]">
+                    {s.desired ? (
+                      <span title={`${t('diag.shadow.by')} ${s.desired.by} · ${new Date(s.desired.ts).toLocaleTimeString()}`}>
+                        <span className="text-indigo-700 font-semibold">{String(s.desired.value)}</span>
+                        <span className="text-slate-400 text-[10px] ml-1">@{s.desired.by}</span>
+                      </span>
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-6 py-2.5">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      s.state === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {s.state === 'pending' ? t('diag.shadow.pending') : t('diag.shadow.synced')}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {filteredShadows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-6 text-center text-slate-400 text-xs">
+                    {shadows.length === 0 ? t('diag.shadow.empty') : t('diag.noMatch', { q: shadowSearch })}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-6 py-2 bg-slate-50 text-[10px] text-slate-400">
+          {t('diag.shadow.hint')}
         </div>
       </div>
 

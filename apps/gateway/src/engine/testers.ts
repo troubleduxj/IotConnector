@@ -1,5 +1,5 @@
 import ModbusRTU from 'modbus-serial';
-import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds } from 'node-opcua';
+import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds, TimestampsToReturn, ClientSubscription } from 'node-opcua';
 import NodeS7 from 'nodes7';
 import type { Channel } from '@iotconnector/shared';
 import { probeMelsec } from './drivers/melsec';
@@ -17,6 +17,13 @@ export interface ChannelTestResult {
   rttMs: number;
   steps: TestStep[];
   error?: string;
+}
+
+/** S7 多位号探针（#15）：探针名称 → nodes7 地址 */
+export interface S7ProbeItem {
+  name: string;
+  nodes7Addr: string;
+  addrLabel: string;
 }
 
 /**
@@ -44,7 +51,7 @@ async function testModbus(channel: Channel, steps: TestStep[]): Promise<void> {
   client.close(() => {});
 }
 
-async function testS7(channel: Channel, steps: TestStep[], probeNodes7Addr?: string, probeAddrLabel?: string): Promise<void> {
+async function testS7(channel: Channel, steps: TestStep[], probes?: S7ProbeItem[]): Promise<void> {
   const conn = new NodeS7();
   const t0 = Date.now();
   steps.push({ label: 'TCP / ISO-on-TCP (COTP)', ok: true, detail: `${channel.host}:${channel.port}` });
@@ -59,10 +66,11 @@ async function testS7(channel: Channel, steps: TestStep[], probeNodes7Addr?: str
     'S7 连接',
   );
   steps.push({ label: 'S7 通讯建立 (0xF0)', ok: true, detail: `Rack ${channel.params.rack ?? 0} / Slot ${channel.params.slot ?? 1}` });
-  // 读取第一个位号作为探针（无位号则跳过）
-  if (probeNodes7Addr && probeAddrLabel) {
-    conn.setTranslationCB((tag) => (tag === 'probe' ? probeNodes7Addr : undefined));
-    conn.addItems(['probe']);
+  // #15 多位号探针循环：全部探针一次性加入翻译表，单次 readAllItems 批量读回（与采集驱动同路径）
+  if (probes && probes.length > 0) {
+    const byName = new Map(probes.map((p) => [p.name, p.nodes7Addr]));
+    conn.setTranslationCB((tag) => byName.get(tag));
+    conn.addItems(probes.map((p) => p.name));
     const values = await withTimeout(
       new Promise<Record<string, number | boolean | string>>((resolve, reject) => {
         conn.readAllItems((err, vals) => (err ? reject(new Error(String(err))) : resolve(vals ?? {})));
@@ -70,7 +78,11 @@ async function testS7(channel: Channel, steps: TestStep[], probeNodes7Addr?: str
       5000,
       '读取探针',
     );
-    steps.push({ label: '读探针点位', ok: true, detail: `${probeAddrLabel} = ${values['probe']}` });
+    for (const p of probes) {
+      const v = values[p.name];
+      steps.push({ label: '读探针点位', ok: v !== undefined, detail: `${p.addrLabel} = ${v === undefined ? '无返回' : String(v)}` });
+    }
+    steps.push({ label: '探针批量读', ok: true, detail: `${probes.length} 个位号 / 1 次 PDU 往返` });
   }
   await new Promise<void>((resolve) => conn.dropConnection(() => resolve()));
   steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
@@ -92,6 +104,57 @@ async function testOpcUa(channel: Channel, steps: TestStep[], probeNodeId?: stri
   const nodeId = probeNodeId ?? 'ns=0;i=2258'; // Server_ServerStatus_CurrentTime
   const dv = await withTimeout(session.read({ nodeId, attributeId: AttributeIds.Value }), 4000, '读取探针');
   steps.push({ label: '读探针节点', ok: true, detail: `${nodeId} = ${String(dv.value?.value)}` });
+  // #15 订阅式探针：创建 Subscription + MonitoredItem，等待首个数据通知（验证 Publishing 通道与采集驱动同路径）
+  try {
+    const subscription = ClientSubscription.create(session, {
+      requestedPublishingInterval: 500,
+      requestedLifetimeCount: 60,
+      requestedMaxKeepAliveCount: 10,
+      maxNotificationsPerPublish: 10,
+      publishingEnabled: true,
+      priority: 0,
+    });
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        subscription.on('started', () => resolve());
+        subscription.on('internal_error', (err: Error) => reject(err));
+      }),
+      5000,
+      '订阅创建',
+    );
+    const firstValue = await withTimeout(
+      new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('订阅无数据通知')), 5000);
+        void subscription
+          .monitor(
+            { nodeId, attributeId: AttributeIds.Value },
+            { samplingInterval: 200, discardOldest: true, queueSize: 1 },
+            TimestampsToReturn.Both,
+          )
+          .then((item) => {
+            item.on('changed', (dataValue) => {
+              clearTimeout(timer);
+              resolve(String(dataValue.value?.value));
+            });
+            item.on('err', (err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+          })
+          .catch((err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
+      }),
+      6000,
+      '订阅采样',
+    );
+    steps.push({ label: '订阅采样 (MonitoredItem)', ok: true, detail: `${nodeId} = ${firstValue}` });
+    await subscription.terminate();
+  } catch (e) {
+    // 订阅失败不否定连接本身（只读已验证服务可用），记录告警步骤
+    steps.push({ label: '订阅采样 (MonitoredItem)', ok: false, detail: String((e as Error).message ?? e) });
+  }
   await session.close();
   await client.disconnect();
   steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
@@ -130,7 +193,7 @@ async function testEnip(channel: Channel, steps: TestStep[], probeTag?: string):
 /** 执行通道真实连接测试（不干扰运行中的采集驱动） */
 export async function testChannel(
   channel: Channel,
-  s7Probe?: { nodes7Addr: string; addrLabel: string },
+  s7Probes?: S7ProbeItem[],
   opcProbeNodeId?: string,
   rawProbeAddr?: string,
 ): Promise<ChannelTestResult> {
@@ -141,7 +204,7 @@ export async function testChannel(
         await testModbus(channel, steps);
         break;
       case 'Siemens Profinet':
-        await testS7(channel, steps, s7Probe?.nodes7Addr, s7Probe?.addrLabel);
+        await testS7(channel, steps, s7Probes);
         break;
       case 'OPC UA':
         await testOpcUa(channel, steps, opcProbeNodeId);

@@ -11,7 +11,7 @@ import { loadConfig, saveConfig, seedConfig } from './config';
 import { AlarmEngine } from './alarms';
 import { getFrames, clearFrames } from './diagnostics';
 import { dispatchAlarm, sendTestMessage } from './notify';
-import { testChannel } from './engine/testers';
+import { testChannel, type S7ProbeItem } from './engine/testers';
 import { channelCommStats } from './engine/stats';
 import { toNodes7Address } from './engine/drivers/s7';
 import { StorageTaskEngine } from './storage-tasks';
@@ -548,20 +548,25 @@ async function main(): Promise<void> {
     const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
     if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
     const channelTagList = tags.filter((t) => t.channelId === channel.id);
-    let s7Probe: { nodes7Addr: string; addrLabel: string } | undefined;
+    // #15 S7 多位号探针：通道全部位号（上限 8）一次性批量读回
+    let s7Probes: S7ProbeItem[] | undefined;
     let opcProbe: string | undefined;
-    if (channel.protocol === 'Siemens Profinet' && channelTagList[0]) {
-      try {
-        s7Probe = { nodes7Addr: toNodes7Address(channelTagList[0].address), addrLabel: `${channelTagList[0].address}` };
-      } catch {
-        /* 地址不可解析则跳过探针 */
+    if (channel.protocol === 'Siemens Profinet' && channelTagList.length > 0) {
+      const probes: S7ProbeItem[] = [];
+      for (const tg of channelTagList.slice(0, 8)) {
+        try {
+          probes.push({ name: `probe_${probes.length}`, nodes7Addr: toNodes7Address(tg.address), addrLabel: tg.address });
+        } catch {
+          /* 单个地址不可解析则跳过 */
+        }
       }
+      if (probes.length > 0) s7Probes = probes;
     }
     if (channel.protocol === 'OPC UA' && channelTagList[0]) opcProbe = channelTagList[0].address;
     const rawProbe = ['Mitsubishi MELSEC', 'Omron FINS', 'EtherNet/IP (Rockwell)'].includes(channel.protocol)
       ? channelTagList[0]?.address
       : undefined;
-    const result = await testChannel(channel, s7Probe, opcProbe, rawProbe);
+    const result = await testChannel(channel, s7Probes, opcProbe, rawProbe);
     return result;
   });
 

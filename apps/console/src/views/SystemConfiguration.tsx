@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2 } from 'lucide-react';
+import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2, Users, Trash2, KeyRound, Plus } from 'lucide-react';
 import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus } from '../api';
 import { useI18n } from '../i18n';
+import { toast } from '../components/Toast';
 
 interface NotificationConfig {
   enabled: boolean;
@@ -18,6 +19,9 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'operator' as ConsoleUser['role'] });
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [resetPw, setResetPw] = useState('');
+  const [userBusy, setUserBusy] = useState(false);
   const [northbound, setNorthbound] = useState<NorthboundConfig | null>(null);
   const [nbStatus, setNbStatus] = useState<NorthboundStatus | null>(null);
   const [nbBusy, setNbBusy] = useState(false);
@@ -66,6 +70,47 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     });
     setNotifyToast(t('sys.notify.saved'));
     setTimeout(() => setNotifyToast(null), 2500);
+  };
+
+  // ===== 用户管理（admin）：新建/重置密码 → 该用户下次登录强制改密 =====
+  const refreshUsers = (): void => {
+    void fetchUsers().then(setUsers).catch(() => {});
+  };
+  const apiError = async (res: Response): Promise<string> => {
+    return ((await res.json().catch(() => ({}))) as { error?: string }).error ?? t('sys.users.failed');
+  };
+  const changeUserRole = async (u: ManagedUser, role: ConsoleUser['role']): Promise<void> => {
+    const res = await updateUser(u.id, { role });
+    if (!res.ok) { toast(await apiError(res), false); refreshUsers(); return; }
+    showToastMsg(t('sys.users.saved'));
+    refreshUsers();
+  };
+  const applyReset = async (u: ManagedUser): Promise<void> => {
+    const res = await updateUser(u.id, { password: resetPw });
+    if (!res.ok) { toast(await apiError(res), false); return; }
+    toast(t('sys.users.resetDone', { name: u.username }));
+    setResetTarget(null);
+    setResetPw('');
+    refreshUsers();
+  };
+  const removeUser = async (u: ManagedUser): Promise<void> => {
+    const res = await deleteUser(u.id);
+    if (!res.ok) { toast(await apiError(res), false); return; }
+    toast(t('sys.users.deleted', { name: u.username }));
+    refreshUsers();
+  };
+  const addUser = async (): Promise<void> => {
+    setUserBusy(true);
+    try {
+      await createUser(newUser.username, newUser.password, newUser.role);
+      toast(t('sys.users.addDone', { name: newUser.username }));
+      setNewUser({ username: '', password: '', role: 'operator' });
+      refreshUsers();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : t('sys.users.failed'), false);
+    } finally {
+      setUserBusy(false);
+    }
   };
 
   // Fallback for isolated preview
@@ -423,6 +468,126 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
             </div>
           </div>
         </div>
+
+        {/* 用户管理（admin）：新建用户 / 重置密码 → 下次登录强制改密（FR-M10-02） */}
+        {me?.role === 'admin' && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Users className="w-5 h-5" /></div>
+                <div>
+                  <h3 className="font-bold text-slate-800">{t('sys.users.title')}</h3>
+                  <p className="text-[11px] text-slate-400">{t('sys.users.desc')}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 space-y-2">
+              {users.map((u) => (
+                <div key={u.id} className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                  <div className="flex items-center gap-2.5 px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-800 truncate">{u.username}</span>
+                        {u.mustChangePassword && (
+                          <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                            {t('sys.users.mustBadge')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {t('sys.users.createdAt')}: {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
+                      </div>
+                    </div>
+                    <select
+                      value={u.role}
+                      onChange={(e) => void changeUserRole(u, e.target.value as ConsoleUser['role'])}
+                      className="shrink-0 px-2 py-1.5 border border-slate-300 rounded-md text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    >
+                      <option value="admin">{t('role.admin')}</option>
+                      <option value="engineer">{t('role.engineer')}</option>
+                      <option value="operator">{t('role.operator')}</option>
+                    </select>
+                    <button
+                      onClick={() => { setResetTarget(resetTarget === u.id ? null : u.id); setResetPw(''); }}
+                      className="shrink-0 flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 mr-1" /> {t('sys.users.reset')}
+                    </button>
+                    <button
+                      onClick={() => void removeUser(u)}
+                      disabled={u.id === me.id}
+                      title={u.id === me.id ? t('sys.users.cannotDeleteSelf') : undefined}
+                      className="shrink-0 p-1.5 text-slate-400 border border-slate-200 rounded-md hover:text-rose-600 hover:border-rose-200 disabled:opacity-40 disabled:hover:text-slate-400 disabled:hover:border-slate-200"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {resetTarget === u.id && (
+                    <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50">
+                      <input
+                        type="password"
+                        value={resetPw}
+                        onChange={(e) => setResetPw(e.target.value)}
+                        placeholder={t('sys.users.newPassword')}
+                        className="flex-1 min-w-0 px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      />
+                      <button
+                        onClick={() => void applyReset(u)}
+                        disabled={resetPw.length < 6}
+                        className="shrink-0 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {t('sys.users.apply')}
+                      </button>
+                      <button
+                        onClick={() => setResetTarget(null)}
+                        className="shrink-0 px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                      >
+                        {t('sys.users.cancel')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* 新建用户 */}
+              <div className="border-t border-slate-100 pt-4 mt-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">{t('sys.users.add')}</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <input
+                    value={newUser.username}
+                    onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                    placeholder={t('sys.users.username')}
+                    className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                  <input
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                    placeholder={t('sys.users.initialPassword')}
+                    className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                  <select
+                    value={newUser.role}
+                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value as ConsoleUser['role'] })}
+                    className="px-3 py-2 border border-slate-300 rounded-md text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  >
+                    <option value="admin">{t('role.admin')}</option>
+                    <option value="engineer">{t('role.engineer')}</option>
+                    <option value="operator">{t('role.operator')}</option>
+                  </select>
+                  <button
+                    onClick={() => void addUser()}
+                    disabled={!newUser.username || newUser.password.length < 6 || userBusy}
+                    className="flex items-center justify-center px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {userBusy ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Plus className="w-4 h-4 mr-1.5" />}
+                    {t('sys.users.add')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         </div>
 

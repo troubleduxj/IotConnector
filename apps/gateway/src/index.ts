@@ -660,7 +660,8 @@ async function main(): Promise<void> {
   app.get('/api/auth/me', async (req, reply) => {
     const user = authStore.verify(tokenOf(req));
     if (!user) return reply.code(401).send({ ok: false, error: '未登录' });
-    return user;
+    // 携带 mustChangePassword，使前端刷新/重开页面后仍能恢复强制改密 gate
+    return { ...user, mustChangePassword: authStore.findUser(user.id)?.mustChangePassword ?? false };
   });
 
   app.get('/api/users', async (req, reply) => {
@@ -682,6 +683,8 @@ async function main(): Promise<void> {
       passwordHash: hashPassword(b.password),
       role: b.role,
       createdAt: Date.now(),
+      // 管理员代设初始口令 → 首次登录强制改密
+      mustChangePassword: true,
     };
     authStore.setUsers([...authStore.getUsers(), created]);
     persist();
@@ -695,10 +698,10 @@ async function main(): Promise<void> {
     const target = authStore.findUser((req.params as { id: string }).id);
     if (!target) return reply.code(404).send({ ok: false, error: 'user not found' });
     const b = (req.body ?? {}) as { password?: string; role?: Role };
-    if (b.password) target.passwordHash = hashPassword(b.password);
+    if (b.password) authStore.resetPassword(target.id, b.password);
     if (b.role) target.role = b.role;
     persist();
-    auditLog(actor, 'user.update', `${target.username} role=${target.role}`);
+    auditLog(actor, 'user.update', `${target.username} role=${target.role}${b.password ? ' +password reset' : ''}`);
     return { id: target.id, username: target.username, role: target.role };
   });
 

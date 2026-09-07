@@ -142,6 +142,15 @@ export class AuthStore {
     return true;
   }
 
+  /** 管理员重置口令：散列更新并强制该用户下次登录改密 */
+  resetPassword(userId: string, newPassword: string): boolean {
+    const user = this.users.find((u) => u.id === userId);
+    if (!user) return false;
+    user.passwordHash = hashPassword(newPassword);
+    user.mustChangePassword = true;
+    return true;
+  }
+
   /** 启动时恢复持久化的会话 */
   loadSessions(entries: Array<{ token: string; user: SessionUser; expiresAt: number }>): void {
     for (const e of entries) {

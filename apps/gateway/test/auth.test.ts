@@ -54,4 +54,26 @@ describe('AuthStore', () => {
     store.logout(login.token);
     expect(store.verify(login.token)).toBeNull();
   });
+
+  it('管理员重置口令：置 mustChangePassword，旧口令失效、新口令可登录', () => {
+    const store = makeStore();
+    expect(store.resetPassword('u2', 'newpass9')).toBe(true);
+    expect(store.login('op', 'op12345')?.ok ?? null).toBe(null);
+    const login = store.login('op', 'newpass9');
+    expect(login?.ok).toBe(true);
+    expect(login?.ok === true ? login.mustChangePassword : false).toBe(true);
+  });
+
+  it('用户改密后 mustChangePassword 清除', () => {
+    const store = makeStore();
+    store.resetPassword('u2', 'newpass9');
+    expect(store.changePassword('u2', 'mypersonal7')).toBe(true);
+    const login = store.login('op', 'mypersonal7');
+    expect(login?.ok === true ? login.mustChangePassword : true).toBe(false);
+  });
+
+  it('未标记用户登录不返回 mustChangePassword', () => {
+    const login = makeStore().login('admin', 'secret1');
+    expect(login?.ok === true ? Boolean(login.mustChangePassword) : true).toBe(false);
+  });
 });

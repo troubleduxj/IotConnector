@@ -262,14 +262,14 @@ export async function login(username: string, password: string): Promise<{ token
   return { token: body.token, user: body.user, mustChangePassword: body.mustChangePassword };
 }
 
-export async function fetchMe(): Promise<ConsoleUser | null> {
+export async function fetchMe(): Promise<(ConsoleUser & { mustChangePassword?: boolean }) | null> {
   if (!getToken()) return null;
   const res = await apiFetch('/api/auth/me');
   if (!res.ok) {
     setToken(null);
     return null;
   }
-  return (await res.json()) as ConsoleUser;
+  return (await res.json()) as ConsoleUser & { mustChangePassword?: boolean };
 }
 
 export async function logout(): Promise<void> {
@@ -287,6 +287,7 @@ export interface ManagedUser {
   username: string;
   role: ConsoleRole;
   createdAt?: number;
+  mustChangePassword?: boolean;
 }
 
 export async function fetchUsers(): Promise<ManagedUser[]> {
@@ -303,16 +304,16 @@ export async function createUser(username: string, password: string, role: Conso
   return (await res.json()) as ManagedUser;
 }
 
-export async function updateUser(id: string, patch: { password?: string; role?: ConsoleRole }): Promise<void> {
-  await apiFetch(`/api/users/${id}`, {
+export async function updateUser(id: string, patch: { password?: string; role?: ConsoleRole }): Promise<Response> {
+  return apiFetch(`/api/users/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),
   });
 }
 
-export async function deleteUser(id: string): Promise<void> {
-  await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
+export async function deleteUser(id: string): Promise<Response> {
+  return apiFetch(`/api/users/${id}`, { method: 'DELETE' });
 }
 
 // ===== 审计日志（admin）=====

@@ -44,7 +44,8 @@ function Shell(): React.JSX.Element {
   const [mustChange, setMustChange] = useState(false);
 
   useEffect(() => {
-    fetchMe().then((u) => setUser(u)).catch(() => setUser(null));
+    // me 携带 mustChangePassword：刷新/重开页面后仍恢复强制改密 gate
+    fetchMe().then((u) => { setMustChange(Boolean(u?.mustChangePassword)); setUser(u); }).catch(() => setUser(null));
     const onExpired = (): void => setUser(null);
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);

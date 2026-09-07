@@ -534,6 +534,18 @@ const jsonPost = (body: unknown): RequestInit => ({
 export const fetchStorageTasks = async (): Promise<StorageTask[]> =>
   (await apiFetch('/api/storage-tasks')).json() as Promise<StorageTask[]>;
 
+/** FR-M4-06 任务运行状态（/api/storage-tasks/stats，按任务 id 索引） */
+export interface StorageTaskRuntime {
+  writes: number;
+  lastWriteAt?: number;
+  errors: number;
+  lastError?: string;
+  ratePerMin: number;
+}
+
+export const fetchStorageTaskStats = async (): Promise<Record<string, StorageTaskRuntime>> =>
+  (await apiFetch('/api/storage-tasks/stats')).json() as Promise<Record<string, StorageTaskRuntime>>;
+
 export const createStorageTask = async (task: Omit<StorageTask, 'id'>): Promise<StorageTask> => {
   const res = await apiFetch('/api/storage-tasks', jsonPost(task));
   if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? '创建失败');

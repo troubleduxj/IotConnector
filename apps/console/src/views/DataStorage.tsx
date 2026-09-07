@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Database, Plus, Save, Trash2, Loader2, Zap } from 'lucide-react';
 import {
   fetchStorageTasks, createStorageTask, updateStorageTask, deleteStorageTask,
-  fetchGatewayTags, type StorageTask, type GatewayTag,
+  fetchStorageTaskStats, fetchGatewayTags, type StorageTask, type StorageTaskRuntime, type GatewayTag,
 } from '../api';
 import { useI18n } from '../i18n';
 
@@ -19,6 +19,7 @@ const emptyTask = (name: string): Omit<StorageTask, 'id'> => ({
 export default function DataStorage() {
   const { t } = useI18n();
   const [tasks, setTasks] = useState<StorageTask[]>([]);
+  const [taskStats, setTaskStats] = useState<Record<string, StorageTaskRuntime>>({});
   const [tags, setTags] = useState<GatewayTag[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<StorageTask | null>(null);
@@ -35,6 +36,14 @@ export default function DataStorage() {
   };
 
   useEffect(() => { void load(); }, []);
+
+  // FR-M4-06 运行状态轮询（3s）
+  useEffect(() => {
+    const poll = (): void => { fetchStorageTaskStats().then(setTaskStats).catch(() => undefined); };
+    poll();
+    const timer = setInterval(poll, 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const t = tasks.find((x) => x.id === selectedId);
@@ -102,6 +111,23 @@ export default function DataStorage() {
                 <div className="text-[10px] font-mono text-slate-400 mt-1">
                   {task.tableName} · {task.trigger.mode === 'cycle' ? t('stor.triggerCycle', { ms: task.trigger.intervalMs }) : task.trigger.mode === 'deadband' ? t('stor.triggerDeadband', { db: task.trigger.deadband }) : task.trigger.mode === 'edge' ? t('stor.triggerEdge', { edge: task.trigger.edge }) : t('stor.triggerExpression', { expr: task.trigger.expression ?? '' })}
                 </div>
+                {/* FR-M4-06 运行状态：写入计数 / 近 1 分钟速率 / 最近写入 / 错误 */}
+                {(() => {
+                  const rs = taskStats[task.id];
+                  if (!rs) return <div className="text-[10px] font-mono text-slate-300 mt-0.5">{t('stor.runNever')}</div>;
+                  return (
+                    <div className="text-[10px] font-mono mt-0.5 flex items-center gap-2 flex-wrap">
+                      <span className="text-slate-500">{t('stor.runWrites', { n: rs.writes })}</span>
+                      {rs.ratePerMin > 0 && <span className="text-indigo-600">{t('stor.runRate', { n: rs.ratePerMin })}</span>}
+                      <span className="text-slate-400">
+                        {rs.lastWriteAt ? t('stor.runLast', { time: new Date(rs.lastWriteAt).toLocaleTimeString() }) : t('stor.runNever')}
+                      </span>
+                      {rs.errors > 0 && (
+                        <span className="text-rose-600 font-bold" title={rs.lastError}>{t('stor.runErrors', { n: rs.errors })}</span>
+                      )}
+                    </div>
+                  );
+                })()}
               </button>
             ))}
             {tasks.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">{t('stor.emptyTasks')}</div>}

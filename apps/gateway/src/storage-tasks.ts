@@ -39,6 +39,8 @@ export class StorageTaskEngine {
   private exprCache = new Map<string, CompiledExpr>();
   /** expression 用：条件上一次求值结果（上升沿检测） */
   private exprLast = new Map<string, boolean>();
+  /** FR-M4-06 任务运行状态：写入计数/最近写入/错误/近 1 分钟速率 */
+  private runStats = new Map<string, { writes: number; lastWriteAt?: number; errors: number; lastError?: string; recent: number[] }>();
 
   constructor(
     private storage: TDengineWriter,
@@ -57,10 +59,11 @@ export class StorageTaskEngine {
     }
     this.tasks = tasks;
     const ids = new Set(tasks.filter((t) => t.enabled).map((t) => t.id));
-    // 清理已删除任务的表达式缓存/沿状态
+    // 清理已删除任务的表达式缓存/沿状态/运行统计
     const allIds = new Set(tasks.map((t) => t.id));
     for (const id of [...this.exprCache.keys()]) if (!allIds.has(id)) this.exprCache.delete(id);
     for (const id of [...this.exprLast.keys()]) if (!allIds.has(id)) this.exprLast.delete(id);
+    for (const id of [...this.runStats.keys()]) if (!allIds.has(id)) this.runStats.delete(id);
     // 停止不再启用/已删除的任务
     for (const [id, timer] of this.timers) {
       if (!ids.has(id)) {
@@ -178,6 +181,7 @@ export class StorageTaskEngine {
 
   /** 写一行：所有映射列取当前值 */
   private async writeSnapshot(task: StorageTask): Promise<void> {
+    if (task.mappings.length === 0) return; // 无映射列时无从写起，避免对未建表的目标反复报错
     const cols: string[] = ['ts'];
     const vals: string[] = ['now'];
     for (const m of task.mappings) {
@@ -190,7 +194,28 @@ export class StorageTaskEngine {
     const result = await this.storage.query(
       `INSERT INTO ${this.db}.${sanitizeTable(task.tableName)} (${cols.join(', ')}) VALUES (${vals.join(', ')})`,
     );
-    if (result.code !== 0) console.error(`[storage-tasks] ${task.name}: ${result.code} ${result.msg ?? result.desc ?? ''}`);
+    const st = this.runStats.get(task.id) ?? { writes: 0, errors: 0, recent: [] };
+    if (result.code !== 0) {
+      st.errors += 1;
+      st.lastError = result.msg ?? result.desc ?? String(result.code);
+      console.error(`[storage-tasks] ${task.name}: ${result.code} ${st.lastError}`);
+    } else {
+      st.writes += 1;
+      st.lastWriteAt = Date.now();
+      st.recent.push(st.lastWriteAt);
+    }
+    this.runStats.set(task.id, st);
+  }
+
+  /** FR-M4-06 导出任务运行状态（近 1 分钟速率由 recent 时间戳惰性裁剪得出） */
+  runtimeStats(): Record<string, { writes: number; lastWriteAt?: number; errors: number; lastError?: string; ratePerMin: number }> {
+    const now = Date.now();
+    const out: Record<string, { writes: number; lastWriteAt?: number; errors: number; lastError?: string; ratePerMin: number }> = {};
+    for (const [id, st] of this.runStats) {
+      st.recent = st.recent.filter((ts) => now - ts < 60_000);
+      out[id] = { writes: st.writes, lastWriteAt: st.lastWriteAt, errors: st.errors, lastError: st.lastError, ratePerMin: st.recent.length };
+    }
+    return out;
   }
 
   private async runCycle(task: StorageTask): Promise<void> {

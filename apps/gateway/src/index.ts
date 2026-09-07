@@ -776,6 +776,7 @@ async function main(): Promise<void> {
         '/api/channels': { get: { summary: '通道列表' }, post: { summary: '新建通道' } },
         '/api/channels/{id}/test': { post: { summary: '真实连接测试（分步握手）' } },
         '/api/storage-tasks': { get: { summary: '存储任务' }, post: { summary: '新建存储任务' } },
+        '/api/storage-tasks/stats': { get: { summary: '任务运行状态（写入/速率/错误）' } },
         '/api/recipes': { get: { summary: '配方列表' } },
         '/api/recipes/{id}/download': { post: { summary: '配方下发到设备' } },
         '/api/scripts': { get: { summary: '边缘脚本' } },
@@ -1083,6 +1084,9 @@ async function main(): Promise<void> {
 
   // ===== 存储任务 CRUD（PRD FR-M4-01）=====
   app.get('/api/storage-tasks', async () => config.storageTasks ?? []);
+
+  // FR-M4-06 任务运行状态：写入计数/最近写入/近 1 分钟速率/错误
+  app.get('/api/storage-tasks/stats', async () => storageTaskEngine.runtimeStats());
 
   app.post('/api/storage-tasks', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');

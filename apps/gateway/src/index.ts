@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   const getValue = (tagId: string): number | string | boolean | undefined =>
     engine.snapshot().find((v) => v.id === tagId)?.value;
 
-  const storageTaskEngine = new StorageTaskEngine(storage, getValue, getTag, process.env.TDENGINE_DB ?? 'factory_bridge');
+  const storageTaskEngine = new StorageTaskEngine(storage, getValue, getTag, process.env.TDENGINE_DB ?? 'factory_bridge', () => tags);
   storageTaskEngine.sync(config.storageTasks ?? []);
 
   const scriptEngine = new ScriptEngine(

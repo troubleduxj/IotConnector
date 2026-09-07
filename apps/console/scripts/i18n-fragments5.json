@@ -28,5 +28,19 @@
       "diag.kind.deviation": "Deviation",
       "diag.kind.roc": "Rate of change"
     }
+  },
+  "stor": {
+    "zh": {
+      "stor.modeExpression": "条件表达式",
+      "stor.expressionLabel": "触发表达式",
+      "stor.expressionHint": "位号按名称引用，条件由假变真时写一行（事件语义）。支持 > < >= <= == != && || ! + - * / % 与括号；单等号自动视为 ==。",
+      "stor.triggerExpression": "表达式 {expr}"
+    },
+    "en": {
+      "stor.modeExpression": "Expression",
+      "stor.expressionLabel": "Trigger expression",
+      "stor.expressionHint": "Reference tags by name; one row is written on false→true (event semantics). Supports > < >= <= == != && || ! + - * / % and parentheses; a single = is treated as ==.",
+      "stor.triggerExpression": "expr {expr}"
+    }
   }
 }

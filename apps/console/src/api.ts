@@ -417,11 +417,13 @@ export async function testNotificationChannel(channel: string): Promise<{ ok: bo
 // ===== 存储任务 / 配方 / 脚本 / 调度 / 确认（Phase 1 收尾）=====
 
 export interface StorageTrigger {
-  mode: 'cycle' | 'deadband' | 'edge';
+  mode: 'cycle' | 'deadband' | 'edge' | 'expression';
   intervalMs?: number;
   tagId?: string;
   deadband?: number;
   edge?: 'rising' | 'falling';
+  /** mode === 'expression' 时的触发条件（位号按名引用，如 `温度1 > 80 && 电机运行 == true`） */
+  expression?: string;
 }
 
 export interface StorageTask {

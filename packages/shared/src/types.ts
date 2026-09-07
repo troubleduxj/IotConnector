@@ -160,7 +160,8 @@ export interface EmailConfig {
 export type StorageTrigger =
   | { mode: 'cycle'; intervalMs: number }
   | { mode: 'deadband'; tagId: string; deadband: number }
-  | { mode: 'edge'; tagId: string; edge: 'rising' | 'falling' };
+  | { mode: 'edge'; tagId: string; edge: 'rising' | 'falling' }
+  | { mode: 'expression'; expression: string };
 
 export interface StorageTask {
   id: string;

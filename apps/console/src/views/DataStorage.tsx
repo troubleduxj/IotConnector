@@ -100,7 +100,7 @@ export default function DataStorage() {
                   <span className={`w-2 h-2 rounded-full ${task.enabled ? 'bg-green-500' : 'bg-slate-300'}`} />
                 </div>
                 <div className="text-[10px] font-mono text-slate-400 mt-1">
-                  {task.tableName} · {task.trigger.mode === 'cycle' ? t('stor.triggerCycle', { ms: task.trigger.intervalMs }) : task.trigger.mode === 'deadband' ? t('stor.triggerDeadband', { db: task.trigger.deadband }) : t('stor.triggerEdge', { edge: task.trigger.edge })}
+                  {task.tableName} · {task.trigger.mode === 'cycle' ? t('stor.triggerCycle', { ms: task.trigger.intervalMs }) : task.trigger.mode === 'deadband' ? t('stor.triggerDeadband', { db: task.trigger.deadband }) : task.trigger.mode === 'edge' ? t('stor.triggerEdge', { edge: task.trigger.edge }) : t('stor.triggerExpression', { expr: task.trigger.expression ?? '' })}
                 </div>
               </button>
             ))}
@@ -147,7 +147,8 @@ export default function DataStorage() {
                       const trigger =
                         mode === 'cycle' ? { mode, intervalMs: 5000 } :
                         mode === 'deadband' ? { mode, tagId: tags[0]?.id ?? '', deadband: 0.5 } :
-                        { mode, tagId: tags[0]?.id ?? '', edge: 'rising' as const };
+                        mode === 'edge' ? { mode, tagId: tags[0]?.id ?? '', edge: 'rising' as const } :
+                        { mode, expression: tags[0] ? `${tags[0].name} > 0` : '' };
                       setDraft({ ...draft, trigger });
                     }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-medium bg-slate-50"
@@ -155,6 +156,7 @@ export default function DataStorage() {
                     <option value="cycle">{t('stor.modeCycle')}</option>
                     <option value="deadband">{t('stor.modeDeadband')}</option>
                     <option value="edge">{t('stor.modeEdge')}</option>
+                    <option value="expression">{t('stor.modeExpression')}</option>
                   </select>
                 </div>
               </div>
@@ -198,6 +200,19 @@ export default function DataStorage() {
                       <option value="falling">{t('stor.edgeFalling')}</option>
                     </select>
                   </div>
+                </div>
+              )}
+
+              {draft.trigger.mode === 'expression' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('stor.expressionLabel')}</label>
+                  <input
+                    value={draft.trigger.expression ?? ''}
+                    onChange={(e) => setDraft({ ...draft, trigger: { mode: 'expression', expression: e.target.value } })}
+                    placeholder={tags[0] ? `${tags[0].name} > 80 && ${tags[1]?.name ?? tags[0].name} == true` : 'tag_a > 80'}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">{t('stor.expressionHint')}</p>
                 </div>
               )}
 

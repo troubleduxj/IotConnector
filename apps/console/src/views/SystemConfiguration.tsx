@@ -19,7 +19,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [auditFilter, setAuditFilter] = useState('');
-  const [tab, setTab] = useState<'config' | 'audit'>('config');
+  const [tab, setTab] = useState<'config' | 'users' | 'audit'>('config');
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'operator' as ConsoleUser['role'] });
   const [resetTarget, setResetTarget] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState('');
@@ -199,6 +199,16 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
         >
           {t('sys.title')}
         </button>
+        {me?.role === 'admin' && (
+          <button
+            onClick={() => setTab('users')}
+            className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+              tab === 'users' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            {t('sys.users.title')}
+          </button>
+        )}
         {me?.role === 'admin' && (
           <button
             onClick={() => setTab('audit')}
@@ -520,8 +530,14 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
           </div>
         </div>
 
-        {/* 用户管理（admin）：新建用户 / 重置密码 → 下次登录强制改密（FR-M10-02） */}
-        {me?.role === 'admin' && (
+        </div>
+
+      </div>
+      )}
+
+      {/* 用户管理（admin）：新建 / 重置密码 → 下次登录强制改密（FR-M10-02） */}
+      {tab === 'users' && me?.role === 'admin' && (
+        <div className="max-w-3xl">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-3">
@@ -638,11 +654,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
               </div>
             </div>
           </div>
-        )}
-
         </div>
-
-      </div>
       )}
 
       {/* 审计日志（FR-M10-03，admin）：配置变更/写操作/下发/登录全量留痕 */}

@@ -66,5 +66,17 @@
       "sys.info.resetFail": "Factory reset failed",
       "sys.nb.lastPublish": "Last publish"
     }
+  },
+  "dev": {
+    "zh": {
+      "dev.col.liveValue": "实时值",
+      "dev.col.waitLive": "等待采集…",
+      "dev.addrValid": "地址格式合法"
+    },
+    "en": {
+      "dev.col.liveValue": "Live value",
+      "dev.col.waitLive": "Waiting…",
+      "dev.addrValid": "Address format valid"
+    }
   }
 }

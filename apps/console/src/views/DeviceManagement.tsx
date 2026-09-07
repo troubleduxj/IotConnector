@@ -29,7 +29,7 @@ const PROTOCOL_CAT_KEYS: Record<string, string> = {
 };
 
 export default function DeviceManagement() {
-  const { channels: channelStatus, connect } = useRuntime();
+  const { channels: channelStatus, liveValues, connect } = useRuntime();
   const { t } = useI18n();
   const [channels, setChannels] = useState<GatewayChannel[]>([]);
   const [tags, setTags] = useState<GatewayTag[]>([]);
@@ -636,6 +636,7 @@ export default function DeviceManagement() {
                           <th className="px-4 py-2.5">{t('dev.col.address')}</th>
                           <th className="px-4 py-2.5">{t('dev.col.type')}</th>
                           <th className="px-4 py-2.5">{t('dev.common.unit')}</th>
+                          <th className="px-4 py-2.5">{t('dev.col.liveValue')}</th>
                           <th className="px-4 py-2.5">{t('dev.col.scale')}</th>
                           <th className="px-4 py-2.5 text-right">{t('dev.col.actions')}</th>
                         </tr>
@@ -650,6 +651,20 @@ export default function DeviceManagement() {
                             <td className="px-4 py-2.5 font-mono text-slate-500">{tag.address}</td>
                             <td className="px-4 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-bold">{tag.dataType}</span></td>
                             <td className="px-4 py-2.5 font-mono text-slate-500">{tag.unit || '—'}</td>
+                            <td className="px-4 py-2.5">
+                              {(() => {
+                                const live = liveValues[tag.id];
+                                const isBad = live?.quality === 'Bad';
+                                return (
+                                  <span className="inline-flex items-center gap-1.5" title={live ? `${live.quality} · ${new Date(live.ts).toLocaleTimeString()}` : t('dev.col.waitLive')}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${live ? (isBad ? 'bg-rose-500' : 'bg-emerald-500') : 'bg-slate-300'}`} />
+                                    <span className={`font-mono font-bold tabular-nums ${live ? (isBad ? 'text-slate-400' : 'text-slate-800') : 'text-slate-300'}`}>
+                                      {live ? (typeof live.value === 'number' ? Number(live.value.toFixed(4)) : String(live.value)) : '—'}
+                                    </span>
+                                  </span>
+                                );
+                              })()}
+                            </td>
                             <td className="px-4 py-2.5 font-mono text-slate-500">
                               ×{tag.scale} {tag.offset !== 0 ? `${tag.offset > 0 ? '+' : ''}${tag.offset}` : ''}
                             </td>
@@ -664,7 +679,7 @@ export default function DeviceManagement() {
                           </tr>
                         ))}
                         {filteredTagList.length === 0 && (
-                          <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{t('dev.tags.empty')}</td></tr>
+                          <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{t('dev.tags.empty')}</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -778,15 +793,23 @@ export default function DeviceManagement() {
                   value={tagModal.draft.address}
                   onChange={(e) => {
                     setTagModal({ ...tagModal, draft: { ...tagModal.draft, address: e.target.value } });
-                    setTagAddrError(null);
+                    // 在线实时校验（FR-M2-12）：按协议地址语法逐键验证
+                    const v = validateAddress((selected?.protocol ?? 'Modbus TCP') as Protocol, e.target.value);
+                    setTagAddrError(v.ok ? null : (v.error ?? t('dev.addrInvalid')));
                   }}
                   className={`w-full px-3 py-2 border rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                    tagAddrError ? 'border-rose-400 bg-rose-50' : 'border-slate-300 focus:border-indigo-500'
+                    tagAddrError
+                      ? 'border-rose-400 bg-rose-50'
+                      : tagModal.draft.address.trim()
+                        ? 'border-emerald-400 bg-emerald-50/40'
+                        : 'border-slate-300 focus:border-indigo-500'
                   }`}
                 />
-                {tagAddrError && (
+                {tagAddrError ? (
                   <p className="text-[11px] text-rose-600 mt-1">✗ {tagAddrError}</p>
-                )}
+                ) : tagModal.draft.address.trim() ? (
+                  <p className="text-[11px] text-emerald-600 mt-1">✓ {t('dev.addrValid')}</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('dev.field.dataType')}</label>

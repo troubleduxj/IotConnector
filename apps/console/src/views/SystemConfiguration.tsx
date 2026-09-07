@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2, Users, Trash2, KeyRound, Plus } from 'lucide-react';
+import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2, Users, Trash2, KeyRound, Plus, ScrollText, RefreshCw } from 'lucide-react';
 import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus } from '../api';
 import { useI18n } from '../i18n';
 import { toast } from '../components/Toast';
@@ -18,6 +18,7 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [me, setMe] = useState<ConsoleUser | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [auditFilter, setAuditFilter] = useState('');
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'operator' as ConsoleUser['role'] });
   const [resetTarget, setResetTarget] = useState<string | null>(null);
   const [resetPw, setResetPw] = useState('');
@@ -39,7 +40,6 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
       if (u?.role !== 'admin') return;
       setMe(u);
       setUsers(await fetchUsers().catch(() => []));
-      setAudit(await fetchAudit().catch(() => []));
     });
     const loadNb = (): void => {
       fetchNorthbound().then((d) => { setNorthbound(d.config); setNbStatus(d.status); }).catch(() => {});
@@ -48,6 +48,17 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     const timer = setInterval(loadNb, 5000);
     return () => clearInterval(timer);
   }, []);
+
+  // 审计日志（admin）：初始加载 + 15s 轮询
+  useEffect(() => {
+    if (me?.role !== 'admin') return;
+    const load = (): void => {
+      void fetchAudit().then(setAudit).catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    return () => clearInterval(timer);
+  }, [me?.role]);
 
   const saveNorthboundCfg = async (): Promise<void> => {
     if (!northbound) return;
@@ -111,6 +122,22 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     } finally {
       setUserBusy(false);
     }
+  };
+
+  // ===== 审计日志展示辅助 =====
+  const auditFiltered = audit.filter((e) => {
+    const f = auditFilter.trim().toLowerCase();
+    if (!f) return true;
+    return `${e.user} ${e.action} ${e.detail}`.toLowerCase().includes(f);
+  });
+  const actionChipCls = (a: string): string => {
+    if (a.startsWith('tag.write') || a.startsWith('alarm.')) {
+      return 'bg-amber-50 text-amber-700 border-amber-200';
+    }
+    if (a.startsWith('login') || a.startsWith('logout')) {
+      return 'bg-slate-100 text-slate-500 border-slate-200';
+    }
+    return 'bg-indigo-50 text-indigo-700 border-indigo-200';
   };
 
   // Fallback for isolated preview
@@ -592,6 +619,60 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
         </div>
 
       </div>
+
+      {/* 审计日志（FR-M10-03，admin）：配置变更/写操作/下发/登录全量留痕 */}
+      {me?.role === 'admin' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3 justify-between bg-slate-50">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-slate-200 text-slate-600 rounded-lg"><ScrollText className="w-5 h-5" /></div>
+              <div>
+                <h3 className="font-bold text-slate-800">{t('sys.audit.title')}</h3>
+                <p className="text-[11px] text-slate-400">{t('sys.audit.desc')}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                value={auditFilter}
+                onChange={(e) => setAuditFilter(e.target.value)}
+                placeholder={t('sys.audit.filterPlaceholder')}
+                className="w-56 px-3 py-1.5 border border-slate-300 rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+              <button
+                onClick={() => void fetchAudit().then(setAudit).catch(() => {})}
+                className="flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> {t('sys.audit.refresh')}
+              </button>
+            </div>
+          </div>
+          <div className="max-h-[420px] overflow-auto">
+            {auditFiltered.length === 0 ? (
+              <div className="px-6 py-8 text-center text-xs text-slate-400">{t('sys.audit.empty')}</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {auditFiltered.map((e, i) => (
+                  <div key={i} className="flex items-start gap-3 px-6 py-2 text-xs">
+                    <span className="shrink-0 w-[152px] pt-0.5 font-mono text-slate-400">
+                      {new Date(e.ts).toLocaleString()}
+                    </span>
+                    <span className="shrink-0 w-20 pt-0.5 font-bold text-slate-700 truncate" title={e.user}>
+                      {e.user}
+                    </span>
+                    <span className={`shrink-0 px-1.5 py-0.5 rounded font-bold border ${actionChipCls(e.action)}`}>
+                      {e.action}
+                    </span>
+                    <span className="flex-1 pt-0.5 text-slate-600 break-all" title={e.detail}>
+                      {e.detail}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

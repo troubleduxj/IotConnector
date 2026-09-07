@@ -17,7 +17,12 @@
     "sys.users.add": "新建用户",
     "sys.users.addDone": "用户 {name} 已创建，首次登录须改密",
     "sys.users.username": "用户名",
-    "sys.users.initialPassword": "初始口令（至少 6 位）"
+    "sys.users.initialPassword": "初始口令（至少 6 位）",
+    "sys.audit.title": "审计日志",
+    "sys.audit.desc": "配置变更、写操作、下发与登录事件全量留痕",
+    "sys.audit.refresh": "刷新",
+    "sys.audit.filterPlaceholder": "过滤用户 / 动作 / 详情…",
+    "sys.audit.empty": "暂无审计记录"
   },
   "en": {
     "sys.users.title": "User Management",
@@ -36,7 +41,12 @@
     "sys.users.add": "New user",
     "sys.users.addDone": "User {name} created; password change required on first login",
     "sys.users.username": "Username",
-    "sys.users.initialPassword": "Initial password (min 6 chars)"
+    "sys.users.initialPassword": "Initial password (min 6 chars)",
+    "sys.audit.title": "Audit Log",
+    "sys.audit.desc": "Full trail of config changes, writes, downloads and logins",
+    "sys.audit.refresh": "Refresh",
+    "sys.audit.filterPlaceholder": "Filter user / action / detail…",
+    "sys.audit.empty": "No audit events"
   }
   }
 }

@@ -282,10 +282,17 @@ async function main(): Promise<void> {
   app.get('/api/tags/live', async () => engine.snapshot());
 
   app.post('/api/tags/:id/write', async (req, reply) => {
-    if (!requireAuth(req, reply, 'operator')) return;
+    const actor = requireAuth(req, reply, 'operator');
+    if (!actor) return;
     const { value } = (req.body ?? {}) as { value?: number | string | boolean };
     if (value === undefined) return reply.code(400).send({ ok: false, error: 'body.value required' });
-    return engine.write((req.params as { id: string }).id, value);
+    const id = (req.params as { id: string }).id;
+    const tag = getTag(id);
+    const prev = engine.snapshot().find((s) => s.id === id)?.value;
+    const result = await engine.write(id, value);
+    // FR-M5-03 写入审计：谁、何时、哪个位号、旧值→新值、结果
+    auditLog(actor, 'tag.write', `${tag?.name ?? id}: ${String(prev ?? '—')} → ${String(value)}${result.ok ? '' : ' 失败 ' + (result.error ?? '')}`);
+    return result;
   });
 
   /**
@@ -383,6 +390,7 @@ async function main(): Promise<void> {
     persist();
     void engine.reloadChannel(channel.id);
     broadcastConfigChanged();
+    auditLog(actor, 'channel.create', `${channel.name} (${channel.protocol} ${channel.host}:${channel.port})`);
     return reply.code(201).send(channel);
   });
 
@@ -392,15 +400,17 @@ async function main(): Promise<void> {
     const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
     if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
     const b = (req.body ?? {}) as Partial<Channel>;
-    if (b.name !== undefined) channel.name = b.name;
-    if (b.host !== undefined) channel.host = b.host;
-    if (b.port !== undefined) channel.port = Number(b.port);
-    if (b.enabled !== undefined) channel.enabled = Boolean(b.enabled);
-    if (b.pollIntervalMs !== undefined) channel.pollIntervalMs = Number(b.pollIntervalMs);
-    if (b.params !== undefined) channel.params = b.params;
+    const changes: string[] = [];
+    if (b.name !== undefined) { channel.name = b.name; changes.push(`name=${b.name}`); }
+    if (b.host !== undefined) { channel.host = b.host; changes.push(`host=${b.host}`); }
+    if (b.port !== undefined) { channel.port = Number(b.port); changes.push(`port=${b.port}`); }
+    if (b.enabled !== undefined) { channel.enabled = Boolean(b.enabled); changes.push(`enabled=${b.enabled}`); }
+    if (b.pollIntervalMs !== undefined) { channel.pollIntervalMs = Number(b.pollIntervalMs); changes.push(`period=${b.pollIntervalMs}ms`); }
+    if (b.params !== undefined) { channel.params = b.params; changes.push('params'); }
     persist();
     void engine.reloadChannel(channel.id);
     broadcastConfigChanged();
+    auditLog(actor, 'channel.update', `${channel.name}: ${changes.join(' ') || '(无变更)'}`);
     return channel;
   });
 
@@ -430,6 +440,7 @@ async function main(): Promise<void> {
     const id = (req.params as { id: string }).id;
     const i = channels.findIndex((c) => c.id === id);
     if (i < 0) return reply.code(404).send({ ok: false, error: 'channel not found' });
+    const name = channels[i].name;
     channels.splice(i, 1);
     const kept = tags.filter((t) => t.channelId !== id);
     const removedCount = tags.length - kept.length;
@@ -438,6 +449,7 @@ async function main(): Promise<void> {
     persist();
     await engine.removeChannel(id);
     broadcastConfigChanged();
+    auditLog(actor, 'channel.delete', `${name}（含 ${removedCount} 位号）`);
     return { ok: true, removedTags: removedCount };
   });
 
@@ -466,6 +478,7 @@ async function main(): Promise<void> {
     engine.upsertTagRuntime(tag);
     void engine.reloadChannel(tag.channelId);
     broadcastConfigChanged();
+    auditLog(actor, 'tag.create', `${tag.name} (${tag.address} ${tag.dataType})`);
     return reply.code(201).send(tag);
   });
 
@@ -475,19 +488,21 @@ async function main(): Promise<void> {
     const tag = getTag((req.params as { id: string }).id);
     if (!tag) return reply.code(404).send({ ok: false, error: 'tag not found' });
     const b = (req.body ?? {}) as Partial<Tag>;
-    if (b.name !== undefined) tag.name = b.name;
-    if (b.address !== undefined) tag.address = b.address;
-    if (b.dataType !== undefined) tag.dataType = b.dataType;
-    if (b.unit !== undefined) tag.unit = b.unit;
-    if (b.scale !== undefined) tag.scale = Number(b.scale);
-    if (b.offset !== undefined) tag.offset = Number(b.offset);
-    if (b.engMin !== undefined) tag.engMin = b.engMin === null ? undefined : Number(b.engMin);
-    if (b.engMax !== undefined) tag.engMax = b.engMax === null ? undefined : Number(b.engMax);
-    if (b.description !== undefined) tag.description = b.description;
+    const changes: string[] = [];
+    if (b.name !== undefined) { tag.name = b.name; changes.push(`name=${b.name}`); }
+    if (b.address !== undefined) { tag.address = b.address; changes.push(`addr=${b.address}`); }
+    if (b.dataType !== undefined) { tag.dataType = b.dataType; changes.push(`type=${b.dataType}`); }
+    if (b.unit !== undefined) { tag.unit = b.unit; changes.push(`unit=${b.unit}`); }
+    if (b.scale !== undefined) { tag.scale = Number(b.scale); changes.push(`scale=${b.scale}`); }
+    if (b.offset !== undefined) { tag.offset = Number(b.offset); changes.push(`offset=${b.offset}`); }
+    if (b.engMin !== undefined) { tag.engMin = b.engMin === null ? undefined : Number(b.engMin); changes.push(`engMin=${b.engMin}`); }
+    if (b.engMax !== undefined) { tag.engMax = b.engMax === null ? undefined : Number(b.engMax); changes.push(`engMax=${b.engMax}`); }
+    if (b.description !== undefined) { tag.description = b.description; changes.push('desc'); }
     persist();
     engine.upsertTagRuntime(tag);
     void engine.reloadChannel(tag.channelId);
     broadcastConfigChanged();
+    auditLog(actor, 'tag.update', `${tag.name}: ${changes.join(' ') || '(无变更)'}`);
     return tag;
   });
 
@@ -503,6 +518,7 @@ async function main(): Promise<void> {
     engine.removeTagRuntime(id);
     void engine.reloadChannel(tag.channelId);
     broadcastConfigChanged();
+    auditLog(actor, 'tag.delete', `${tag.name} (${tag.address})`);
     return { ok: true };
   });
 
@@ -533,6 +549,7 @@ async function main(): Promise<void> {
     alarmEngine.upsertRule(rule);
     persist();
     broadcastConfigChanged();
+    auditLog(actor, 'alarm.create', `${getTag(rule.tagId)?.name ?? rule.tagId} ${rule.kind}>${rule.threshold}`);
     return reply.code(201).send(rule);
   });
 
@@ -542,24 +559,29 @@ async function main(): Promise<void> {
     const rule = alarmEngine.getRules().find((r) => r.id === (req.params as { id: string }).id);
     if (!rule) return reply.code(404).send({ ok: false, error: 'alarm rule not found' });
     const b = (req.body ?? {}) as Partial<AlarmRule>;
-    if (b.kind !== undefined) rule.kind = b.kind;
-    if (b.threshold !== undefined) rule.threshold = Number(b.threshold);
-    if (b.hysteresis !== undefined) rule.hysteresis = Math.max(0, Number(b.hysteresis));
-    if (b.enabled !== undefined) rule.enabled = Boolean(b.enabled);
-    if (b.message !== undefined) rule.message = b.message;
+    const changes: string[] = [];
+    if (b.kind !== undefined) { rule.kind = b.kind; changes.push(`kind=${b.kind}`); }
+    if (b.threshold !== undefined) { rule.threshold = Number(b.threshold); changes.push(`threshold=${b.threshold}`); }
+    if (b.hysteresis !== undefined) { rule.hysteresis = Math.max(0, Number(b.hysteresis)); changes.push(`hyst=${b.hysteresis}`); }
+    if (b.enabled !== undefined) { rule.enabled = Boolean(b.enabled); changes.push(`enabled=${b.enabled}`); }
+    if (b.message !== undefined) { rule.message = b.message; changes.push('message'); }
     alarmEngine.upsertRule(rule);
     persist();
     broadcastConfigChanged();
+    auditLog(actor, 'alarm.update', `${getTag(rule.tagId)?.name ?? rule.tagId}: ${changes.join(' ') || '(无变更)'}`);
     return rule;
   });
 
   app.delete('/api/alarms/:id', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');
     if (!actor) return;
-    const ok = alarmEngine.removeRule((req.params as { id: string }).id);
-    if (!ok) return reply.code(404).send({ ok: false, error: 'alarm rule not found' });
+    const id = (req.params as { id: string }).id;
+    const rule = alarmEngine.getRules().find((r) => r.id === id);
+    if (!rule) return reply.code(404).send({ ok: false, error: 'alarm rule not found' });
+    alarmEngine.removeRule(id);
     persist();
     broadcastConfigChanged();
+    auditLog(actor, 'alarm.delete', `${getTag(rule.tagId)?.name ?? rule.tagId} ${rule.kind}>${rule.threshold}`);
     return { ok: true };
   });
 
@@ -580,6 +602,7 @@ async function main(): Promise<void> {
     if (b.enabled !== undefined) notifications.enabled = Boolean(b.enabled);
     if (b.webhookUrl !== undefined) notifications.webhookUrl = String(b.webhookUrl);
     persist();
+    auditLog(actor, 'notify.update', `enabled=${notifications.enabled} webhook=${notifications.webhookUrl || '(空)'}`);
     return notifications;
   });
 
@@ -594,6 +617,13 @@ async function main(): Promise<void> {
     if (b.wecom) notifications.wecom = b.wecom;
     if (b.email) notifications.email = b.email;
     persist();
+    const chans = [
+      notifications.webhookUrl && 'webhook',
+      notifications.dingtalk?.enabled && 'dingtalk',
+      notifications.wecom?.enabled && 'wecom',
+      notifications.email?.enabled && 'email',
+    ].filter(Boolean).join('+') || '(无渠道)';
+    auditLog(actor, 'notify.update', `enabled=${notifications.enabled} 渠道=${chans}`);
     return notifications;
   });
 
@@ -626,12 +656,15 @@ async function main(): Promise<void> {
     if (b.dataFlushMs !== undefined) northbound.dataFlushMs = Math.max(500, Number(b.dataFlushMs));
     persist();
     northboundPublisher.applyConfig();
+    auditLog(actor, 'northbound.update', `enabled=${northbound.enabled} url=${northbound.url} group=${northbound.groupId} node=${northbound.edgeNodeId}`);
     return { config: northbound, status: northboundPublisher.status };
   });
 
   app.post('/api/northbound/rebirth', async (req, reply) => {
-    if (!requireAuth(req, reply, 'engineer')) return;
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
     northboundPublisher.applyConfig(); // 触发 BIRTH 重发
+    auditLog(actor, 'northbound.rebirth', '手动触发 BIRTH 重发');
     return { ok: true };
   });
 
@@ -720,23 +753,29 @@ async function main(): Promise<void> {
 
   app.get('/api/audit', async (req, reply) => {
     if (!requireAuth(req, reply, 'admin')) return;
+    const q = (req.query ?? {}) as { limit?: string; action?: string; user?: string };
+    const limit = Math.min(1000, Math.max(1, Number(q.limit ?? 200)));
     try {
       const lines = fs.readFileSync(AUDIT_FILE, 'utf-8').split('\n').filter(Boolean);
-      const events = lines.slice(-200).map((l) => JSON.parse(l) as Record<string, unknown>).reverse();
-      return { events };
+      let events = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+      if (q.action) events = events.filter((e) => String(e.action ?? '').startsWith(q.action as string));
+      if (q.user) events = events.filter((e) => String(e.user ?? '') === q.user);
+      const total = events.length;
+      events = events.slice(-limit).reverse();
+      return { events, total };
     } catch {
-      return { events: [] };
+      return { events: [], total: 0 };
     }
   });
 
   // ===== 告警历史查询（持久化于 TDengine alarm_events）=====
   app.post('/api/alarms/events/:id/ack', async (req, reply) => {
-    if (!requireAuth(req, reply, 'operator')) return;
-    const user = requireAuth(req, reply, 'operator');
-    if (!user) return;
+    const actor = requireAuth(req, reply, 'operator');
+    if (!actor) return;
     const { note } = (req.body ?? {}) as { note?: string };
-    const updated = alarmEngine.ack((req.params as { id: string }).id, user.username, note);
+    const updated = alarmEngine.ack((req.params as { id: string }).id, actor.username, note);
     if (!updated) return reply.code(404).send({ ok: false, error: 'event not found' });
+    auditLog(actor, 'alarm.ack', `${updated.tagName} ${updated.kind}>${updated.threshold}=${updated.value}${note ? `: ${note}` : ''}`);
     broadcast({ type: 'alarm', event: updated });
     return updated;
   });
@@ -824,6 +863,7 @@ async function main(): Promise<void> {
     persist();
     storageTaskEngine.sync(config.storageTasks);
     broadcastConfigChanged();
+    auditLog(actor, 'storage.create', `${task.name} → ${task.tableName}（${task.trigger.mode}）`);
     return reply.code(201).send(task);
   });
 
@@ -836,16 +876,19 @@ async function main(): Promise<void> {
     persist();
     storageTaskEngine.sync(config.storageTasks);
     broadcastConfigChanged();
+    auditLog(actor, 'storage.update', config.storageTasks[i].name);
     return config.storageTasks[i];
   });
 
   app.delete('/api/storage-tasks/:id', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');
     if (!actor) return;
+    const task = (config.storageTasks ?? []).find((t) => t.id === (req.params as { id: string }).id);
     config.storageTasks = (config.storageTasks ?? []).filter((t) => t.id !== (req.params as { id: string }).id);
     persist();
     storageTaskEngine.sync(config.storageTasks);
     broadcastConfigChanged();
+    if (task) auditLog(actor, 'storage.delete', `${task.name} → ${task.tableName}`);
     return { ok: true };
   });
 
@@ -867,6 +910,7 @@ async function main(): Promise<void> {
     config.recipes = [...(config.recipes ?? []), recipe];
     persist();
     broadcastConfigChanged();
+    auditLog(actor, 'recipe.create', `${recipe.name}（${recipe.items.length} 参数）`);
     return reply.code(201).send(recipe);
   });
 
@@ -879,15 +923,18 @@ async function main(): Promise<void> {
     config.recipes[i] = { ...config.recipes[i], name: b.name ?? config.recipes[i].name, description: b.description ?? config.recipes[i].description, items: b.items ?? config.recipes[i].items, updatedAt: Date.now() };
     persist();
     broadcastConfigChanged();
+    auditLog(actor, 'recipe.update', `${config.recipes[i].name}（${config.recipes[i].items.length} 参数）`);
     return config.recipes[i];
   });
 
   app.delete('/api/recipes/:id', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');
     if (!actor) return;
+    const recipe = (config.recipes ?? []).find((r) => r.id === (req.params as { id: string }).id);
     config.recipes = (config.recipes ?? []).filter((r) => r.id !== (req.params as { id: string }).id);
     persist();
     broadcastConfigChanged();
+    if (recipe) auditLog(actor, 'recipe.delete', recipe.name);
     return { ok: true };
   });
 
@@ -933,6 +980,7 @@ async function main(): Promise<void> {
     persist();
     scriptEngine.setScripts(config.scripts);
     broadcastConfigChanged();
+    auditLog(actor, 'script.create', `${script.name}（${script.trigger.type}）`);
     return reply.code(201).send(script);
   });
 
@@ -946,16 +994,19 @@ async function main(): Promise<void> {
     persist();
     scriptEngine.setScripts(config.scripts);
     broadcastConfigChanged();
+    auditLog(actor, 'script.update', `${config.scripts[i].name}${b.enabled !== undefined ? ` enabled=${b.enabled}` : ''}`);
     return config.scripts[i];
   });
 
   app.delete('/api/scripts/:id', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');
     if (!actor) return;
+    const script = (config.scripts ?? []).find((s) => s.id === (req.params as { id: string }).id);
     config.scripts = (config.scripts ?? []).filter((s) => s.id !== (req.params as { id: string }).id);
     persist();
     scriptEngine.setScripts(config.scripts);
     broadcastConfigChanged();
+    if (script) auditLog(actor, 'script.delete', script.name);
     return { ok: true };
   });
 

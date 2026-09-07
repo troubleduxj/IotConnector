@@ -738,7 +738,7 @@ async function main(): Promise<void> {
     return updated;
   });
 
-  // ===== 报文诊断（PRD FR-M2-20，Modbus 先行）=====
+  // ===== 报文诊断（PRD FR-M2-20）：Modbus/MELSEC/FINS/ENIP 帧级捕获 + 协议解码注解 =====
   app.get('/api/channels/:id/frames', async (req) => {
     const q = (req.query ?? {}) as { limit?: string; dir?: string; clear?: string };
     const id = (req.params as { id: string }).id;

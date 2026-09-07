@@ -13,6 +13,35 @@ interface FinsAddress {
   isBit: boolean;
 }
 
+const FINS_AREA_NAMES: Record<number, string> = { 0x82: 'D', 0xb1: 'W', 0xb0: 'CIO', 0xb2: 'H', 0x30: 'CIO' };
+
+/**
+ * TX 帧解码：TCP 头 8B('FINS'+len) + 2B + FINS 帧（ICF@10..SID@19、MRC@20、SRC@21、area@22）。
+ * 驱动约定：01 01=读字；01 02=写字（area=0x30 时为读位）；01 03=写位。
+ */
+function describeFinsRequest(frame: Buffer): string {
+  if (frame.length < 27) return `FINS/TCP ${frame.length}B`;
+  const mrc = frame[20];
+  const src = frame[21];
+  const sid = frame[19];
+  const area = frame[22];
+  const name = FINS_AREA_NAMES[area] ?? `0x${area.toString(16)}`;
+  const word = frame.readUInt16BE(23);
+  if (mrc === 0x01 && src === 0x01) {
+    return `FINS 读字 ${name}${word}×${frame.readUInt16BE(25)} SID=${sid}`;
+  }
+  if (mrc === 0x01 && src === 0x02 && area === 0x30) {
+    return `FINS 读位 ${name}${word}.${String(frame[25]).padStart(2, '0')} SID=${sid}`;
+  }
+  if (mrc === 0x01 && src === 0x02) {
+    return `FINS 写字 ${name}${word}×${frame.readUInt16BE(25)} SID=${sid}`;
+  }
+  if (mrc === 0x01 && src === 0x03) {
+    return `FINS 写位 ${name}${word}.${String(frame[25]).padStart(2, '0')} SID=${sid}`;
+  }
+  return `FINS MRC/SRC=0x${mrc.toString(16)}/0x${src.toString(16)} SID=${sid}`;
+}
+
 /** 解析 FINS 地址：D100（DM 字）、W10（W 区字）、CIO5.00（CIO 位） */
 export function parseFinsAddress(address: string): FinsAddress {
   const bit = address.trim().match(/^CIO(\d{1,4})\.(\d{1,2})$/i);
@@ -160,9 +189,9 @@ export class FinsDriver implements Driver {
       if (!this.socket) return reject(new Error('not connected'));
       this.pending?.reject(new Error('overridden'));
       clearTimeout(this.pending?.timer);
-      pushFrame(this.ctx.channel.id, 'TX', frame, 'FINS/TCP');
       this.sid = (this.sid + 1) & 0xff;
       frame[19] = this.sid & 0xff; // SID @19（TCP 10B 头之后第 9 字节）
+      pushFrame(this.ctx.channel.id, 'TX', frame, describeFinsRequest(frame)); // SID 填充后再捕获，保证 hex/注解与线上一致
       const timer = setTimeout(() => {
         this.pending = undefined;
         reject(new Error('响应超时'));
@@ -173,7 +202,6 @@ export class FinsDriver implements Driver {
   }
 
   private onData(chunk: Buffer): void {
-    pushFrame(this.ctx.channel.id, 'RX', chunk, 'FINS/TCP');
     this.rx = Buffer.concat([this.rx, chunk]);
     while (this.rx.length >= 8) {
       if (this.rx.toString('ascii', 0, 4) !== 'FINS') {
@@ -185,6 +213,19 @@ export class FinsDriver implements Driver {
       if (this.rx.length < total) return;
       const frame = Buffer.from(this.rx.subarray(0, total));
       this.rx = this.rx.subarray(total);
+      // 帧级捕获（重组后的完整帧才能解码）：TCP err@9、SID@19、endcode@22、数据@24
+      const tcpErr = frame[9];
+      const end = frame.length >= 24 ? frame.readUInt16BE(22) : -1;
+      pushFrame(
+        this.ctx.channel.id,
+        'RX',
+        frame,
+        tcpErr !== 0
+          ? `FINS/TCP 错误 0x${tcpErr.toString(16)}`
+          : end === 0
+            ? `FINS 响应 SID=${frame[19]} OK · ${Math.max(0, frame.length - 24)}B 数据`
+            : `FINS 响应 SID=${frame[19]} end=0x${(end & 0xffff).toString(16).padStart(4, '0')}`,
+      );
       if (frame[9] !== 0x00) {
         this.pending?.reject(new Error(`FINS/TCP err 0x${frame[9].toString(16)}`));
         this.pending = undefined;

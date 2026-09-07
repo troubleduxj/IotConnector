@@ -8,6 +8,28 @@ const RECONNECT_MS = 5000;
 
 /** MELSEC 软元件代码（MC 3E 二进制） */
 const DEVICE_CODES: Record<string, number> = { D: 0xa8, W: 0xb4, R: 0xaf, M: 0x90, X: 0x9c, Y: 0x9d, B: 0xa0, ZR: 0xb0 };
+const DEVICE_NAMES: Record<number, string> = { 0xa8: 'D', 0xb4: 'W', 0xaf: 'R', 0x90: 'M', 0x9c: 'X', 0x9d: 'Y', 0xa0: 'B', 0xb0: 'ZR' };
+
+/** TX 帧解码：副头9B + [监视定时器2][命令2@11][子命令2@13][软元件1@15][地址3@16][点数2@19]… */
+function describeMcRequest(frame: Buffer): string {
+  if (frame.length < 21) return `MC-3E ${frame.length}B`;
+  const cmd = frame.readUInt16LE(11);
+  const isBit = frame.readUInt16LE(13) === 0x0001;
+  const dev = DEVICE_NAMES[frame[15]] ?? `0x${frame[15].toString(16)}`;
+  const num = frame.readUIntLE(16, 3);
+  const points = frame.readUInt16LE(19);
+  const kind = cmd === 0x0401 ? '读' : cmd === 0x1401 ? '写' : `cmd=0x${cmd.toString(16)}`;
+  return `MC-3E ${kind}${isBit ? '位' : '字'} ${dev}${num}×${points}`;
+}
+
+/** RX 帧解码：副头9B + end code 2B(@9) + 数据(@11) */
+function describeMcResponse(frame: Buffer): string {
+  const end = frame.readUInt16LE(9);
+  const dataLen = Math.max(0, frame.length - 11);
+  return end === 0
+    ? `MC-3E 响应 OK · ${dataLen}B 数据`
+    : `MC-3E 响应 end=0x${end.toString(16).padStart(4, '0')}`;
+}
 
 interface McAddress {
   device: string;
@@ -158,7 +180,7 @@ export class MelsecDriver implements Driver {
       if (!this.socket) return reject(new Error('not connected'));
       this.pending?.reject(new Error('overridden'));
       clearTimeout(this.pending?.timer);
-      pushFrame(this.ctx.channel.id, 'TX', frame, `${frame.length}B`);
+      pushFrame(this.ctx.channel.id, 'TX', frame, describeMcRequest(frame));
       const timer = setTimeout(() => {
         this.pending = undefined;
         reject(new Error('响应超时'));
@@ -169,7 +191,6 @@ export class MelsecDriver implements Driver {
   }
 
   private onData(chunk: Buffer): void {
-    pushFrame(this.ctx.channel.id, 'RX', chunk, `${chunk.length}B`);
     this.rx = Buffer.concat([this.rx, chunk]);
     while (this.rx.length >= 9) {
       const dataLen = this.rx.readUInt16LE(7);
@@ -177,6 +198,8 @@ export class MelsecDriver implements Driver {
       if (this.rx.length < total) return;
       const frame = Buffer.from(this.rx.subarray(0, total));
       this.rx = this.rx.subarray(total);
+      // 帧级捕获（重组后的完整帧才能解码）
+      pushFrame(this.ctx.channel.id, 'RX', frame, frame[0] === 0xd0 ? describeMcResponse(frame) : 'MC-3E 非响应帧');
       if (frame[0] !== 0xd0) continue;
       const endCode = frame.readUInt16LE(9);
       this.pending?.timer && clearTimeout(this.pending.timer);

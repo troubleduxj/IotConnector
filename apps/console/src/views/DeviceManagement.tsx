@@ -585,13 +585,16 @@ export default function DeviceManagement() {
                       <div className="text-slate-500">{t('dev.diag.waiting')}</div>
                     ) : (
                       frames.map((f, i) => (
-                        <div key={i} className="flex items-start gap-2 py-0.5 border-b border-slate-800/60">
-                          <span className="text-slate-500 shrink-0">{new Date(f.ts).toLocaleTimeString()}</span>
-                          <span className={`shrink-0 font-bold ${f.dir === 'TX' ? 'text-amber-400' : 'text-emerald-400'}`}>
-                            {f.dir}
-                          </span>
-                          <span className="text-slate-500 shrink-0">{f.bytes}B</span>
-                          <span className="text-cyan-300 break-all">{f.hex}</span>
+                        <div key={i} className="py-0.5 border-b border-slate-800/60">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500 shrink-0">{new Date(f.ts).toLocaleTimeString()}</span>
+                            <span className={`shrink-0 font-bold ${f.dir === 'TX' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              {f.dir}
+                            </span>
+                            <span className="text-slate-500 shrink-0">{f.bytes}B</span>
+                            {f.note && <span className="text-indigo-300 font-semibold truncate">{f.note}</span>}
+                          </div>
+                          <div className="text-cyan-300 break-all">{f.hex}</div>
                         </div>
                       ))
                     )}

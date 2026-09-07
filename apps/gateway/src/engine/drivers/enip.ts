@@ -37,6 +37,59 @@ function cipValueBytes(dataType: string, value: number | string | boolean): Buff
   return v;
 }
 
+// ===== 报文诊断解码 =====
+
+const ENIP_CMDS: Record<number, string> = {
+  0x0065: 'RegisterSession',
+  0x0066: 'UnRegisterSession',
+  0x006e: 'SendUnitData',
+  0x006f: 'SendRRData',
+};
+
+/** SendRRData 数据项 → Unconnected Send 解包 → 服务码 + IOI 符号名 */
+function describeEnipCip(payload: Buffer | undefined): string {
+  if (!payload) return '';
+  let embedded = payload;
+  let service = payload[0];
+  if (service === 0x4c && payload.length >= 3) {
+    const msgLen = payload.readUInt16LE(1);
+    embedded = payload.subarray(3, 3 + msgLen);
+    service = embedded[0];
+  }
+  const pathSize = embedded[1] ?? 0;
+  const ioi = embedded.subarray(2, 2 + pathSize * 2);
+  const tag = ioi[0] === 0x91 && ioi.length >= 2 ? ioi.toString('ascii', 2, 2 + ioi[1]) : '';
+  if (service === 0x4e) return `读 ${tag}`;
+  if (service === 0x4d) return `写 ${tag}`;
+  return `service=0x${service.toString(16)} ${tag}`;
+}
+
+/** TX 帧解码：Encapsulation 命令 +（SendRRData 时）CIP 服务/位号 */
+function describeEnipRequest(frame: Buffer): string {
+  const cmd = frame.readUInt16LE(0);
+  const name = ENIP_CMDS[cmd] ?? `0x${cmd.toString(16)}`;
+  if (cmd !== 0x006f || frame.length < 38) return `ENIP ${name}`;
+  const itemCount = frame.readUInt16LE(30);
+  let p = 32;
+  let payload: Buffer | undefined;
+  for (let i = 0; i < itemCount && p + 4 <= frame.length; i += 1) {
+    const type = frame.readUInt16LE(p);
+    const len = frame.readUInt16LE(p + 2);
+    if (type === 0xb1) payload = frame.subarray(p + 4, p + 4 + len);
+    p += 4 + len;
+  }
+  const cip = describeEnipCip(payload);
+  return cip ? `ENIP SendRRData ${cip}` : `ENIP SendRRData ${frame.length}B`;
+}
+
+/** RX 帧解码：Encapsulation 命令 + status */
+function describeEnipResponse(frame: Buffer): string {
+  const cmd = frame.readUInt16LE(0);
+  const name = ENIP_CMDS[cmd] ?? `0x${cmd.toString(16)}`;
+  const status = frame.readUInt32LE(8);
+  return `ENIP 响应 ${name} status=0x${status.toString(16).padStart(8, '0')} (${frame.length}B)`;
+}
+
 /**
  * EtherNet/IP（CIP）驱动 —— 自研裸实现：
  * Register Session + SendRRData（Unconnected Send 包装 Symbolic Read/Write Tag）。
@@ -131,7 +184,7 @@ export class EnipDriver implements Driver {
       if (!this.socket) return reject(new Error('not connected'));
       this.pending?.reject(new Error('overridden'));
       clearTimeout(this.pending?.timer);
-      pushFrame(this.ctx.channel.id, 'TX', frame, 'ENIP');
+      pushFrame(this.ctx.channel.id, 'TX', frame, describeEnipRequest(frame));
       const timer = setTimeout(() => {
         this.pending = undefined;
         reject(new Error('响应超时'));
@@ -142,7 +195,6 @@ export class EnipDriver implements Driver {
   }
 
   private onData(chunk: Buffer): void {
-    pushFrame(this.ctx.channel.id, 'RX', chunk, `${chunk.length}B`);
     this.rx = Buffer.concat([this.rx, chunk]);
     while (this.rx.length >= 24) {
       const len = this.rx.readUInt16LE(2);
@@ -150,6 +202,8 @@ export class EnipDriver implements Driver {
       if (this.rx.length < total) return;
       const frame = Buffer.from(this.rx.subarray(0, total));
       this.rx = this.rx.subarray(total);
+      // 帧级捕获（重组后的完整帧才能解码）
+      pushFrame(this.ctx.channel.id, 'RX', frame, describeEnipResponse(frame));
       const status = frame.readUInt32LE(8);
       clearTimeout(this.pending?.timer);
       const pending = this.pending;

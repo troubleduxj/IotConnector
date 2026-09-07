@@ -342,16 +342,17 @@ export default function Historian() {
         // Header Border & Title
         ctx.fillStyle = '#0f172a';
         ctx.font = 'bold 28px sans-serif';
-        ctx.fillText('FactoryBridge Industrial Historian Trend Export', padding, 45);
+        ctx.fillText(t('hist.export.pngTitle'), padding, 45);
 
         // Subtitle & Time metadata
         ctx.fillStyle = '#64748b';
         ctx.font = '16px sans-serif';
         const dateStr = new Date().toLocaleString();
-        const timeRangeStr = timePreset === 'custom' 
-          ? `${customStartDate} ~ ${customEndDate}` 
-          : `Preset: Last ${timePreset.toUpperCase()}`;
-        ctx.fillText(`Time Window: ${timeRangeStr}  |  Generated: ${dateStr}  |  Tags: ${activeTags.map(t => t.name).join(', ')}`, padding, 75);
+        const timeRangeStr = timePreset === 'custom'
+          ? `${customStartDate} ~ ${customEndDate}`
+          : t('hist.export.preset', { p: timePreset.toUpperCase() });
+        const tagNames = activeTags.map(tag => tag.name).join(', ');
+        ctx.fillText(t('hist.export.meta', { range: timeRangeStr, time: dateStr, tags: tagNames }), padding, 75);
 
         // Top separator line
         ctx.strokeStyle = '#e2e8f0';
@@ -461,7 +462,7 @@ export default function Historian() {
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 mr-2">
               <Clock className="w-4 h-4 text-indigo-600" />
-              <span>Time Window:</span>
+              <span>{t('hist.toolbar.timeWindow')}</span>
             </div>
             {(['15m', '1h', '6h', '24h', '7d', '30d', 'custom'] as TimePreset[]).map(preset => (
               <button
@@ -473,7 +474,7 @@ export default function Historian() {
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
                 }`}
               >
-                {preset === 'custom' ? 'Custom Range' : preset.toUpperCase()}
+                {preset === 'custom' ? t('hist.toolbar.customRange') : preset.toUpperCase()}
               </button>
             ))}
 
@@ -487,7 +488,7 @@ export default function Historian() {
               }`}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isAutoRefresh ? 'animate-spin' : ''}`} />
-              {isAutoRefresh ? 'Live Auto-Polling' : 'Polling Paused'}
+              {isAutoRefresh ? t('hist.toolbar.livePolling') : t('hist.toolbar.paused')}
             </button>
           </div>
 
@@ -499,13 +500,13 @@ export default function Historian() {
               className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Image className="w-3.5 h-3.5" />
-              <span>{isExporting ? 'Generating PNG...' : 'Export Chart PNG'}</span>
+              <span>{isExporting ? t('hist.toolbar.generatingPng') : t('hist.toolbar.exportPng')}</span>
             </button>
 
             <button
               onClick={handleExportSVG}
               className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
-              title="Download vector SVG format"
+              title={t('hist.toolbar.svgTitle')}
             >
               <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
               <span>SVG</span>
@@ -516,7 +517,7 @@ export default function Historian() {
               className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Export CSV</span>
+              <span>{t('hist.toolbar.exportCsv')}</span>
             </button>
           </div>
         </div>
@@ -526,7 +527,7 @@ export default function Historian() {
           <div className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-100 flex flex-wrap items-center gap-4 text-xs animate-in fade-in slide-in-from-top-1">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-indigo-600" />
-              <span className="font-bold text-slate-700">Start Time:</span>
+              <span className="font-bold text-slate-700">{t('hist.toolbar.startTime')}</span>
               <input 
                 type="datetime-local" 
                 value={customStartDate}
@@ -535,7 +536,7 @@ export default function Historian() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-700">End Time:</span>
+              <span className="font-bold text-slate-700">{t('hist.toolbar.endTime')}</span>
               <input 
                 type="datetime-local" 
                 value={customEndDate}
@@ -544,26 +545,26 @@ export default function Historian() {
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-700">Resample:</span>
+              <span className="font-bold text-slate-700">{t('hist.toolbar.resample')}</span>
               <select 
                 value={samplingInterval}
                 onChange={(e) => setSamplingInterval(e.target.value as any)}
                 className="px-2 py-1 bg-white border border-slate-300 rounded-md text-slate-700 font-semibold"
               >
-                <option value="1s">1s (Raw Points)</option>
-                <option value="5s">5s Average</option>
-                <option value="1m">1m Interpolated</option>
-                <option value="5m">5m Envelope</option>
+                <option value="1s">{t('hist.toolbar.resample1s')}</option>
+                <option value="5s">{t('hist.toolbar.resample5s')}</option>
+                <option value="1m">{t('hist.toolbar.resample1m')}</option>
+                <option value="5m">{t('hist.toolbar.resample5m')}</option>
               </select>
             </div>
             <button
               onClick={() => {
                 setRefreshTrigger(prev => prev + 1);
-                showToast('Custom time range applied.');
+                showToast(t('hist.toast.rangeApplied'));
               }}
               className="px-3 py-1 bg-indigo-600 text-white font-bold rounded-md hover:bg-indigo-700"
             >
-              Apply Range
+              {t('hist.toolbar.applyRange')}
             </button>
           </div>
         )}
@@ -572,30 +573,30 @@ export default function Historian() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
           {/* Quick presets */}
           <div className="flex items-center gap-2 flex-wrap text-xs">
-            <span className="font-bold text-slate-500">Quick Comparison:</span>
+            <span className="font-bold text-slate-500">{t('hist.quick.title')}</span>
             <button 
               onClick={() => handleSelectQuickGroup('all')}
               className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium"
             >
-              Top 6 Metrics
+              {t('hist.quick.top6')}
             </button>
             <button 
               onClick={() => handleSelectQuickGroup('reactors')}
               className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium"
             >
-              Reactor R0021
+              {t('hist.quick.reactor')}
             </button>
             <button 
               onClick={() => handleSelectQuickGroup('drives')}
               className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium"
             >
-              Drives & Motion
+              {t('hist.quick.drives')}
             </button>
             <button 
               onClick={() => handleSelectQuickGroup('clear')}
               className="px-2.5 py-1 text-rose-600 hover:bg-rose-50 rounded font-medium"
             >
-              Reset
+              {t('hist.quick.reset')}
             </button>
           </div>
 
@@ -608,18 +609,18 @@ export default function Historian() {
                 className={`px-2.5 py-1 rounded font-bold transition-all ${
                   scalingMode === 'raw' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                 }`}
-                title="Display raw physical engineering units"
+                title={t('hist.scaling.rawTitle')}
               >
-                Raw Values
+                {t('hist.scaling.raw')}
               </button>
               <button
                 onClick={() => setScalingMode('normalized')}
                 className={`px-2.5 py-1 rounded font-bold transition-all ${
                   scalingMode === 'normalized' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                 }`}
-                title="Normalize dissimilar variables to 0-100% scale for trend alignment"
+                title={t('hist.scaling.normTitle')}
               >
-                Normalized (0-100%)
+                {t('hist.scaling.norm')}
               </button>
             </div>
 
@@ -629,9 +630,9 @@ export default function Historian() {
               onChange={(e) => setCurveType(e.target.value as CurveType)}
               className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-semibold focus:outline-none"
             >
-              <option value="monotone">Spline Smooth</option>
-              <option value="linear">Linear</option>
-              <option value="step">Step (Discrete)</option>
+              <option value="monotone">{t('hist.curve.spline')}</option>
+              <option value="linear">{t('hist.curve.linear')}</option>
+              <option value="step">{t('hist.curve.step')}</option>
             </select>
 
             <button
@@ -639,7 +640,7 @@ export default function Historian() {
               className={`p-1.5 rounded-lg border transition-all ${
                 showAreaGradient ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-200 text-slate-400'
               }`}
-              title="Toggle Area Gradient Shading"
+              title={t('hist.display.areaGradient')}
             >
               <Layers className="w-3.5 h-3.5" />
             </button>
@@ -648,7 +649,7 @@ export default function Historian() {
               className={`p-1.5 rounded-lg border transition-all ${
                 showGrid ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-200 text-slate-400'
               }`}
-              title="Toggle Cartesian Grid"
+              title={t('hist.display.grid')}
             >
               <Sliders className="w-3.5 h-3.5" />
             </button>
@@ -665,10 +666,10 @@ export default function Historian() {
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm">
                 <Search className="w-4 h-4 text-indigo-600" />
-                <span>Tag Selector ({selectedTagIds.length} / {gatewayTags.length})</span>
+                <span>{t('hist.selector.title', { sel: selectedTagIds.length, total: gatewayTags.length })}</span>
               </div>
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-                Max 8 Tags
+                {t('hist.selector.max8')}
               </span>
             </div>
 
@@ -677,7 +678,7 @@ export default function Historian() {
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Search tag name, channel..."
+                placeholder={t('hist.selector.placeholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-8 pr-7 py-1.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
@@ -704,7 +705,7 @@ export default function Historian() {
                       : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  {channel === 'All' ? 'All Channels' : channel.split('_')[0]}
+                  {channel === 'All' ? t('hist.selector.allChannels') : channel.split('_')[0]}
                 </button>
               ))}
             </div>
@@ -714,7 +715,7 @@ export default function Historian() {
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100 max-h-[460px]">
             {filteredAvailableTags.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-xs">
-                No matching tags found.
+                {t('hist.selector.noMatch')}
               </div>
             ) : (
               pagedTags.map(tag => {
@@ -765,7 +766,7 @@ export default function Historian() {
                       <button
                         onClick={() => handleToggleVisibility(tag.id)}
                         className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors shrink-0"
-                        title={isVisible ? 'Hide from chart' : 'Show in chart'}
+                        title={isVisible ? t('hist.selector.hide') : t('hist.selector.show')}
                       >
                         {isVisible ? <Eye className="w-3.5 h-3.5 text-indigo-600" /> : <EyeOff className="w-3.5 h-3.5 text-slate-300" />}
                       </button>
@@ -801,17 +802,17 @@ export default function Historian() {
 
           {/* Active tags badges summary */}
           <div className="p-3 border-t border-slate-100 bg-slate-50 flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-            {activeTags.map(t => (
+            {activeTags.map(tag => (
               <span
-                key={t.id}
+                key={tag.id}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold text-white shadow-xs"
-                style={{ backgroundColor: t.color }}
+                style={{ backgroundColor: tag.color }}
               >
-                <span className="truncate max-w-[120px]">{t.name}</span>
+                <span className="truncate max-w-[120px]">{tag.name}</span>
                 <button
-                  onClick={() => handleToggleTag(t.id)}
+                  onClick={() => handleToggleTag(tag.id)}
                   className="hover:opacity-80"
-                  title="Remove from comparison"
+                  title={t('hist.badge.remove')}
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -826,22 +827,22 @@ export default function Historian() {
             <div>
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-indigo-600" />
-                Multi-Tag Synchronized Time Series Analysis
+                {t('hist.chart.title')}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 {scalingMode === 'normalized' 
-                  ? 'Normalized relative mode (0-100%) for cross-parameter physical correlation' 
-                  : 'Direct engineering unit scaling'}
+                  ? t('hist.chart.normDesc')
+                  : t('hist.chart.rawDesc')}
               </p>
             </div>
 
             <div className="flex items-center gap-2 text-xs font-mono bg-slate-50 px-2.5 py-1 rounded border border-slate-200 text-slate-600">
               {isLoading ? (
                 <span className="flex items-center gap-1.5 text-indigo-600">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> Querying TDengine…
+                  <RefreshCw className="w-3 h-3 animate-spin" /> {t('hist.chart.querying')}
                 </span>
               ) : (
-                <span>Points: {chartData.length}</span>
+                <span>{t('hist.chart.points', { n: chartData.length })}</span>
               )}
             </div>
           </div>
@@ -978,7 +979,7 @@ export default function Historian() {
         <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart2 className="w-4 h-4 text-indigo-600" />
-            <h4 className="font-bold text-slate-800 text-sm">Statistical Metrics & Engineering Envelope</h4>
+            <h4 className="font-bold text-slate-800 text-sm">{t('hist.stats.title')}</h4>
           </div>
           <span className="text-xs text-slate-500 font-mono">
             Sample Window: {timePreset.toUpperCase()} · {historyData?.[0]?.intervalSec ? `${historyData[0].intervalSec}s buckets` : 'auto'} · {chartData.length} buckets
@@ -989,16 +990,16 @@ export default function Historian() {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-100/50 font-bold text-slate-600">
-                <th className="py-3 px-4">Tag Name</th>
-                <th className="py-3 px-4">Channel / Driver</th>
-                <th className="py-3 px-4">Unit</th>
-                <th className="py-3 px-4 text-right">Latest</th>
-                <th className="py-3 px-4 text-right">Min</th>
-                <th className="py-3 px-4 text-right">Max</th>
-                <th className="py-3 px-4 text-right">Average (μ)</th>
-                <th className="py-3 px-4 text-right">Std Dev (σ)</th>
-                <th className="py-3 px-4 text-right">Delta (P-P)</th>
-                <th className="py-3 px-4 text-center">Quality</th>
+                <th className="py-3 px-4">{t('hist.stats.col.tag')}</th>
+                <th className="py-3 px-4">{t('hist.stats.col.channel')}</th>
+                <th className="py-3 px-4">{t('hist.stats.col.unit')}</th>
+                <th className="py-3 px-4 text-right">{t('hist.stats.col.latest')}</th>
+                <th className="py-3 px-4 text-right">{t('hist.stats.col.min')}</th>
+                <th className="py-3 px-4 text-right">{t('hist.stats.col.max')}</th>
+                <th className="py-3 px-4 text-right">{t('hist.stats.col.avg')}</th>
+                <th className="py-3 px-4 text-right">{t('hist.stats.col.std')}</th>
+                <th className="py-3 px-4 text-right">{t('hist.stats.col.delta')}</th>
+                <th className="py-3 px-4 text-center">{t('hist.stats.col.quality')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1039,7 +1040,7 @@ export default function Historian() {
                     <td className="py-3 px-4 text-center">
                       {stat.quality === 'Good' ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                          <Check className="w-3 h-3" /> Good
+                          <Check className="w-3 h-3" /> {t('hist.stats.good')}
                         </span>
                       ) : (
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1049,7 +1050,11 @@ export default function Historian() {
                               ? 'bg-amber-100 text-amber-800'
                               : 'bg-slate-100 text-slate-500'
                         }`}>
-                          {stat.quality === 'NoData' ? 'No Data' : stat.quality}
+                          {stat.quality === 'Bad'
+                            ? t('hist.stats.bad')
+                            : stat.quality === 'Uncertain'
+                              ? t('hist.stats.uncertain')
+                              : t('hist.stats.noData')}
                         </span>
                       )}
                     </td>

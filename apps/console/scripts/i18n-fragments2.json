@@ -1,0 +1,74 @@
+{
+  "dash": {
+    "zh": {
+      "dash.kpi.monitoredTags": "监测位号",
+      "dash.kpi.activeConnections": "活动连接",
+      "dash.kpi.goodQuality": "质量良好",
+      "dash.kpi.optimalRange": "处于最优区间",
+      "dash.kpi.warnings": "告警",
+      "dash.alarms.title": "告警",
+      "dash.alarms.activeBadge": "{n} 活动中",
+      "dash.alarms.activeCol": "活动告警",
+      "dash.alarms.recentEvents": "最近事件",
+      "dash.grid.title": "实时设备状态",
+      "dash.grid.onlineInfo": "{n} 通道在线 · 更新于 {time}",
+      "dash.grid.connecting": "正在连接网关…",
+      "dash.grid.offline": "网关离线，正在重试…",
+      "dash.grid.badQuality": "质量差",
+      "dash.grid.live": "实时 ({q})"
+    },
+    "en": {
+      "dash.kpi.monitoredTags": "Monitored Tags",
+      "dash.kpi.activeConnections": "Active connections",
+      "dash.kpi.goodQuality": "Good Quality",
+      "dash.kpi.optimalRange": "Optimal range",
+      "dash.kpi.warnings": "Warnings",
+      "dash.alarms.title": "Alarms",
+      "dash.alarms.activeBadge": "{n} ACTIVE",
+      "dash.alarms.activeCol": "Active",
+      "dash.alarms.recentEvents": "Recent Events",
+      "dash.grid.title": "Live Equipment Status",
+      "dash.grid.onlineInfo": "{n} channel(s) online · updated {time}",
+      "dash.grid.connecting": "Connecting to gateway…",
+      "dash.grid.offline": "Gateway offline, retrying…",
+      "dash.grid.badQuality": "Bad quality",
+      "dash.grid.live": "Live ({q})"
+    }
+  },
+  "header": {
+    "zh": {
+      "header.syncHealth": "同步健康",
+      "header.nominal": "94% 正常"
+    },
+    "en": {
+      "header.syncHealth": "Sync Health",
+      "header.nominal": "94% Nominal"
+    }
+  },
+  "alarms": {
+    "zh": {
+      "alarms.filter.active": "活动中",
+      "alarms.filter.cleared": "已恢复",
+      "alarms.state.activeBadge": "活动中"
+    },
+    "en": {
+      "alarms.filter.active": "Active",
+      "alarms.filter.cleared": "Cleared",
+      "alarms.state.activeBadge": "ACTIVE"
+    }
+  },
+  "dev": {
+    "zh": {
+      "dev.cat.plc": "PLC 与现场总线",
+      "dev.cat.open": "开放标准",
+      "dev.cat.iiot": "IIoT 与云",
+      "dev.cat.building": "楼宇与电力"
+    },
+    "en": {
+      "dev.cat.plc": "PLC & Fieldbus",
+      "dev.cat.open": "Open Standard",
+      "dev.cat.iiot": "IIoT & Cloud",
+      "dev.cat.building": "Building & Power"
+    }
+  }
+}

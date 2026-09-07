@@ -20,6 +20,14 @@ import { useI18n } from '../i18n';
 
 const DATA_TYPES = ['Bool', 'Int16', 'UInt16', 'Int32', 'Float', 'Double', 'String'];
 
+/** 协议分类（来自 PROTOCOL_CONFIGS.category）→ i18n 键；未映射的回退显示原文 */
+const PROTOCOL_CAT_KEYS: Record<string, string> = {
+  'PLC & Fieldbus': 'dev.cat.plc',
+  'Open Standard': 'dev.cat.open',
+  'IIoT & Cloud': 'dev.cat.iiot',
+  'Building & Power': 'dev.cat.building',
+};
+
 export default function DeviceManagement() {
   const { channels: channelStatus, connect } = useRuntime();
   const { t } = useI18n();
@@ -315,7 +323,11 @@ export default function DeviceManagement() {
                     protocolFilter === chip ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  {chip === 'All' ? t('dev.filter.all') : chip}
+                  {chip === 'All'
+                    ? t('dev.filter.all')
+                    : PROTOCOL_CAT_KEYS[chip]
+                      ? t(PROTOCOL_CAT_KEYS[chip])
+                      : chip}
                 </button>
               ))}
             </div>

@@ -45,25 +45,25 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Monitored Tags</div>
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.monitoredTags')}</div>
             <Server className="w-4 h-4 text-slate-400" />
           </div>
           <div className="text-3xl font-bold">{activeTags}</div>
-          <div className="text-indigo-600 text-xs mt-2">Active connections</div>
+          <div className="text-indigo-600 text-xs mt-2">{t('dash.kpi.activeConnections')}</div>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Good Quality</div>
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.goodQuality')}</div>
             <CheckCircle className="w-4 h-4 text-slate-400" />
           </div>
           <div className="text-3xl font-bold">{goodQualityTags}</div>
-          <div className="text-green-600 text-xs mt-2">Optimal range</div>
+          <div className="text-green-600 text-xs mt-2">{t('dash.kpi.optimalRange')}</div>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">Warnings</div>
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{t('dash.kpi.warnings')}</div>
             <AlertTriangle className="w-4 h-4 text-amber-500" />
           </div>
           <div className={`text-3xl font-bold ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-amber-500'}`}>
@@ -80,10 +80,10 @@ export default function Dashboard() {
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <h3 className="font-semibold text-slate-800 flex items-center">
             <Bell className={`w-5 h-5 mr-2 ${activeAlarms.length > 0 ? 'text-rose-500' : 'text-slate-500'}`} />
-            Alarms
+            {t('dash.alarms.title')}
             {activeAlarms.length > 0 && (
               <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 animate-pulse">
-                {activeAlarms.length} ACTIVE
+                {t('dash.alarms.activeBadge', { n: activeAlarms.length })}
               </span>
             )}
           </h3>
@@ -91,7 +91,7 @@ export default function Dashboard() {
         </div>
         <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Active</div>
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">{t('dash.alarms.activeCol')}</div>
             {activeAlarms.length === 0 ? (
               <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
                 {t('dash.alarms.emptyActive')}
@@ -128,7 +128,7 @@ export default function Dashboard() {
             )}
           </div>
           <div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Recent Events</div>
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">{t('dash.alarms.recentEvents')}</div>
             {recentAlarms.length === 0 ? (
               <div className="px-3 py-4 text-xs text-slate-400 bg-slate-50 rounded-lg border border-slate-100">
                 {t('dash.alarms.noEvents')}
@@ -155,7 +155,7 @@ export default function Dashboard() {
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <h3 className="font-semibold text-slate-800 flex items-center">
             <Activity className="w-5 h-5 mr-2 text-slate-500" />
-            Live Equipment Status
+            {t('dash.grid.title')}
           </h3>
           <div className="flex items-center gap-2 text-xs font-medium">
             <span
@@ -169,10 +169,10 @@ export default function Dashboard() {
             />
             <span className="text-slate-500">
               {status === 'live'
-                ? `${onlineChannels} channel(s) online · updated ${lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—'}`
+                ? t('dash.grid.onlineInfo', { n: onlineChannels, time: lastUpdateTs ? new Date(lastUpdateTs).toLocaleTimeString() : '—' })
                 : status === 'connecting'
-                  ? 'Connecting to gateway…'
-                  : 'Gateway offline, retrying…'}
+                  ? t('dash.grid.connecting')
+                  : t('dash.grid.offline')}
             </span>
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function Dashboard() {
                     {live && (
                       <span
                         className={`w-1.5 h-1.5 rounded-full ${isBad ? 'bg-rose-500' : 'bg-green-500'}`}
-                        title={isBad ? 'Bad quality' : `Live (${live.quality})`}
+                        title={isBad ? t('dash.grid.badQuality') : t('dash.grid.live', { q: live.quality })}
                       />
                     )}
                   </div>

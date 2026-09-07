@@ -217,7 +217,7 @@ export default function AlarmCenter() {
                       {t('alarms.ack')}
                     </button>
                   )}
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">ACTIVE</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">{t('alarms.state.activeBadge')}</span>
                 </div>
               </div>
             ))
@@ -331,8 +331,8 @@ export default function AlarmCenter() {
                 className="px-2 py-1.5 border border-slate-300 rounded-md text-xs font-medium"
               >
                 <option value="">{t('alarms.filter.state')}：{t('alarms.filter.all')}</option>
-                <option value="Active">Active</option>
-                <option value="Cleared">Cleared</option>
+                <option value="Active">{t('alarms.filter.active')}</option>
+                <option value="Cleared">{t('alarms.filter.cleared')}</option>
               </select>
               <select
                 value={filterRange}

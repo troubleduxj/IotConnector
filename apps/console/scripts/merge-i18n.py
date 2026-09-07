@@ -21,15 +21,16 @@ def parse_block(name):
     return {k.replace("\\'", "'"): v.replace("\\'", "'") for k, v in pairs}
 
 zh, en = parse_block('zh'), parse_block('en')
-frag = json.load(io.open(FRAG, encoding='utf-8'))
-
-for ns, d in frag.items():
-    for k, v in d['zh'].items():
-        if k in zh and zh[k] != v:
-            print('WARN zh 冲突覆盖:', k, '|', zh[k], '->', v)
-        zh[k] = v
-    for k, v in d['en'].items():
-        en[k] = v
+frag_files = sys.argv[1:] or [FRAG]
+for path in frag_files:
+    frag = json.load(io.open(path, encoding='utf-8'))
+    for ns, d in frag.items():
+        for k, v in d['zh'].items():
+            if k in zh and zh[k] != v:
+                print('WARN zh 冲突覆盖:', k, '|', zh[k], '->', v)
+            zh[k] = v
+        for k, v in d['en'].items():
+            en[k] = v
 
 for k, (zv, ev) in APP_ADD.items():
     zh[k], en[k] = zv, ev

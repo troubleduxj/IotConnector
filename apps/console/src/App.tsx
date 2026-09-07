@@ -165,12 +165,12 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
           })}
         </nav>
         <div className="p-4 bg-slate-800 m-4 rounded-lg">
-          <div className="text-xs text-slate-400 mb-1">Sync Health</div>
+          <div className="text-xs text-slate-400 mb-1">{t('header.syncHealth')}</div>
           <div className="w-full bg-slate-700 h-1.5 rounded-full mb-2">
             <div className="bg-green-500 w-[94%] h-full rounded-full"></div>
           </div>
           <div className="flex justify-between text-[10px] text-slate-300">
-            <span>94% Nominal</span>
+            <span>{t('header.nominal')}</span>
             <span>v2.4.1</span>
           </div>
         </div>

@@ -14,6 +14,19 @@ import type { Script, Tag } from '@iotconnector/shared';
 
 const MAX_OUTPUTS = 50;
 const MAX_RUN_MS = 1000;
+/** FR-M8-06 连续崩溃阈值：达到即自动禁用脚本并通知上层持久化 */
+const AUTO_DISABLE_AFTER = 3;
+
+export interface ScriptRunStat {
+  runs: number;
+  lastRunAt?: number;
+  lastDurationMs?: number;
+  errors: number;
+  lastError?: string;
+  consecutiveErrors: number;
+  /** 因连续崩溃被自动禁用（用户重新启用后清除） */
+  autoDisabled?: boolean;
+}
 
 export interface ScriptRunResult {
   ok: boolean;
@@ -33,6 +46,8 @@ export class ScriptEngine {
   private timers = new Map<string, NodeJS.Timeout>();
   private lastTagValue = new Map<string, boolean>(); // tagChange 触发用（布尔沿）与数值变化检测
   private lastNumeric = new Map<string, number>();
+  /** FR-M8-06 运行监控：执行次数/耗时/错误/连续崩溃 */
+  private runStats = new Map<string, ScriptRunStat>();
 
   constructor(
     private lookup: ScriptValueLookup,
@@ -40,12 +55,28 @@ export class ScriptEngine {
     private doWrite: (tagId: string, value: number | string | boolean) => Promise<void>,
   ) {}
 
+  /** 连续崩溃自动禁用回调（上层负责落 config + 审计） */
+  onAutoDisable?: (id: string, reason: string) => void;
+
   getScripts(): Script[] {
     return this.scripts;
   }
 
   setScripts(scripts: Script[]): void {
     this.scripts = scripts;
+    // 清理已删除脚本的运行统计
+    const allIds = new Set(scripts.map((s) => s.id));
+    for (const id of [...this.runStats.keys()]) if (!allIds.has(id)) this.runStats.delete(id);
+    // 用户重新启用脚本时清除自动禁用标记与连续错误计数
+    for (const s of scripts) {
+      if (s.enabled) {
+        const st = this.runStats.get(s.id);
+        if (st?.autoDisabled) {
+          st.autoDisabled = false;
+          st.consecutiveErrors = 0;
+        }
+      }
+    }
     const ids = new Set(scripts.filter((s) => s.enabled && s.trigger.type === 'interval').map((s) => s.id));
     for (const [id, timer] of this.timers) {
       if (!ids.has(id)) {
@@ -68,6 +99,32 @@ export class ScriptEngine {
 
   getOutputs(id: string): string[] {
     return this.outputs.get(id) ?? [];
+  }
+
+  /** FR-M8-06 运行监控数据 */
+  getRunStats(id: string): ScriptRunStat {
+    return this.runStats.get(id) ?? { runs: 0, errors: 0, consecutiveErrors: 0 };
+  }
+
+  /** 记录执行结果；连续崩溃达阈值时自动禁用（幂等：已禁用不再回调） */
+  private recordResult(id: string, ok: boolean, durationMs: number, error?: string): void {
+    const st = this.runStats.get(id) ?? { runs: 0, errors: 0, consecutiveErrors: 0 };
+    st.runs += 1;
+    st.lastRunAt = Date.now();
+    st.lastDurationMs = durationMs;
+    if (ok) {
+      st.consecutiveErrors = 0;
+    } else {
+      st.errors += 1;
+      st.lastError = error;
+      st.consecutiveErrors += 1;
+    }
+    const script = this.scripts.find((s) => s.id === id);
+    if (!ok && script?.enabled && st.consecutiveErrors >= AUTO_DISABLE_AFTER && !st.autoDisabled) {
+      st.autoDisabled = true;
+      this.onAutoDisable?.(id, `连续 ${st.consecutiveErrors} 次执行失败：${error ?? 'unknown'}`);
+    }
+    this.runStats.set(id, st);
   }
 
   /** 引擎位号采样入口：tagChange 触发评估（布尔沿 / 数值变化） */
@@ -96,6 +153,10 @@ export class ScriptEngine {
   async runScript(id: string): Promise<ScriptRunResult> {
     const script = this.scripts.find((s) => s.id === id);
     if (!script) return { ok: false, outputs: [], error: `script not found: ${id}`, durationMs: 0 };
+    // 崩溃自动禁用后拒绝执行（config 同步期间兜底，避免禁用窗口内继续跑）
+    if (this.runStats.get(id)?.autoDisabled) {
+      return { ok: false, outputs: [], error: 'script auto-disabled after consecutive failures', durationMs: 0 };
+    }
 
     const outputs: string[] = [];
     const pendingWrites: Array<{ tagId: string; value: number | string | boolean }> = [];
@@ -125,7 +186,9 @@ export class ScriptEngine {
     } catch (e) {
       outputs.push(`✗ 执行错误: ${String((e as Error).message ?? e)}`);
       this.pushOutputs(id, outputs);
-      return { ok: false, outputs, error: String((e as Error).message ?? e), durationMs: Date.now() - t0 };
+      const durationMs = Date.now() - t0;
+      this.recordResult(id, false, durationMs, String((e as Error).message ?? e));
+      return { ok: false, outputs, error: String((e as Error).message ?? e), durationMs };
     }
     this.pushOutputs(id, outputs);
 
@@ -138,7 +201,9 @@ export class ScriptEngine {
         this.pushOutputs(id, outputs);
       }
     }
-    return { ok: true, outputs: this.getOutputs(id), durationMs: Date.now() - t0 };
+    const durationMs = Date.now() - t0;
+    this.recordResult(id, true, durationMs);
+    return { ok: true, outputs: this.getOutputs(id), durationMs };
   }
 
   private pushOutputs(id: string, lines: string[]): void {

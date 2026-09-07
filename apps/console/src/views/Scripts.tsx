@@ -31,6 +31,12 @@ export default function Scripts() {
 
   useEffect(() => { void load(); }, []);
 
+  // FR-M8-06 运行状态轮询（3s）：周期/变化触发脚本的后台输出也随此刷新
+  useEffect(() => {
+    const timer = setInterval(() => { void load(false).catch(() => undefined); }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     const s = scripts.find((x) => x.id === selectedId);
     setDraft(s ? JSON.parse(JSON.stringify(s)) as GatewayScript : null);
@@ -112,11 +118,19 @@ export default function Scripts() {
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs text-slate-800 truncate">{s.name}</span>
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${s.enabled ? 'bg-green-500' : 'bg-slate-300'}`} />
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${s.stats?.autoDisabled ? 'bg-rose-500' : s.enabled ? 'bg-green-500' : 'bg-slate-300'}`} />
                 </div>
                 <div className="text-[10px] text-slate-400 mt-0.5">
                   {s.trigger.type === 'interval' ? t('scr.triggerIntervalMs', { ms: s.trigger.intervalMs }) : s.trigger.type === 'tagChange' ? t('scr.triggerTagChange') : t('scr.triggerManual')}
                 </div>
+                {/* FR-M8-06 运行状态摘要 */}
+                {s.stats && s.stats.runs > 0 && (
+                  <div className="text-[10px] font-mono mt-0.5 flex items-center gap-1.5">
+                    <span className="text-slate-500">{t('scr.statRuns', { n: s.stats.runs })}</span>
+                    {s.stats.errors > 0 && <span className="text-rose-600 font-bold">{t('scr.statErrors', { n: s.stats.errors })}</span>}
+                    {s.stats.autoDisabled && <span className="text-rose-600 font-bold">{t('scr.autoDisabledBadge')}</span>}
+                  </div>
+                )}
               </button>
             ))}
             {scripts.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">{t('scr.empty')}</div>}
@@ -195,9 +209,31 @@ export default function Scripts() {
                   )}
                 </div>
 
+                {/* FR-M8-06 运行状态条 + 崩溃自动禁用横幅 */}
+                {selected.stats?.autoDisabled && (
+                  <div className="px-6 py-2.5 bg-rose-50 border-b border-rose-200 text-[11px] font-semibold text-rose-700 flex items-center justify-between">
+                    <span>{t('scr.autoDisabledBanner', { error: selected.stats.lastError ?? '' })}</span>
+                    <button
+                      onClick={() => setDraft({ ...draft, enabled: true })}
+                      className="px-2.5 py-1 rounded-md bg-white border border-rose-300 text-rose-700 font-bold hover:bg-rose-100"
+                    >
+                      {t('scr.reEnable')}
+                    </button>
+                  </div>
+                )}
+                {selected.stats && selected.stats.runs > 0 && (
+                  <div className="px-6 py-2 border-b border-slate-200 bg-slate-50/70 flex items-center gap-4 text-[11px] font-mono text-slate-500">
+                    <span>{t('scr.statRuns', { n: selected.stats.runs })}</span>
+                    <span>{selected.stats.lastRunAt ? t('scr.statLastRun', { time: new Date(selected.stats.lastRunAt).toLocaleTimeString() }) : ''}</span>
+                    {selected.stats.lastDurationMs !== undefined && <span>{t('scr.statDuration', { ms: selected.stats.lastDurationMs })}</span>}
+                    {selected.stats.errors > 0 && (
+                      <span className="text-rose-600 font-bold" title={selected.stats.lastError}>{t('scr.statErrors', { n: selected.stats.errors })}</span>
+                    )}
+                  </div>
+                )}
+
                 {/* 代码编辑器 */}
-                <div className="relative bg-slate-900">
-                  <div className="absolute left-0 top-0 bottom-0 w-10 select-none text-right pr-2 pt-3 text-[11px] leading-5 font-mono text-slate-600 overflow-hidden">
+                <div className="relative bg-slate-900">                  <div className="absolute left-0 top-0 bottom-0 w-10 select-none text-right pr-2 pt-3 text-[11px] leading-5 font-mono text-slate-600 overflow-hidden">
                     {Array.from({ length: lineCount }, (_, i) => <div key={i}>{i + 1}</div>)}
                   </div>
                   <textarea

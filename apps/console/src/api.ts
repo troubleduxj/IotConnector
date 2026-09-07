@@ -487,6 +487,16 @@ export interface GatewayScript {
   trigger: ScriptTrigger;
   enabled: boolean;
   output?: string[];
+  /** FR-M8-06 运行监控 */
+  stats?: {
+    runs: number;
+    lastRunAt?: number;
+    lastDurationMs?: number;
+    errors: number;
+    lastError?: string;
+    consecutiveErrors: number;
+    autoDisabled?: boolean;
+  };
 }
 
 export interface SchedulerChannel {

@@ -158,6 +158,16 @@ async function main(): Promise<void> {
       if (!r.ok) throw new Error(r.error);
     },
   );
+  // FR-M8-06 崩溃自动禁用：连续失败达阈值 → 停用脚本、落配置、审计
+  scriptEngine.onAutoDisable = (id, reason) => {
+    const s = (config.scripts ?? []).find((x) => x.id === id);
+    if (!s || !s.enabled) return;
+    s.enabled = false;
+    persist();
+    scriptEngine.setScripts(config.scripts);
+    broadcastConfigChanged();
+    auditLog({ id: 'system', username: 'system', role: 'admin' }, 'script.autoDisable', `${s.name}：${reason}`);
+  };
   scriptEngine.setScripts(config.scripts ?? []);
 
   engine.onTagSample = (tag, value, quality) => {
@@ -1202,7 +1212,12 @@ async function main(): Promise<void> {
 
   // ===== 边缘脚本 CRUD / 运行 / 输出（决策 D5）=====
   app.get('/api/scripts', async () =>
-    (config.scripts ?? []).map((s) => ({ ...s, triggerText: s.trigger.type, output: scriptEngine.getOutputs(s.id).slice(-20) })),
+    (config.scripts ?? []).map((s) => ({
+      ...s,
+      triggerText: s.trigger.type,
+      output: scriptEngine.getOutputs(s.id).slice(-20),
+      stats: scriptEngine.getRunStats(s.id), // FR-M8-06 运行监控
+    })),
   );
 
   app.post('/api/scripts', async (req, reply) => {

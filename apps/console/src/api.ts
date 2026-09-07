@@ -595,8 +595,34 @@ export interface NorthboundStatus {
   queued: number;
   dropped: number;
   published: number;
+  lastPublishAt?: number;
   lastError?: string;
 }
+
+/** 系统级信息（FR-M9-06/07）：运行状态 / TDengine 连接 / 计数 */
+export interface SystemInfo {
+  name: string;
+  version: string;
+  startedAt: number;
+  uptimeSec: number;
+  node: string;
+  platform: string;
+  port: number;
+  storage: { url: string; db: string; state: string };
+  counts: { channels: number; tags: number; alarms: number; storageTasks: number; recipes: number; scripts: number };
+}
+
+export const fetchSystemInfo = async (): Promise<SystemInfo> =>
+  (await apiFetch('/api/system/info')).json() as Promise<SystemInfo>;
+
+export const testDbConnection = async (): Promise<{ ok: boolean; version?: string; latencyMs?: number; error?: string }> =>
+  (await apiFetch('/api/system/db-test', { method: 'POST' })).json() as Promise<{ ok: boolean; version?: string; latencyMs?: number; error?: string }>;
+
+export const initDb = async (): Promise<{ ok: boolean; code?: number; error?: string }> =>
+  (await apiFetch('/api/system/db-init', { method: 'POST' })).json() as Promise<{ ok: boolean; code?: number; error?: string }>;
+
+export const factoryReset = async (): Promise<Response> =>
+  apiFetch('/api/system/factory-reset', jsonPost({ confirm: 'RESET' }));
 
 export const fetchNorthbound = async (): Promise<{ config: NorthboundConfig; status: NorthboundStatus }> =>
   (await apiFetch('/api/northbound')).json() as Promise<{ config: NorthboundConfig; status: NorthboundStatus }>;

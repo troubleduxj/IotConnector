@@ -1,20 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Database, Globe, Shield, Wifi, Save, Play, CheckCircle2, Bell, Loader2, Users, Trash2, KeyRound, Plus, ScrollText, RefreshCw } from 'lucide-react';
-import { fetchAlarms, fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus } from '../api';
+import { Database, Globe, Wifi, Save, Play, CheckCircle2, Loader2, Users, Trash2, KeyRound, Plus, ScrollText, RefreshCw, Cpu, Download, RotateCcw, XCircle } from 'lucide-react';
+import { fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, fetchSystemInfo, testDbConnection, initDb, factoryReset, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus, type SystemInfo } from '../api';
 import { useI18n } from '../i18n';
 import { toast } from '../components/Toast';
 
-interface NotificationConfig {
-  enabled: boolean;
-  webhookUrl: string;
-}
+/**
+ * 系统配置（FR-M9-06/07）：全部卡片接真实数据源——
+ *  WebAPI 服务状态（真实端口/端点清单/OpenAPI 下载）、TDengine 实测连接/建库、
+ *  北向 MQTT/Sparkplug B（受控表单 + 队列状态）、网关基础信息（运行时长/诊断导出/恢复出厂）。
+ * 无后端支撑的关系库/Redis/设备影子选项按 PRD 决策 D6/D7 收敛，不再展示假表单。
+ */
 
-export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: { dbType?: string, setDbType?: (val: string) => void }) {
-  const [mqttEnabled, setMqttEnabled] = useState(true);
-  const [mqttSecurity, setMqttSecurity] = useState(true);
-  const [apiEnabled, setApiEnabled] = useState(true);
-  const [notify, setNotify] = useState<NotificationConfig>({ enabled: false, webhookUrl: '' });
-  const [notifyToast, setNotifyToast] = useState<string | null>(null);
+export default function SystemConfiguration(_props: { dbType?: string, setDbType?: (val: string) => void }) {
   const [me, setMe] = useState<ConsoleUser | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
@@ -27,16 +24,18 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
   const [northbound, setNorthbound] = useState<NorthboundConfig | null>(null);
   const [nbStatus, setNbStatus] = useState<NorthboundStatus | null>(null);
   const [nbBusy, setNbBusy] = useState(false);
+  const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
+  const [dbTesting, setDbTesting] = useState(false);
+  const [dbIniting, setDbIniting] = useState(false);
+  const [dbResult, setDbResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
   const { t } = useI18n();
   const showToastMsg = (msg: string): void => {
     window.dispatchEvent(new CustomEvent('fb-toast', { detail: { message: msg, ok: true } }));
   };
 
   useEffect(() => {
-    fetch('/api/notifications')
-      .then((r) => r.json())
-      .then(setNotify)
-      .catch(() => {});
     fetchMe().then(async (u) => {
       if (u?.role !== 'admin') return;
       setMe(u);
@@ -47,7 +46,13 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     };
     loadNb();
     const timer = setInterval(loadNb, 5000);
-    return () => clearInterval(timer);
+    // 系统信息（真实运行状态，10s 轮询）
+    const loadInfo = (): void => {
+      fetchSystemInfo().then(setSysInfo).catch(() => {});
+    };
+    loadInfo();
+    const infoTimer = setInterval(loadInfo, 10000);
+    return () => { clearInterval(timer); clearInterval(infoTimer); };
   }, []);
 
   // 审计日志（admin）：进入审计 TAB 才加载并 15s 轮询
@@ -61,6 +66,55 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     return () => clearInterval(timer);
   }, [me?.role, tab]);
 
+  // 带鉴权的文件下载（OpenAPI 文档 / 诊断包）
+  const downloadFile = async (url: string, fallback: string): Promise<void> => {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('fb_token') ?? ''}` } });
+    if (!res.ok) { toast(t('sys.info.downloadFail'), false); return; }
+    const blob = await res.blob();
+    const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = m?.[1] ?? fallback;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const runDbTest = async (): Promise<void> => {
+    setDbTesting(true);
+    try {
+      const r = await testDbConnection();
+      setDbResult({ ok: r.ok, text: r.ok ? t('sys.db.testOk', { version: r.version ?? '', ms: r.latencyMs ?? 0 }) : t('sys.db.testFail', { error: r.error ?? '' }) });
+    } finally {
+      setDbTesting(false);
+    }
+  };
+
+  const runDbInit = async (): Promise<void> => {
+    setDbIniting(true);
+    try {
+      const r = await initDb();
+      setDbResult({ ok: r.ok, text: r.ok ? t('sys.db.initOk') : t('sys.db.testFail', { error: r.error ?? `code ${r.code}` }) });
+    } finally {
+      setDbIniting(false);
+    }
+  };
+
+  const runFactoryReset = async (): Promise<void> => {
+    setResetBusy(true);
+    try {
+      const res = await factoryReset();
+      if (!res.ok) {
+        const err = ((await res.json().catch(() => ({}))) as { error?: string }).error;
+        toast(err ?? t('sys.info.resetFail'), false);
+        return;
+      }
+      toast(t('sys.info.resetDone'));
+      setResetConfirm('');
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
   const saveNorthboundCfg = async (): Promise<void> => {
     if (!northbound) return;
     setNbBusy(true);
@@ -72,16 +126,6 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     } finally {
       setNbBusy(false);
     }
-  };
-
-  const saveNotify = async (): Promise<void> => {
-    await fetch('/api/notifications', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(notify),
-    });
-    setNotifyToast(t('sys.notify.saved'));
-    setTimeout(() => setNotifyToast(null), 2500);
   };
 
   // ===== 用户管理（admin）：新建/重置密码 → 该用户下次登录强制改密 =====
@@ -141,40 +185,13 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
     return 'bg-indigo-50 text-indigo-700 border-indigo-200';
   };
 
-  // Fallback for isolated preview
-  const [localDbType, setLocalDbType] = useState(dbType);
-  const currentDb = setDbType ? dbType : localDbType;
-
-  const handleDbChange = (val: string) => {
-    if (setDbType) setDbType(val);
-    setLocalDbType(val);
+  const fmtUptime = (sec: number): string => {
+    if (sec < 60) return t('sys.info.uptimeSec', { s: sec });
+    if (sec < 3600) return t('sys.info.uptimeMin', { m: Math.floor(sec / 60), s: sec % 60 });
+    return t('sys.info.uptimeHour', { h: Math.floor(sec / 3600), m: Math.floor((sec % 3600) / 60) });
   };
 
-  const getDefaultPort = () => {
-    switch (currentDb) {
-      case 'PostgreSQL': return '5432';
-      case 'MySQL': return '3306';
-      case 'TDengine': return '6041';
-      default: return '1433'; // SQL Server
-    }
-  };
-
-  const Toggle = ({ enabled, onChange }: { enabled: boolean, onChange: (val: boolean) => void }) => (
-    <button
-      type="button"
-      className={`${
-        enabled ? 'bg-indigo-600' : 'bg-slate-200'
-      } relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2`}
-      onClick={() => onChange(!enabled)}
-    >
-      <span
-        aria-hidden="true"
-        className={`${
-          enabled ? 'translate-x-4' : 'translate-x-0'
-        } pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
-      />
-    </button>
-  );
+  const storageOk = sysInfo?.storage.state === 'online';
 
   return (
     <div className="space-y-6 pb-12">
@@ -183,13 +200,9 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
           <h2 className="text-lg font-bold text-slate-800">{t('sys.title')}</h2>
           <p className="text-sm text-slate-500 mt-1">{t('sys.subtitle')}</p>
         </div>
-        <button className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors shadow-sm">
-          <Save className="w-4 h-4 mr-2" />
-          {t('sys.saveAll')}
-        </button>
       </div>
 
-      {/* TAB：系统配置 / 审计日志（admin） */}
+      {/* TAB：系统配置 / 用户管理 / 审计日志（admin） */}
       <div className="flex gap-1 border-b border-slate-200">
         <button
           onClick={() => setTab('config')}
@@ -225,313 +238,276 @@ export default function SystemConfiguration({ dbType = 'TDengine', setDbType }: 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Left Column */}
         <div className="space-y-6">
-          
-          {/* WebAPI Configuration */}
+
+          {/* WebAPI 服务状态（真实：监听端口/端点清单/OpenAPI 下载） */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><Globe className="w-5 h-5" /></div>
                 <h3 className="font-bold text-slate-800">{t('sys.api.title')}</h3>
               </div>
-              <Toggle enabled={apiEnabled} onChange={setApiEnabled} />
+              <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                {t('sys.api.running')}
+              </span>
             </div>
-            <div className={`p-6 space-y-4 ${apiEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
-              <div className="text-xs text-slate-500 mb-4">
-                {t('sys.api.desc')}
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.api.servicePort')}</label>
-                <input type="text" defaultValue="8093" className="w-full max-w-xs px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.api.endpointPreview')}</label>
-                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-600 font-mono">
-                  http://127.0.0.1:8093/api/Data/GetRealtimeValues
+            <div className="p-6 space-y-4">
+              <div className="text-xs text-slate-500">{t('sys.api.desc')}</div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.api.realPort')}</div>
+                  <div className="font-mono font-semibold text-slate-800">{sysInfo ? `:${sysInfo.port}` : '—'}</div>
                 </div>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.api.authMode')}</div>
+                  <div className="font-mono font-semibold text-slate-800">Bearer JWT</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">{t('sys.api.endpoints')}</div>
+                <div className="px-3 py-2 bg-slate-900 rounded-md text-[11px] font-mono text-slate-300 space-y-0.5">
+                  <div>GET&nbsp;&nbsp;/api/tags/live</div>
+                  <div>GET&nbsp;&nbsp;/api/history</div>
+                  <div>POST&nbsp;/api/tags/{'{id}'}/write</div>
+                  <div>WS&nbsp;&nbsp;&nbsp;/ws</div>
+                </div>
+              </div>
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={() => void downloadFile('/api/system/openapi.json', 'openapi.json')}
+                  className="flex items-center px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" /> {t('sys.api.openapi')}
+                </button>
               </div>
             </div>
           </div>
 
-          {/* MQTT Configuration */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          {/* 北向 MQTT/Sparkplug B（决策 D7，真实受控表单） */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-100 text-amber-600 rounded-lg"><Wifi className="w-5 h-5" /></div>
-                <h3 className="font-bold text-slate-800">{t('sys.mqtt.title')}</h3>
+                <div className="p-2 bg-teal-100 text-teal-600 rounded-lg"><Wifi className="w-5 h-5" /></div>
+                <div>
+                  <h3 className="font-bold text-slate-800">{t('sys.nb.title')}</h3>
+                  <p className="text-[11px] text-slate-400">
+                    {t('sys.nb.publishLine')}
+                    {nbStatus && t('sys.nb.queueStatus', { queued: nbStatus.queued, published: nbStatus.published })}
+                  </p>
+                </div>
               </div>
-              <Toggle enabled={mqttEnabled} onChange={setMqttEnabled} />
+              <button
+                onClick={() => setNorthbound((n) => (n ? { ...n, enabled: !n.enabled } : n))}
+                className={`px-2.5 py-1 rounded-md text-xs font-bold border ${
+                  northbound?.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
+                }`}
+              >
+                {northbound?.enabled ? t('sys.nb.enabled') : t('sys.nb.disabled')}
+              </button>
             </div>
-            <div className={`p-6 space-y-5 ${mqttEnabled ? '' : 'opacity-50 pointer-events-none'}`}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.mqtt.brokerHost')}</label>
-                  <input type="text" defaultValue="mqtt.factorybridge.local" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+            {northbound && (
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.nb.brokerUrl')}</label>
+                    <input
+                      value={northbound.url}
+                      onChange={(e) => setNorthbound({ ...northbound, url: e.target.value })}
+                      placeholder="mqtt://broker.local:1883"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.nb.groupId')}</label>
+                    <input
+                      value={northbound.groupId}
+                      onChange={(e) => setNorthbound({ ...northbound, groupId: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.nb.edgeNodeId')}</label>
+                    <input
+                      value={northbound.edgeNodeId}
+                      onChange={(e) => setNorthbound({ ...northbound, edgeNodeId: e.target.value })}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.mqtt.port')}</label>
-                  <input type="text" defaultValue="1883" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.mqtt.groupTopic')}</label>
-                <input type="text" defaultValue="industrial/realtime" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono text-indigo-700" />
-              </div>
-
-              <div className="pt-4 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {nbStatus?.connected
+                      ? t('sys.nb.connected')
+                      : nbStatus?.lastError
+                        ? t('sys.nb.error', { error: nbStatus.lastError })
+                        : t('sys.nb.disconnected')}
+                    {nbStatus?.lastPublishAt ? ` · ${t('sys.nb.lastPublish')} ${new Date(nbStatus.lastPublishAt).toLocaleTimeString()}` : ''}
+                  </span>
                   <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-slate-400" />
-                    <span className="text-sm font-semibold text-slate-700">{t('sys.mqtt.enableAuth')}</span>
+                    <button
+                      onClick={() => void rebirthNorthbound().then(() => showToastMsg(t('sys.nb.rebirthToast')))}
+                      className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                    >
+                      REBIRTH
+                    </button>
+                    <button
+                      onClick={() => void saveNorthboundCfg()}
+                      disabled={nbBusy}
+                      className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {nbBusy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('sys.nb.saveApply')}
+                    </button>
                   </div>
-                  <Toggle enabled={mqttSecurity} onChange={setMqttSecurity} />
-                </div>
-                {mqttSecurity && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-100 mb-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.mqtt.username')}</label>
-                      <input type="text" defaultValue="admin" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.mqtt.password')}</label>
-                      <input type="password" defaultValue="********" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                    </div>
-                  </div>
-                )}
-                
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 mt-5">{t('sys.mqtt.advanced')}</h4>
-                <div className="space-y-3">
-                  <label className="flex items-start gap-3 cursor-pointer p-3 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors">
-                    <div className="flex items-center h-5 pt-0.5">
-                      <input type="checkbox" defaultChecked className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-800">{t('sys.mqtt.deviceShadow')}</div>
-                      <div className="text-[11px] text-slate-500 leading-relaxed mt-0.5">{t('sys.mqtt.deviceShadowDesc')}</div>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-3 cursor-pointer p-3 border border-slate-200 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors">
-                    <div className="flex items-center h-5 pt-0.5">
-                      <input type="checkbox" defaultChecked className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-800">{t('sys.mqtt.reliableOutbox')}</div>
-                      <div className="text-[11px] text-slate-500 leading-relaxed mt-0.5">{t('sys.mqtt.reliableOutboxDesc')}</div>
-                    </div>
-                  </label>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
         {/* Right Column */}
         <div className="space-y-6">
-          {/* Database Configuration */}
+          {/* TDengine 存储（决策 D6 锁定默认）：真实连接状态 + 实测/建库 */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><Database className="w-5 h-5" /></div>
-              <h3 className="font-bold text-slate-800">{t('sys.db.title')}</h3>
-            </div>
-            <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              {t('sys.db.connected')}
-            </div>
-          </div>
-          
-          <div className="p-6 space-y-5">
-            <div className="text-xs text-slate-500 mb-2">
-              {t('sys.db.desc')}
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.db.type')}</label>
-              <select 
-                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50 font-medium text-slate-700"
-                value={currentDb}
-                onChange={(e) => handleDbChange(e.target.value)}
-              >
-                <option value="TDengine">{t('sys.db.tdengine')}</option>
-                <option value="PostgreSQL">PostgreSQL</option>
-                <option value="Microsoft SQL Server">Microsoft SQL Server</option>
-                <option value="MySQL">MySQL</option>
-                <option value="SQLite">SQLite</option>
-              </select>
-            </div>
-
-            {currentDb !== 'SQLite' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                    {currentDb === 'TDengine' ? t('sys.db.restHost') : t('sys.db.sqlHost')}
-                  </label>
-                  <input type="text" defaultValue="127.0.0.1" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.db.port')}</label>
-                  <input type="text" value={getDefaultPort()} readOnly className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50 text-slate-500" />
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.db.name')}</label>
-              <input type="text" defaultValue="factory_bridge_db" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-            </div>
-
-            {currentDb !== 'SQLite' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.db.username')}</label>
-                  <input type="text" defaultValue="postgres" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.db.password')}</label>
-                  <input type="password" defaultValue="********" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                </div>
-              </div>
-            )}
-
-            <div className="pt-4 border-t border-slate-100">
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-                {currentDb === 'TDengine' ? t('sys.db.keepDays') : t('sys.db.retentionMonths')}
-              </label>
               <div className="flex items-center gap-3">
-                <input type="number" defaultValue={currentDb === 'TDengine' ? 180 : 6} min={1} className="w-24 px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-                <span className="text-sm text-slate-500">
-                  {currentDb === 'TDengine' 
-                    ? t('sys.db.keepDescTde')
-                    : t('sys.db.keepDescGw')}
-                </span>
+                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><Database className="w-5 h-5" /></div>
+                <h3 className="font-bold text-slate-800">{t('sys.db.title')}</h3>
+              </div>
+              <div className={`flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-full border ${
+                storageOk ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : 'text-rose-600 bg-rose-50 border-rose-200'
+              }`}>
+                {storageOk ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                {storageOk ? t('sys.db.connected') : t('sys.db.disconnected')}
               </div>
             </div>
-            
-            <div className="flex items-center gap-2 pt-2">
-              <input type="checkbox" id="localLogs" defaultChecked className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-              <label htmlFor="localLogs" className="text-sm text-slate-700">{t('sys.db.localLogs')}</label>
-            </div>
 
-            <div className="pt-6 flex items-center justify-end gap-3 border-t border-slate-100">
-              <button className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm">
-                <Play className="w-4 h-4 text-emerald-600" />
-                {t('sys.db.testConn')}
-              </button>
-              <button className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors shadow-sm">
-                {t('sys.db.createDb')}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 北向 MQTT/Sparkplug B（决策 D7） */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-teal-100 text-teal-600 rounded-lg"><Wifi className="w-5 h-5" /></div>
-              <div>
-                <h3 className="font-bold text-slate-800">{t('sys.nb.title')}</h3>
-                <p className="text-[11px] text-slate-400">
-                  {t('sys.nb.publishLine')}
-                  {nbStatus && t('sys.nb.queueStatus', { queued: nbStatus.queued, published: nbStatus.published })}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setNorthbound((n) => (n ? { ...n, enabled: !n.enabled } : n))}
-              className={`px-2.5 py-1 rounded-md text-xs font-bold border ${
-                northbound?.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
-              }`}
-            >
-              {northbound?.enabled ? t('sys.nb.enabled') : t('sys.nb.disabled')}
-            </button>
-          </div>
-          {northbound && (
             <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.nb.brokerUrl')}</label>
-                  <input
-                    value={northbound.url}
-                    onChange={(e) => setNorthbound({ ...northbound, url: e.target.value })}
-                    placeholder="mqtt://broker.local:1883"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.nb.groupId')}</label>
-                  <input
-                    value={northbound.groupId}
-                    onChange={(e) => setNorthbound({ ...northbound, groupId: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.nb.edgeNodeId')}</label>
-                  <input
-                    value={northbound.edgeNodeId}
-                    onChange={(e) => setNorthbound({ ...northbound, edgeNodeId: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-400 font-mono">
-                  {nbStatus?.connected ? t('sys.nb.connected') : nbStatus?.lastError ? t('sys.nb.error', { error: nbStatus.lastError }) : t('sys.nb.disconnected')}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => void rebirthNorthbound().then(() => showToastMsg(t('sys.nb.rebirthToast')))}
-                    className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
-                  >
-                    REBIRTH
-                  </button>
-                  <button
-                    onClick={() => void saveNorthboundCfg()}
-                    disabled={nbBusy}
-                    className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
-                  >
-                    {nbBusy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('sys.nb.saveApply')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+              <div className="text-xs text-slate-500">{t('sys.db.desc')}</div>
 
-        {/* Real-time Data Pipeline (Redis) */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
-                <Database className="w-5 h-5" />
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div className="col-span-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.db.restEndpoint')}</div>
+                  <div className="font-mono font-semibold text-slate-800 truncate" title={sysInfo?.storage.url}>{sysInfo?.storage.url || '—'}</div>
+                </div>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.db.name')}</div>
+                  <div className="font-mono font-semibold text-slate-800">{sysInfo?.storage.db ?? '—'}</div>
+                </div>
               </div>
-              <h3 className="font-bold text-slate-800">{t('sys.redis.title')}</h3>
-            </div>
-            <Toggle enabled={true} onChange={() => {}} />
-          </div>
-          <div className="p-6 space-y-5">
-            <p className="text-xs text-slate-500 leading-relaxed -mt-2 mb-4">
-              {t('sys.redis.desc')}
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.redis.host')}</label>
-                <input type="text" defaultValue="127.0.0.1" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
+
+              {dbResult && (
+                <div className={`px-3 py-2 rounded-md text-xs font-medium border ${
+                  dbResult.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}>
+                  {dbResult.text}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => void runDbTest()}
+                  disabled={dbTesting}
+                  className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-60"
+                >
+                  {dbTesting ? <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> : <Play className="w-4 h-4 text-emerald-600" />}
+                  {t('sys.db.testConn')}
+                </button>
+                <button
+                  onClick={() => void runDbInit()}
+                  disabled={dbIniting}
+                  className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors shadow-sm disabled:opacity-60"
+                >
+                  {dbIniting ? t('sys.db.creating') : t('sys.db.createDb')}
+                </button>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.redis.port')}</label>
-                <input type="text" defaultValue="6379" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('sys.redis.streamKey')}</label>
-              <input type="text" defaultValue="edge:telemetry:stream" className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
             </div>
           </div>
-        </div>
 
+          {/* 网关基础信息（FR-M9-07）：运行状态 / 诊断导出 / 恢复出厂 */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-fit">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-slate-200 text-slate-600 rounded-lg"><Cpu className="w-5 h-5" /></div>
+                <div>
+                  <h3 className="font-bold text-slate-800">{t('sys.info.title')}</h3>
+                  <p className="text-[11px] text-slate-400">{t('sys.info.desc')}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.info.version')}</div>
+                  <div className="font-mono font-semibold text-slate-800">{sysInfo?.version ?? '—'}</div>
+                </div>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.info.uptime')}</div>
+                  <div className="font-mono font-semibold text-slate-800">{sysInfo ? fmtUptime(sysInfo.uptimeSec) : '—'}</div>
+                </div>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.info.runtime')}</div>
+                  <div className="font-mono font-semibold text-slate-800">{sysInfo ? `Node ${sysInfo.node}` : '—'}</div>
+                </div>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{t('sys.info.platform')}</div>
+                  <div className="font-mono font-semibold text-slate-800">{sysInfo?.platform ?? '—'}</div>
+                </div>
+              </div>
+              {sysInfo && (
+                <div className="text-[11px] text-slate-400 font-mono">
+                  {t('sys.info.counts', { ...sysInfo.counts })}
+                </div>
+              )}
+              {me?.role === 'admin' && (
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => void downloadFile('/api/system/diag', 'factorybridge-diag.json')}
+                    className="flex items-center px-3.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1.5" /> {t('sys.info.diag')}
+                  </button>
+                </div>
+              )}
+              {/* 危险区：恢复出厂（admin） */}
+              {me?.role === 'admin' && (
+                <div className="pt-3 border-t border-rose-100">
+                  <div className="text-xs font-bold text-rose-600 mb-2">{t('sys.info.danger')}</div>
+                  {resetConfirm === '' ? (
+                    <button
+                      onClick={() => setResetConfirm('pending')}
+                      className="flex items-center px-3.5 py-1.5 text-xs font-bold text-rose-600 bg-white border border-rose-300 rounded-md hover:bg-rose-50"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> {t('sys.info.reset')}
+                    </button>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        value={resetConfirm === 'pending' ? '' : resetConfirm}
+                        onChange={(e) => setResetConfirm(e.target.value)}
+                        placeholder={t('sys.info.resetPlaceholder')}
+                        className="w-36 px-3 py-1.5 border border-rose-300 rounded-md text-xs font-mono focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+                      />
+                      <button
+                        onClick={() => void runFactoryReset()}
+                        disabled={resetConfirm !== 'RESET' || resetBusy}
+                        className="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 rounded-md hover:bg-rose-700 disabled:opacity-50"
+                      >
+                        {resetBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('sys.info.confirmReset')}
+                      </button>
+                      <button
+                        onClick={() => setResetConfirm('')}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                      >
+                        {t('sys.users.cancel')}
+                      </button>
+                      <span className="w-full text-[11px] text-rose-500">{t('sys.info.resetWarn')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-
       </div>
       )}
 

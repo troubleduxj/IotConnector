@@ -31,6 +31,7 @@ export interface NorthboundStatus {
   queued: number;
   dropped: number;
   published: number;
+  lastPublishAt?: number;
   lastError?: string;
 }
 
@@ -47,6 +48,7 @@ export class NorthboundPublisher {
   private connected = false;
   private dropped = 0;
   private published = 0;
+  private lastPublishAt?: number;
   private lastError?: string;
   private outbox: OutboxEntry[] = [];
   private dataBuffer = new Map<string, Map<string, { value: number | string | boolean; ts: number }>>();
@@ -68,6 +70,7 @@ export class NorthboundPublisher {
       queued: this.outbox.length,
       dropped: this.dropped,
       published: this.published,
+      lastPublishAt: this.lastPublishAt,
       lastError: this.lastError,
     };
   }
@@ -258,6 +261,7 @@ export class NorthboundPublisher {
           this.client!.publish(topic, Buffer.from(payload), { qos }, (err) => (err ? reject(err) : resolve()));
         });
         this.published += 1;
+        this.lastPublishAt = Date.now();
         return;
       } catch (e) {
         this.lastError = String(e);

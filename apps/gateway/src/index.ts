@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AlarmEvent, AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
 import { Engine } from './engine/engine';
-import { loadConfig, saveConfig } from './config';
+import { loadConfig, saveConfig, seedConfig } from './config';
 import { AlarmEngine } from './alarms';
 import { getFrames, clearFrames } from './diagnostics';
 import { dispatchAlarm, sendTestMessage } from './notify';
@@ -647,6 +647,134 @@ async function main(): Promise<void> {
 
   // ===== 北向 MQTT/Sparkplug B（决策 D7）=====
   app.get('/api/northbound', async () => ({ config: northbound, status: northboundPublisher.status }));
+
+  // ===== 系统级：信息 / WebAPI 文档 / 数据库 / 诊断导出 / 恢复出厂（FR-M9-06/07）=====
+  const startedAt = Date.now();
+
+  app.get('/api/system/info', async (req, reply) => {
+    if (!requireAuth(req, reply, 'operator')) return;
+    return {
+      name: 'FactoryBridge Edge Gateway',
+      version: '2.4.1',
+      startedAt,
+      uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+      node: process.version,
+      platform: `${process.platform}/${process.arch}`,
+      port: PORT,
+      storage: { url: process.env.TDENGINE_URL ?? '', db: process.env.TDENGINE_DB ?? 'factory_bridge', state: storage.status.state },
+      counts: {
+        channels: channels.length,
+        tags: tags.length,
+        alarms: (config.alarms ?? []).length,
+        storageTasks: config.storageTasks.length,
+        recipes: config.recipes.length,
+        scripts: config.scripts.length,
+      },
+    };
+  });
+
+  // OpenAPI 3.0 描述（真实端点清单；UI 提供下载，供第三方集成查阅）
+  app.get('/api/system/openapi.json', async (req, reply) => {
+    if (!requireAuth(req, reply, 'operator')) return;
+    const bearer = { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' };
+    const json = {
+      openapi: '3.0.3',
+      info: { title: 'FactoryBridge Edge Gateway REST API', version: '2.4.1' },
+      servers: [{ url: `http://<gateway-host>:${PORT}` }],
+      components: { securitySchemes: { bearerAuth: bearer } },
+      security: [{ bearerAuth: [] }],
+      paths: {
+        '/api/auth/login': { post: { summary: '登录获取 Bearer 令牌', security: [] } },
+        '/api/auth/me': { get: { summary: '当前会话用户' } },
+        '/api/tags': { get: { summary: '位号配置列表' } },
+        '/api/tags/live': { get: { summary: '位号实时值快照' } },
+        '/api/tags/{id}/write': { post: { summary: '下行写值（审计留痕）' } },
+        '/api/history': { get: { summary: '历史查询（TDengine 聚合）' } },
+        '/api/alarms': { get: { summary: '告警事件' }, post: { summary: '新建告警规则' } },
+        '/api/alarms/{id}/ack': { post: { summary: '告警确认' } },
+        '/api/channels': { get: { summary: '通道列表' }, post: { summary: '新建通道' } },
+        '/api/channels/{id}/test': { post: { summary: '真实连接测试（分步握手）' } },
+        '/api/storage-tasks': { get: { summary: '存储任务' }, post: { summary: '新建存储任务' } },
+        '/api/recipes': { get: { summary: '配方列表' } },
+        '/api/recipes/{id}/download': { post: { summary: '配方下发到设备' } },
+        '/api/scripts': { get: { summary: '边缘脚本' } },
+        '/api/scripts/{id}/run': { post: { summary: '试运行脚本' } },
+        '/api/scheduler': { get: { summary: '调度统计' } },
+        '/api/audit': { get: { summary: '审计日志（admin）' } },
+        '/ws': { get: { summary: 'WebSocket 实时推送（tags-batch / alarms / storage-status）' } },
+      },
+    };
+    return reply.header('content-disposition', 'attachment; filename="openapi.json"').send(json);
+  });
+
+  // TDengine 连通性实测：SELECT SERVER_VERSION() 往返
+  app.post('/api/system/db-test', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    if (!storage.enabled) return { ok: false, error: 'TDengine URL 未配置（环境变量 TDENGINE_URL）' };
+    const t0 = Date.now();
+    try {
+      const r = await storage.query('SELECT SERVER_VERSION()');
+      if (r.code !== 0) return { ok: false, error: r.msg ?? r.desc ?? `code ${r.code}` };
+      return { ok: true, version: String((r.data as unknown[][])?.[0]?.[0] ?? ''), latencyMs: Date.now() - t0 };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  });
+
+  // 初始化数据库（幂等）：CREATE DATABASE IF NOT EXISTS
+  app.post('/api/system/db-init', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    if (!storage.enabled) return reply.code(400).send({ ok: false, error: 'TDengine URL 未配置（环境变量 TDENGINE_URL）' });
+    const db = (process.env.TDENGINE_DB ?? 'factory_bridge').replace(/[^A-Za-z0-9_]/g, '');
+    const r = await storage.query(`CREATE DATABASE IF NOT EXISTS ${db}`);
+    auditLog(actor, 'system.db-init', `CREATE DATABASE ${db} → code ${r.code}`);
+    return { ok: r.code === 0, code: r.code, error: r.code === 0 ? undefined : (r.msg ?? r.desc ?? `code ${r.code}`) };
+  });
+
+  // 诊断包导出：审计尾部 + 运行信息（JSON 下载）
+  app.get('/api/system/diag', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    let audit: unknown[] = [];
+    try {
+      audit = fs.readFileSync(AUDIT_FILE, 'utf-8').split('\n').filter(Boolean).slice(-500).map((l) => JSON.parse(l));
+    } catch { /* 无审计文件 */ }
+    const bundle = {
+      generatedAt: new Date().toISOString(),
+      info: {
+        version: '2.4.1', startedAt, uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+        node: process.version, platform: `${process.platform}/${process.arch}`,
+        counts: { channels: channels.length, tags: tags.length, alarms: (config.alarms ?? []).length },
+      },
+      audit,
+    };
+    return reply.header('content-disposition', 'attachment; filename="factorybridge-diag.json"').send(bundle);
+  });
+
+  // 恢复出厂：配置全部回种子（账号口令恢复为 账号+123）；需 body.confirm === 'RESET'
+  app.post('/api/system/factory-reset', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    const { confirm } = (req.body ?? {}) as { confirm?: string };
+    if (confirm !== 'RESET') return reply.code(400).send({ ok: false, error: "body.confirm 必须为 'RESET'" });
+    const seed = seedConfig();
+    // 原地替换数组内容（引擎/发布器持有同一引用，splice 后即刻生效）
+    for (const key of ['channels', 'tags', 'alarms', 'storageTasks', 'recipes', 'scripts'] as const) {
+      (config[key] as unknown[]).splice(0, config[key].length, ...(seed[key] as unknown[]));
+    }
+    Object.assign(notifications, seed.notifications ?? {});
+    Object.assign(northbound, seed.northbound ?? {});
+    if (seed.users) authStore.setUsers(seed.users);
+    saveConfig(config);
+    engine.syncConfig(channels, tags);
+    storageTaskEngine.sync(config.storageTasks);
+    northboundPublisher.applyConfig();
+    alarmEngine.setRules(config.alarms ?? []);
+    auditLog(actor, 'system.factory-reset', '配置恢复出厂默认（种子账号口令恢复为 账号+123）');
+    return { ok: true };
+  });
 
   app.put('/api/northbound', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');

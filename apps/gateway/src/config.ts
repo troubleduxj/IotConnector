@@ -35,7 +35,8 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
  * 三条通道均为真实协议栈：S7comm（s7-sim.ts:10102）、Modbus TCP（modbus-sim.ts:15020）、
  * OPC UA 订阅（opcua-sim-node.ts:4840）。真机交付时仅需改 host/端口与 rack/slot。
  */
-function seedConfig(): GatewayConfig {
+/** 出厂种子配置（恢复出厂用；正常启动走 loadConfig 的"文件优先、缺失段补种子"逻辑） */
+export function seedConfig(): GatewayConfig {
   return {
     channels: [
       {

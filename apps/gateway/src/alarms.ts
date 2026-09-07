@@ -1,8 +1,8 @@
 import type { AlarmEvent, AlarmRule, Quality, Tag } from '@iotconnector/shared';
 
 /**
- * 告警引擎（PRD FR-M10-01 最小集）：限值告警（越上限/越下限）+ 回差消抖。
- * 状态机：Inactive → Active（越限）→ Cleared（回落到阈值 ± 回差内）。
+ * 告警引擎（PRD FR-M10-01）：限值（越上限/越下限）+ 偏差（|值-基准|）+ 变化率（|Δx|/s），
+ * 均带回差消抖。状态机：Inactive → Active（越限）→ Cleared（回落到阈值 ± 回差内）。
  * 评估输入为工程值（引擎标度变换之后）。
  */
 export class AlarmEngine {
@@ -10,6 +10,8 @@ export class AlarmEngine {
   private active = new Map<string, AlarmEvent>(); // ruleId → event
   private history: AlarmEvent[] = [];
   private seq = 0;
+  /** roc 规则的上一次采样（ruleId → {value, ts}），用于计算每秒变化率 */
+  private rocState = new Map<string, { value: number; ts: number }>();
 
   /** 告警事件回调（WS 广播用） */
   onEvent?: (event: AlarmEvent) => void;
@@ -39,6 +41,7 @@ export class AlarmEngine {
   removeRule(id: string): boolean {
     const before = this.rules.length;
     this.rules = this.rules.filter((r) => r.id !== id);
+    this.rocState.delete(id);
     // 规则删除时，若其告警仍处于激活态则自动清除
     const active = this.active.get(id);
     if (active) {
@@ -71,12 +74,35 @@ export class AlarmEngine {
       if (rule.kind === 'high') {
         shouldActivate = !isActive && value > rule.threshold;
         shouldClear = isActive && value < rule.threshold - hyst;
-      } else {
+      } else if (rule.kind === 'low') {
         shouldActivate = !isActive && value < rule.threshold;
         shouldClear = isActive && value > rule.threshold + hyst;
+      } else if (rule.kind === 'deviation') {
+        const dev = Math.abs(value - (rule.reference ?? 0));
+        shouldActivate = !isActive && dev > rule.threshold;
+        shouldClear = isActive && dev < rule.threshold - hyst;
+      } else {
+        // roc：与上次采样求每秒变化率；首个采样只记录基线
+        const now = Date.now();
+        const last = this.rocState.get(rule.id);
+        this.rocState.set(rule.id, { value, ts: now });
+        if (last) {
+          const dtSec = (now - last.ts) / 1000;
+          if (dtSec > 0) {
+            const roc = Math.abs(value - last.value) / dtSec;
+            shouldActivate = !isActive && roc > rule.threshold;
+            shouldClear = isActive && roc < rule.threshold - hyst;
+          }
+        }
       }
 
       if (shouldActivate) {
+        const defaultMsg = {
+          high: `${tag.name} > ${rule.threshold}`,
+          low: `${tag.name} < ${rule.threshold}`,
+          deviation: `${tag.name} |x-${rule.reference ?? 0}| > ${rule.threshold}`,
+          roc: `${tag.name} |Δx|/s > ${rule.threshold}`,
+        }[rule.kind];
         const event: AlarmEvent = {
           id: `alm_${Date.now()}_${(this.seq += 1)}`,
           ruleId: rule.id,
@@ -88,7 +114,7 @@ export class AlarmEngine {
           threshold: rule.threshold,
           value,
           ts: Date.now(),
-          message: rule.message ?? `${tag.name} ${rule.kind === 'high' ? '>' : '<'} ${rule.threshold}`,
+          message: rule.message ?? defaultMsg,
         };
         this.active.set(rule.id, event);
         this.pushHistory(event);

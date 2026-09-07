@@ -101,8 +101,11 @@ export async function fetchHistory(
 export interface AlarmRule {
   id: string;
   tagId: string;
-  kind: 'high' | 'low';
+  /** high 越上限 / low 越下限 / deviation 偏差 |值-基准| / roc 变化率 |Δx|每秒 */
+  kind: 'high' | 'low' | 'deviation' | 'roc';
   threshold: number;
+  /** deviation 模式的基准值（设定点） */
+  reference?: number;
   hysteresis: number;
   enabled: boolean;
   message?: string;

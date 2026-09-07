@@ -542,6 +542,7 @@ async function main(): Promise<void> {
       tagId: b.tagId,
       kind: b.kind,
       threshold: Number(b.threshold),
+      reference: b.reference === undefined ? undefined : Number(b.reference),
       hysteresis: Math.max(0, Number(b.hysteresis ?? 0)),
       enabled: b.enabled ?? true,
       message: b.message,
@@ -562,6 +563,7 @@ async function main(): Promise<void> {
     const changes: string[] = [];
     if (b.kind !== undefined) { rule.kind = b.kind; changes.push(`kind=${b.kind}`); }
     if (b.threshold !== undefined) { rule.threshold = Number(b.threshold); changes.push(`threshold=${b.threshold}`); }
+    if (b.reference !== undefined) { rule.reference = b.reference === null ? undefined : Number(b.reference); changes.push(`ref=${b.reference}`); }
     if (b.hysteresis !== undefined) { rule.hysteresis = Math.max(0, Number(b.hysteresis)); changes.push(`hyst=${b.hysteresis}`); }
     if (b.enabled !== undefined) { rule.enabled = Boolean(b.enabled); changes.push(`enabled=${b.enabled}`); }
     if (b.message !== undefined) { rule.message = b.message; changes.push('message'); }

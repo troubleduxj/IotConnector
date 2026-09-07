@@ -10,6 +10,7 @@ import {
 } from '../api';
 import { useRuntime } from '../store/runtime';
 import { useI18n } from '../i18n';
+import { alarmKindColorCls, alarmKindSymbol } from '../components/alarmKind';
 
 /**
  * 告警中心（PRD FR-M10-01/04）：
@@ -168,7 +169,7 @@ export default function AlarmCenter() {
   };
 
   const removeRule = async (rule: AlarmRule): Promise<void> => {
-    if (!window.confirm(t('alarms.confirmDelete', { rule: `${tagName(rule.tagId)} ${rule.kind === 'high' ? '>' : '<'} ${rule.threshold}` }))) return;
+    if (!window.confirm(t('alarms.confirmDelete', { rule: `${tagName(rule.tagId)} ${alarmKindSymbol(rule.kind)} ${rule.threshold}` }))) return;
     await deleteAlarm(rule.id);
     setRules((prev) => prev.filter((r) => r.id !== rule.id));
     fetchAlarms().then((d) => setActive(d.active)).catch(() => {});
@@ -202,7 +203,7 @@ export default function AlarmCenter() {
               <div key={a.id} className="px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between">
                 <div className="min-w-0">
                   <div className="text-xs font-bold text-rose-800 truncate">
-                    {a.tagName} <span className="font-mono">{a.kind === 'high' ? '>' : '<'} {a.threshold}</span>
+                    {a.tagName} <span className="font-mono">{alarmKindSymbol(a.kind)} {a.threshold}</span>
                   </div>
                   <div className="text-[10px] text-rose-500 font-mono">
                     {a.value.toFixed(2)} · {new Date(a.ts).toLocaleTimeString()}
@@ -256,7 +257,7 @@ export default function AlarmCenter() {
                 onClick={() =>
                   setRuleModal({
                     mode: 'add',
-                    draft: { id: '', tagId: tags[0]?.id ?? '', kind: 'high', threshold: 0, hysteresis: 0.5, enabled: true, message: '' },
+                    draft: { id: '', tagId: tags[0]?.id ?? '', kind: 'high', threshold: 0, reference: 0, hysteresis: 0.5, enabled: true, message: '' },
                   })
                 }
                 disabled={tags.length === 0}
@@ -281,8 +282,9 @@ export default function AlarmCenter() {
                   <tr key={rule.id} className="hover:bg-slate-50/80">
                     <td className="px-4 py-2.5 font-mono font-bold text-slate-800">{tagName(rule.tagId)}</td>
                     <td className="px-4 py-2.5 font-mono">
-                      <span className={`font-bold ${rule.kind === 'high' ? 'text-rose-600' : 'text-blue-600'}`}>
-                        {rule.kind === 'high' ? '>' : '<'} {rule.threshold}
+                      <span className={`font-bold ${alarmKindColorCls(rule.kind)}`}>
+                        {alarmKindSymbol(rule.kind)} {rule.threshold}
+                        {rule.kind === 'deviation' && <span className="ml-1 text-slate-400 font-normal">@{rule.reference ?? 0}</span>}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 font-mono text-slate-500">±{rule.hysteresis}</td>
@@ -371,7 +373,7 @@ export default function AlarmCenter() {
                           {e.state === 'Active' ? <Bell className="w-3 h-3" /> : <Check className="w-3 h-3" />}
                           {e.state === 'Active' ? t('alarms.state.triggered') : t('alarms.state.cleared')}
                         </span>
-                        <span className="ml-2 text-slate-400">{e.kind === 'high' ? t('alarms.kind.high') : t('alarms.kind.low')}</span>
+                        <span className="ml-2 text-slate-400">{t(`alarms.kind.${e.kind}`)}</span>
                       </td>
                       <td className="px-6 py-2.5 text-right font-mono">
                         <span className="font-bold text-slate-800">{e.value.toFixed(2)}</span>
@@ -444,15 +446,19 @@ export default function AlarmCenter() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.field.kind')}</label>
                   <select
                     value={ruleModal.draft.kind}
-                    onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, kind: e.target.value as 'high' | 'low' } })}
+                    onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, kind: e.target.value as 'high' | 'low' | 'deviation' | 'roc' } })}
                     className="w-full px-2 py-2 border border-slate-300 rounded-md text-sm font-semibold"
                   >
                     <option value="high">{t('alarms.kind.high')} &gt;</option>
                     <option value="low">{t('alarms.kind.low')} &lt;</option>
+                    <option value="deviation">{t('alarms.kind.deviation')} |Δ|</option>
+                    <option value="roc">{t('alarms.kind.roc')} |Δ|/s</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.field.threshold')} *</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                    {t(`alarms.field.threshold.${ruleModal.draft.kind}`)} *
+                  </label>
                   <input
                     value={ruleModal.draft.threshold}
                     onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, threshold: Number(e.target.value) } })}
@@ -460,14 +466,37 @@ export default function AlarmCenter() {
                   />
                 </div>
                 <div>
+                  {ruleModal.draft.kind === 'deviation' ? (
+                    <>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.field.reference')} *</label>
+                      <input
+                        value={ruleModal.draft.reference ?? 0}
+                        onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, reference: Number(e.target.value) } })}
+                        className="w-full px-2 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.col.hysteresis')}</label>
+                      <input
+                        value={ruleModal.draft.hysteresis}
+                        onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, hysteresis: Number(e.target.value) } })}
+                        className="w-full px-2 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+              {ruleModal.draft.kind === 'deviation' && (
+                <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.col.hysteresis')}</label>
                   <input
                     value={ruleModal.draft.hysteresis}
                     onChange={(e) => setRuleModal({ ...ruleModal, draft: { ...ruleModal.draft, hysteresis: Number(e.target.value) } })}
-                    className="w-full px-2 py-2 border border-slate-300 rounded-md text-sm font-mono"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono"
                   />
                 </div>
-              </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">{t('alarms.col.desc')}</label>
                 <input

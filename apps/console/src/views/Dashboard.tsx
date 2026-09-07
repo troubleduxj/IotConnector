@@ -18,6 +18,7 @@ import {
 import { PROTOCOL_CONFIGS, type Protocol } from '@iotconnector/shared';
 import { useRuntime } from '../store/runtime';
 import { useI18n } from '../i18n';
+import { alarmKindSymbol } from '../components/alarmKind';
 
 export type DashboardNavTarget = 'devices' | 'diagnostics' | 'alarms' | 'historian';
 
@@ -313,8 +314,8 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (v: DashboardNa
                   <div key={a.id} className="px-3 py-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-300">
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-rose-800 truncate flex items-center gap-1">
-                        {a.kind === 'high' ? <ArrowUp className="w-3.5 h-3.5 shrink-0" /> : <ArrowDown className="w-3.5 h-3.5 shrink-0 text-blue-500" />}
-                        {a.tagName} <span className="font-mono">{a.kind === 'high' ? '>' : '<'} {a.threshold}</span>
+                        {a.kind === 'high' ? <ArrowUp className="w-3.5 h-3.5 shrink-0" /> : a.kind === 'low' ? <ArrowDown className="w-3.5 h-3.5 shrink-0 text-blue-500" /> : <Activity className="w-3.5 h-3.5 shrink-0 text-violet-500" />}
+                        {a.tagName} <span className="font-mono">{alarmKindSymbol(a.kind)} {a.threshold}</span>
                         {a.ack && <span className="ml-1.5 text-[10px] text-slate-500 font-normal">{t('dash.alarms.ackedBy', { user: a.ack.user })}</span>}
                       </div>
                       <div className="text-[10px] text-rose-500 font-mono mt-0.5">

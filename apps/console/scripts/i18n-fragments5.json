@@ -1,0 +1,32 @@
+{
+  "alarms": {
+    "zh": {
+      "alarms.kind.deviation": "偏差",
+      "alarms.kind.roc": "变化率",
+      "alarms.field.threshold.high": "上限值",
+      "alarms.field.threshold.low": "下限值",
+      "alarms.field.threshold.deviation": "偏差限值（|值−基准|）",
+      "alarms.field.threshold.roc": "变化率限值（每秒）",
+      "alarms.field.reference": "基准值"
+    },
+    "en": {
+      "alarms.kind.deviation": "Deviation",
+      "alarms.kind.roc": "Rate of change",
+      "alarms.field.threshold.high": "High limit",
+      "alarms.field.threshold.low": "Low limit",
+      "alarms.field.threshold.deviation": "Deviation limit (|x−ref|)",
+      "alarms.field.threshold.roc": "ROC limit (per second)",
+      "alarms.field.reference": "Reference"
+    }
+  },
+  "diag": {
+    "zh": {
+      "diag.kind.deviation": "偏差",
+      "diag.kind.roc": "变化率"
+    },
+    "en": {
+      "diag.kind.deviation": "Deviation",
+      "diag.kind.roc": "Rate of change"
+    }
+  }
+}

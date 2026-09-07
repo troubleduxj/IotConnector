@@ -93,9 +93,11 @@ export interface StorageStatus {
 export interface AlarmRule {
   id: string;
   tagId: string;
-  /** 越上限 / 越下限 */
-  kind: 'high' | 'low';
+  /** high 越上限 / low 越下限 / deviation 偏差 |值-基准| / roc 变化率 |Δ值|每秒 */
+  kind: 'high' | 'low' | 'deviation' | 'roc';
   threshold: number;
+  /** deviation 模式的基准值（设定点）；其余模式忽略 */
+  reference?: number;
   /** 回差（消除临界抖动）：high 规则回落到 threshold - hysteresis 以下才清除 */
   hysteresis: number;
   enabled: boolean;
@@ -109,7 +111,7 @@ export interface AlarmEvent {
   tagName: string;
   channel: string;
   state: 'Active' | 'Cleared';
-  kind: 'high' | 'low';
+  kind: 'high' | 'low' | 'deviation' | 'roc';
   threshold: number;
   value: number;
   ts: number;

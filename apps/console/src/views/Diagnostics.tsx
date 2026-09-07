@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchAlarms, fetchGatewayTags, writeTagValue, createAlarm, updateAlarm, deleteAlarm, type AlarmRule, type GatewayTag } from '../api';
 import { useRuntime } from '../store/runtime';
 import { useI18n } from '../i18n';
+import { alarmKindColorCls } from '../components/alarmKind';
 import { Search, Send, X, Bell, Trash2, Check, Loader2 } from 'lucide-react';
 
 /**
@@ -317,8 +318,8 @@ export default function Diagnose() {
                   {tagRules.map((rule) => (
                     <div key={rule.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
                       <div className="text-xs">
-                        <span className={`font-bold ${rule.kind === 'high' ? 'text-rose-600' : 'text-blue-600'}`}>
-                          {rule.kind === 'high' ? t('diag.kind.high') : t('diag.kind.low')}
+                        <span className={`font-bold ${alarmKindColorCls(rule.kind)}`}>
+                          {t(`diag.kind.${rule.kind}`)}
                         </span>
                         <span className="font-mono ml-1">{rule.threshold}</span>
                         <span className="text-slate-400 ml-2">{t('diag.hysteresis')} {rule.hysteresis}</span>

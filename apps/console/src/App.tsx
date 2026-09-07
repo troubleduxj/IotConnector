@@ -26,6 +26,7 @@ import { AUTH_EXPIRED_EVENT } from './api';
 import { useRuntime } from './store/runtime';
 import { I18nProvider, useI18n, type Lang } from './i18n';
 import { Toaster } from './components/Toast';
+import { DialogHost } from './components/confirm';
 
 type View = 'dashboard' | 'devices' | 'scheduler' | 'storage' | 'diagnostics' | 'recipes' | 'historian' | 'alarms' | 'scripts' | 'settings';
 
@@ -137,6 +138,7 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex font-sans text-slate-900 overflow-hidden relative">
       <Toaster />
+      <DialogHost />
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div

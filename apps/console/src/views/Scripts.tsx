@@ -4,6 +4,8 @@ import {
   fetchScripts, createScript, updateScript, deleteScript, runScript,
   type GatewayScript,
 } from '../api';
+import { toast } from '../components/Toast';
+import { confirmDialog } from '../components/confirm';
 import { useI18n } from '../i18n';
 
 /**
@@ -18,10 +20,7 @@ export default function Scripts() {
   const [busy, setBusy] = useState(false);
   const [outputs, setOutputs] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const { t } = useI18n();
-
-  const showToast = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const load = async (keepSelection = true): Promise<void> => {
     const list = await fetchScripts();
@@ -52,7 +51,7 @@ export default function Scripts() {
       if (selected) await updateScript(draft.id, draft);
       else await createScript(draft);
       await load();
-      showToast(t('scr.toastSaved'));
+      toast(t('scr.toastSaved'));
     } finally {
       setBusy(false);
     }
@@ -60,10 +59,10 @@ export default function Scripts() {
 
   const remove = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(t('scr.confirmDelete', { name: selected.name }))) return;
+    if (!(await confirmDialog({ title: t('scr.confirmDelete', { name: selected.name }), danger: true }))) return;
     await deleteScript(selected.id);
     await load(false);
-    showToast(t('scr.toastDeleted'));
+    toast(t('scr.toastDeleted'));
   };
 
   const run = async (): Promise<void> => {
@@ -74,7 +73,7 @@ export default function Scripts() {
     try {
       const result = await runScript(draft.id);
       setOutputs(result.outputs ?? []);
-      showToast(result.ok ? t('scr.toastRunOk') : t('scr.toastRunFail', { error: result.error ?? '' }));
+      toast(result.ok ? t('scr.toastRunOk') : t('scr.toastRunFail', { error: result.error ?? '' }));
     } finally {
       setRunning(false);
     }
@@ -84,7 +83,6 @@ export default function Scripts() {
 
   return (
     <div className="space-y-6">
-      {toast && <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl">{toast}</div>}
 
       <div className="flex justify-between items-center">
         <div>

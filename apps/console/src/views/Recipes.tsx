@@ -5,6 +5,8 @@ import {
   fetchRecipeDownloads, duplicateRecipe, exportRecipe, importRecipe,
   fetchGatewayTags, type Recipe, type RecipeDownloadRecord, type GatewayTag, type DownloadResultItem,
 } from '../api';
+import { toast } from '../components/Toast';
+import { confirmDialog } from '../components/confirm';
 import { useI18n } from '../i18n';
 
 /** 配方管理（PRD M6）：位号绑定参数集 + 批量下发（下发前显示 diff，逐项回报结果）。
@@ -20,9 +22,6 @@ export default function Recipes() {
   const [downloadResults, setDownloadResults] = useState<{ recipeId: string; ok: boolean; results: DownloadResultItem[] } | null>(null);
   const [downloads, setDownloads] = useState<RecipeDownloadRecord[]>([]);
   const importFileRef = useRef<HTMLInputElement>(null);
-  const [toast, setToast] = useState<string | null>(null);
-
-  const showToast = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const load = async (): Promise<void> => {
     const [r, tg, dl] = await Promise.all([fetchRecipes(), fetchGatewayTags(), fetchRecipeDownloads()]);
@@ -55,7 +54,7 @@ export default function Recipes() {
       if (selected) await updateRecipe(draft.id, draft);
       else await createRecipe(draft);
       await load();
-      showToast(t('rec.toastSaved'));
+      toast(t('rec.toastSaved'));
     } finally {
       setBusy(false);
     }
@@ -63,10 +62,10 @@ export default function Recipes() {
 
   const remove = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(t('rec.confirmDelete', { name: selected.name }))) return;
+    if (!(await confirmDialog({ title: t('rec.confirmDelete', { name: selected.name }), danger: true }))) return;
     await deleteRecipe(selected.id);
     await load();
-    showToast(t('rec.toastDeleted'));
+    toast(t('rec.toastDeleted'));
   };
 
   const doDownload = async (): Promise<void> => {
@@ -75,7 +74,7 @@ export default function Recipes() {
       const tag = tags.find((t) => t.id === it.tagId);
       return `${tag?.name ?? it.tagId}: ${it.value}`;
     });
-    if (!window.confirm(t('rec.confirmDownload', { name: draft.name, lines: lines.join('\n') }))) return;
+    if (!(await confirmDialog({ title: t('rec.confirmDownloadTitle', { name: draft.name }), message: lines.join('\n'), confirmText: t('rec.download') }))) return;
     setBusy(true);
     try {
       const res = await downloadRecipe(draft.id);
@@ -92,7 +91,7 @@ export default function Recipes() {
     const copy = await duplicateRecipe(selected.id);
     await load();
     setSelectedId(copy.id);
-    showToast(t('rec.toastDuplicated', { name: copy.name }));
+    toast(t('rec.toastDuplicated', { name: copy.name }));
   };
 
   const doExport = async (): Promise<void> => {
@@ -100,20 +99,20 @@ export default function Recipes() {
     try {
       await exportRecipe(selected.id, selected.name);
     } catch {
-      showToast(t('rec.exportFailed'));
+      toast(t('rec.exportFailed'));
     }
   };
 
   const doImportFile = async (file: File): Promise<void> => {
     try {
       const bundle = JSON.parse(await file.text()) as { recipe?: { name?: string } };
-      if (!bundle?.recipe?.name) { showToast(t('rec.importBadFormat')); return; }
+      if (!bundle?.recipe?.name) { toast(t('rec.importBadFormat')); return; }
       const created = await importRecipe(bundle);
       await load();
       setSelectedId(created.id);
-      showToast(t('rec.importDone', { name: created.name }));
+      toast(t('rec.importDone', { name: created.name }));
     } catch (e) {
-      showToast(`${t('rec.importFailed')}: ${e instanceof Error ? e.message : String(e)}`);
+      toast(`${t('rec.importFailed')}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -124,7 +123,6 @@ export default function Recipes() {
 
   return (
     <div className="space-y-6">
-      {toast && <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl">{toast}</div>}
 
       <div className="flex justify-between items-center">
         <div>

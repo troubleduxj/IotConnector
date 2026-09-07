@@ -135,9 +135,9 @@ export default function Diagnose() {
   const qualityCell = (tag: GatewayTag): { label: string; cls: string } => {
     const live = liveValues[tag.id];
     const q = live?.quality ?? 'Uncertain';
-    if (q === 'Good') return { label: 'Good', cls: 'text-green-700 bg-green-500' };
-    if (q === 'Bad') return { label: 'Bad', cls: 'text-rose-700 bg-rose-500' };
-    return { label: 'Uncertain', cls: 'text-amber-700 bg-amber-400' };
+    if (q === 'Good') return { label: t('diag.quality.good'), cls: 'text-green-700 bg-green-500' };
+    if (q === 'Bad') return { label: t('diag.quality.bad'), cls: 'text-rose-700 bg-rose-500' };
+    return { label: t('diag.quality.uncertain'), cls: 'text-amber-700 bg-amber-400' };
   };
 
   const formatLive = (tag: GatewayTag): string => {

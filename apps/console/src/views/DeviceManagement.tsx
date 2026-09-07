@@ -11,6 +11,8 @@ import {
 import { useRuntime } from '../store/runtime';
 import { fetchChannelFrames, type CapturedFrame } from '../api';
 import TagValue from '../components/TagValue';
+import { toast } from '../components/Toast';
+import { confirmDialog } from '../components/confirm';
 import { useI18n } from '../i18n';
 
 /**
@@ -40,7 +42,6 @@ export default function DeviceManagement() {
   const [activeTab, setActiveTab] = useState<'connection' | 'tags' | 'diagnostics'>('connection');
   const [frames, setFrames] = useState<CapturedFrame[]>([]);
   const [framesPaused, setFramesPaused] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [newChannel, setNewChannel] = useState({ name: '', protocol: 'Modbus TCP' as Protocol, host: '192.168.1.100', port: 502 });
@@ -48,11 +49,6 @@ export default function DeviceManagement() {
   const [tagSearch, setTagSearch] = useState('');
   const [testResult, setTestResult] = useState<ChannelTestResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const showToast = (msg: string): void => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const loadConfig = async (): Promise<void> => {
     const config = await fetchConfig();
@@ -106,9 +102,9 @@ export default function DeviceManagement() {
         params: draft.params,
       });
       await loadConfig();
-      showToast(t('dev.toast.channelSaved', { name: draft.name }));
+      toast(t('dev.toast.channelSaved', { name: draft.name }));
     } catch (e) {
-      showToast(t('dev.toast.saveFailed', { err: String(e) }));
+      toast(t('dev.toast.saveFailed', { err: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -116,12 +112,12 @@ export default function DeviceManagement() {
 
   const removeChannel = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(t('dev.confirm.deleteChannel', { name: selected.name, n: selectedTags.length }))) return;
+    if (!(await confirmDialog({ title: t('dev.confirm.deleteChannel', { name: selected.name, n: selectedTags.length }), danger: true }))) return;
     setBusy(true);
     try {
       await deleteChannel(selected.id);
       await loadConfig();
-      showToast(t('dev.toast.channelDeleted', { name: selected.name }));
+      toast(t('dev.toast.channelDeleted', { name: selected.name }));
     } finally {
       setBusy(false);
     }
@@ -133,7 +129,7 @@ export default function DeviceManagement() {
     try {
       await exportChannelConfig(selected.id, selected.name);
     } catch {
-      showToast(t('dev.exportFailed'));
+      toast(t('dev.exportFailed'));
     }
   };
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -142,11 +138,11 @@ export default function DeviceManagement() {
       const bundle = JSON.parse(await file.text()) as { channel?: { name?: string } };
       if (!bundle.channel?.name) throw new Error(t('dev.importBadFormat'));
       const r = await importChannelConfig(bundle);
-      showToast(t('dev.importDone', { name: r.channel.name, n: r.importedTags }));
+      toast(t('dev.importDone', { name: r.channel.name, n: r.importedTags }));
       await loadConfig();
       setSelectedId(r.channel.id);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : t('dev.importFailed'));
+      toast(e instanceof Error ? e.message : t('dev.importFailed'));
     }
   };
 
@@ -169,9 +165,9 @@ export default function DeviceManagement() {
       setIsAddOpen(false);
       await loadConfig();
       setSelectedId(created.id);
-      showToast(t('dev.toast.channelCreated', { name: created.name }));
+      toast(t('dev.toast.channelCreated', { name: created.name }));
     } catch (e) {
-      showToast(t('dev.toast.createFailed', { err: String(e) }));
+      toast(t('dev.toast.createFailed', { err: String(e) }));
     } finally {
       setBusy(false);
     }
@@ -186,9 +182,9 @@ export default function DeviceManagement() {
     try {
       const result = await testChannelConnection(draft.id);
       setTestResult(result);
-      showToast(result.ok ? t('dev.toast.connTestOk') : t('dev.toast.connTestFail'));
+      toast(result.ok ? t('dev.toast.connTestOk') : t('dev.toast.connTestFail'));
     } catch (e) {
-      showToast(t('dev.toast.testFailed', { err: String(e) }));
+      toast(t('dev.toast.testFailed', { err: String(e) }));
     } finally {
       setTestBusy(false);
     }
@@ -223,19 +219,19 @@ export default function DeviceManagement() {
       else await updateTag(tagModal.draft.id, tagModal.draft);
       setTagModal(null);
       await loadConfig();
-      showToast(t('dev.toast.tagSaved'));
+      toast(t('dev.toast.tagSaved'));
     } catch (e) {
-      showToast(t('dev.toast.saveFailed', { err: String(e) }));
+      toast(t('dev.toast.saveFailed', { err: String(e) }));
     } finally {
       setBusy(false);
     }
   };
 
   const removeTag = async (id: string, name: string): Promise<void> => {
-    if (!window.confirm(t('dev.confirm.deleteTag', { name }))) return;
+    if (!(await confirmDialog({ title: t('dev.confirm.deleteTag', { name }), danger: true }))) return;
     await deleteTag(id);
     await loadConfig();
-    showToast(t('dev.toast.tagDeleted', { name }));
+    toast(t('dev.toast.tagDeleted', { name }));
   };
 
   // ===== 位号 CSV 导入 / 导出 =====
@@ -251,7 +247,7 @@ export default function DeviceManagement() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(t('dev.toast.exported', { n: selectedTags.length }));
+    toast(t('dev.toast.exported', { n: selectedTags.length }));
   };
 
   const importTagsCsv = (file: File): void => {
@@ -261,7 +257,7 @@ export default function DeviceManagement() {
       const content = String(event.target?.result ?? '');
       const lines = content.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length <= 1) {
-        showToast(t('dev.toast.csvEmpty'));
+        toast(t('dev.toast.csvEmpty'));
         return;
       }
       let imported = 0;
@@ -285,7 +281,7 @@ export default function DeviceManagement() {
         }
       }
       await loadConfig();
-      showToast(t('dev.toast.imported', { n: imported }));
+      toast(t('dev.toast.imported', { n: imported }));
     };
     reader.readAsText(file);
   };
@@ -310,12 +306,6 @@ export default function DeviceManagement() {
 
   return (
     <div className="space-y-6">
-      {toast && (
-        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl border border-slate-700">
-          {toast}
-        </div>
-      )}
-
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-lg font-bold text-slate-800">{t('dev.title')}</h2>

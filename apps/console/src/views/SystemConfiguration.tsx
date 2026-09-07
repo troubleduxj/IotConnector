@@ -31,10 +31,6 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
   const { t } = useI18n();
-  const showToastMsg = (msg: string): void => {
-    window.dispatchEvent(new CustomEvent('fb-toast', { detail: { message: msg, ok: true } }));
-  };
-
   useEffect(() => {
     fetchMe().then(async (u) => {
       if (u?.role !== 'admin') return;
@@ -122,7 +118,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
       const d = await saveNorthbound(northbound);
       setNorthbound(d.config);
       setNbStatus(d.status);
-      showToastMsg(t('sys.nb.saved'));
+      toast(t('sys.nb.saved'));
     } finally {
       setNbBusy(false);
     }
@@ -138,7 +134,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
   const changeUserRole = async (u: ManagedUser, role: ConsoleUser['role']): Promise<void> => {
     const res = await updateUser(u.id, { role });
     if (!res.ok) { toast(await apiError(res), false); refreshUsers(); return; }
-    showToastMsg(t('sys.users.saved'));
+    toast(t('sys.users.saved'));
     refreshUsers();
   };
   const applyReset = async (u: ManagedUser): Promise<void> => {
@@ -345,7 +341,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                   </span>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => void rebirthNorthbound().then(() => showToastMsg(t('sys.nb.rebirthToast')))}
+                      onClick={() => void rebirthNorthbound().then(() => toast(t('sys.nb.rebirthToast')))}
                       className="px-3 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
                     >
                       REBIRTH

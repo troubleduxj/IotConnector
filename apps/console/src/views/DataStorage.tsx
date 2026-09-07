@@ -4,6 +4,8 @@ import {
   fetchStorageTasks, createStorageTask, updateStorageTask, deleteStorageTask,
   fetchStorageTaskStats, fetchGatewayTags, type StorageTask, type StorageTaskRuntime, type GatewayTag,
 } from '../api';
+import { toast } from '../components/Toast';
+import { confirmDialog } from '../components/confirm';
 import { useI18n } from '../i18n';
 
 /** 存储规则（PRD M4）：存储任务 CRUD + 触发器（周期/死区/边沿），由网关执行写入。 */
@@ -24,9 +26,6 @@ export default function DataStorage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<StorageTask | null>(null);
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-
-  const showToast = (m: string): void => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const load = async (): Promise<void> => {
     const [t, tg] = await Promise.all([fetchStorageTasks(), fetchGatewayTags()]);
@@ -59,7 +58,7 @@ export default function DataStorage() {
       if (selected) await updateStorageTask(draft.id, draft);
       else await createStorageTask(draft);
       await load();
-      showToast(t('stor.toastSaved'));
+      toast(t('stor.toastSaved'));
     } finally {
       setBusy(false);
     }
@@ -67,15 +66,14 @@ export default function DataStorage() {
 
   const remove = async (): Promise<void> => {
     if (!selected) return;
-    if (!window.confirm(t('stor.confirmDelete', { name: selected.name }))) return;
+    if (!(await confirmDialog({ title: t('stor.confirmDelete', { name: selected.name }), danger: true }))) return;
     await deleteStorageTask(selected.id);
     await load();
-    showToast(t('stor.toastDeleted'));
+    toast(t('stor.toastDeleted'));
   };
 
   return (
     <div className="space-y-6">
-      {toast && <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl">{toast}</div>}
 
       <div className="flex justify-between items-center">
         <div>

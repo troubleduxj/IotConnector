@@ -5,11 +5,13 @@ import {
 } from 'recharts';
 import { fetchHistory, fetchGatewayTags, type GatewayTag, type HistorySeries } from '../api';
 import { useRuntime } from '../store/runtime';
+import { toast } from '../components/Toast';
+import { confirmDialog, promptDialog } from '../components/confirm';
 import { useI18n } from '../i18n';
 import {
   Calendar, Download, Search, RefreshCw, Layers, CheckSquare, Square,
   X, Filter, Eye, EyeOff, BarChart2, TrendingUp, Sliders, Image, FileSpreadsheet,
-  FileText, Clock, Sparkles, Activity, Check, CheckCircle2, ChevronDown, ChevronRight,
+  FileText, Clock, Sparkles, Activity, Check, ChevronDown, ChevronRight,
   Maximize2, ArrowUpDown, HelpCircle, AlertTriangle, ChevronLeft
 } from 'lucide-react';
 import { Tag } from '../types';
@@ -100,14 +102,7 @@ export default function Historian() {
 
   // Export State
   const [isExporting, setIsExporting] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
   const chartContainerRef = useRef<HTMLDivElement>(null);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  };
 
   // ===== 真实位号列表（网关 /api/tags，单一数据源）=====
   const [gatewayTags, setGatewayTags] = useState<GatewayTag[]>([]);
@@ -167,13 +162,13 @@ export default function Historian() {
     setSelectedTagIds(prev => {
       if (prev.includes(id)) {
         if (prev.length === 1) {
-          showToast('At least one tag must remain selected.');
+          toast(t('hist.limit.minOne'));
           return prev;
         }
         return prev.filter(tId => tId !== id);
       } else {
         if (prev.length >= 8) {
-          showToast('Maximum 8 tags can be compared simultaneously.');
+          toast(t('hist.limit.max8'));
           return prev;
         }
         return [...prev, id];
@@ -302,16 +297,16 @@ export default function Historian() {
   const handleSelectQuickGroup = (type: 'all' | 'reactors' | 'drives' | 'clear') => {
     if (type === 'all') {
       setSelectedTagIds(gatewayTags.slice(0, 6).map(t => t.id));
-      showToast(t('hist.toast.top6'));
+      toast(t('hist.toast.top6'));
     } else if (type === 'reactors') {
       setSelectedTagIds(gatewayTags.filter(t => t.channelId.includes('s7-01')).map(t => t.id));
-      showToast(t('hist.toast.reactor'));
+      toast(t('hist.toast.reactor'));
     } else if (type === 'drives') {
       setSelectedTagIds(gatewayTags.filter(t => t.channelId.includes('mb-01')).map(t => t.id));
-      showToast(t('hist.toast.drives'));
+      toast(t('hist.toast.drives'));
     } else {
       setSelectedTagIds(gatewayTags.length ? [gatewayTags[0].id] : []);
-      showToast(t('hist.toast.reset'));
+      toast(t('hist.toast.reset'));
     }
   };
 
@@ -328,22 +323,25 @@ export default function Historian() {
     localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
   };
 
-  const savePreset = (): void => {
-    if (!selectedTagIds.length) { showToast(t('hist.preset.empty')); return; }
-    const name = window.prompt(t('hist.preset.promptName'), `${t('hist.preset.defaultName')} ${presets.length + 1}`);
-    const trimmed = name?.trim();
+  const savePreset = async (): Promise<void> => {
+    if (!selectedTagIds.length) { toast(t('hist.preset.empty')); return; }
+    const input = await promptDialog({
+      title: t('hist.preset.promptName'),
+      defaultValue: `${t('hist.preset.defaultName')} ${presets.length + 1}`,
+    });
+    const trimmed = input?.trim();
     if (!trimmed) return;
     const next = [...presets.filter(p => p.name !== trimmed), { name: trimmed, tagIds: [...selectedTagIds] }].slice(-8);
     persistPresets(next);
-    showToast(t('hist.preset.saved', { name: trimmed }));
+    toast(t('hist.preset.saved', { name: trimmed }));
   };
 
   const applyPreset = (p: HistPreset): void => {
     // 过滤已删除的位号；上限 8（PRD FR-M7-01）
     const valid = p.tagIds.filter(id => gatewayTags.some(t => t.id === id)).slice(0, 8);
-    if (!valid.length) { showToast(t('hist.preset.stale', { name: p.name })); return; }
+    if (!valid.length) { toast(t('hist.preset.stale', { name: p.name })); return; }
     setSelectedTagIds(valid);
-    showToast(t('hist.preset.applied', { name: p.name }));
+    toast(t('hist.preset.applied', { name: p.name }));
   };
 
   const removePreset = (name: string): void => {
@@ -359,7 +357,7 @@ export default function Historian() {
 
       const svgElement = container.querySelector('svg');
       if (!svgElement) {
-        showToast('Unable to find SVG chart element.');
+        toast(t('hist.export.noSvg'), false);
         setIsExporting(false);
         return;
       }
@@ -446,14 +444,14 @@ export default function Historian() {
         document.body.removeChild(downloadLink);
         URL.revokeObjectURL(blobURL);
 
-        showToast('Chart image (PNG) exported successfully.');
+        toast(t('hist.export.pngDone'));
         setIsExporting(false);
       };
 
       image.src = blobURL;
     } catch (err) {
       console.error(err);
-      showToast('Image export failed, please try again.');
+      toast(t('hist.export.pngFail'), false);
       setIsExporting(false);
     }
   };
@@ -474,7 +472,7 @@ export default function Historian() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(`Exported ${chartData.length} records to CSV.`);
+    toast(t('hist.export.csvDone', { n: chartData.length }));
   };
 
   // EXPORT 3: Export SVG Vector
@@ -495,19 +493,12 @@ export default function Historian() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showToast('Vector chart (SVG) exported.');
+    toast(t('hist.export.svgDone'));
   };
 
   return (
     <div className="space-y-6">
       {/* Toast Feedback */}
-      {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2 border border-slate-700 animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
       {/* TOP CONTROL BAR: Tag Search, Time Range & Action Buttons */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
         {/* Row 1: Time Presets & Custom Range */}
@@ -614,7 +605,7 @@ export default function Historian() {
             <button
               onClick={() => {
                 setRefreshTrigger(prev => prev + 1);
-                showToast(t('hist.toast.rangeApplied'));
+                toast(t('hist.toast.rangeApplied'));
               }}
               className="px-3 py-1 bg-indigo-600 text-white font-bold rounded-md hover:bg-indigo-700"
             >
@@ -1068,7 +1059,7 @@ export default function Historian() {
             <h4 className="font-bold text-slate-800 text-sm">{t('hist.stats.title')}</h4>
           </div>
           <span className="text-xs text-slate-500 font-mono">
-            Sample Window: {timePreset.toUpperCase()} · {historyData?.[0]?.intervalSec ? `${historyData[0].intervalSec}s buckets` : 'auto'} · {chartData.length} buckets
+            {t('hist.stats.window', { preset: timePreset.toUpperCase(), bucket: historyData?.[0]?.intervalSec ?? 'auto', n: chartData.length })}
           </span>
         </div>
 

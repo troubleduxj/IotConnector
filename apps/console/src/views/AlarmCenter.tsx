@@ -9,6 +9,8 @@ import {
   type AlarmEvent, type AlarmHistoryEvent, type AlarmRule, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
+import { toast } from '../components/Toast';
+import { confirmDialog } from '../components/confirm';
 import { useI18n } from '../i18n';
 import { alarmKindColorCls, alarmKindSymbol } from '../components/alarmKind';
 
@@ -128,7 +130,7 @@ export default function AlarmCenter() {
     try {
       const saved = await saveNotifications(notify);
       setNotify(saved);
-      showToast(t('alarms.notify.savedToast'));
+      toast(t('alarms.notify.savedToast'));
     } finally {
       setNotifyBusy(false);
     }
@@ -138,11 +140,6 @@ export default function AlarmCenter() {
     setNotifyTest({ channel, ok: true, msg: t('alarms.notify.testing') });
     const res = await testNotificationChannel(channel);
     setNotifyTest({ channel, ok: res.ok, msg: res.ok ? t('alarms.notify.testOk') : res.error ?? t('alarms.notify.testFail') });
-  };
-
-  const showToastMsg = (msg: string): void => {
-    setNotifyTest({ channel: '__rule', ok: true, msg });
-    setTimeout(() => setNotifyTest(null), 2500);
   };
 
   const submitRule = async (): Promise<void> => {
@@ -169,7 +166,7 @@ export default function AlarmCenter() {
   };
 
   const removeRule = async (rule: AlarmRule): Promise<void> => {
-    if (!window.confirm(t('alarms.confirmDelete', { rule: `${tagName(rule.tagId)} ${alarmKindSymbol(rule.kind)} ${rule.threshold}` }))) return;
+    if (!(await confirmDialog({ title: t('alarms.confirmDelete', { rule: `${tagName(rule.tagId)} ${alarmKindSymbol(rule.kind)} ${rule.threshold}` }), danger: true }))) return;
     await deleteAlarm(rule.id);
     setRules((prev) => prev.filter((r) => r.id !== rule.id));
     fetchAlarms().then((d) => setActive(d.active)).catch(() => {});
@@ -723,7 +720,3 @@ function NotifyConfigTab({
   );
 }
 
-function showToast(msg: string): void {
-  // 简易 toast：复用页面级提示（后续统一到 Toast 组件）
-  window.dispatchEvent(new CustomEvent('fb-toast', { detail: msg }));
-}

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
 import { hashPassword, type User } from './auth';
-import type { Recipe, Script, StorageTask } from '@iotconnector/shared';
+import type { Recipe, RecipeDownloadRecord, Script, StorageTask } from '@iotconnector/shared';
 
 export interface NorthboundConfig {
   enabled: boolean;
@@ -22,6 +22,8 @@ export interface GatewayConfig {
   users?: User[];
   storageTasks: StorageTask[];
   recipes: Recipe[];
+  /** FR-M6-04 配方下发记录（最近 200 条） */
+  recipeDownloads?: RecipeDownloadRecord[];
   scripts: Script[];
   northbound?: NorthboundConfig;
 }
@@ -216,6 +218,7 @@ export function loadConfig(): GatewayConfig {
       parsed.users = parsed.users ?? seed.users;
       parsed.storageTasks = parsed.storageTasks ?? seed.storageTasks;
       parsed.recipes = parsed.recipes ?? seed.recipes;
+      parsed.recipeDownloads = parsed.recipeDownloads ?? [];
       parsed.scripts = parsed.scripts ?? seed.scripts;
       parsed.northbound = { enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000, ...parsed.northbound };
       return parsed;

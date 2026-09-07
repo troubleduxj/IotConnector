@@ -471,6 +471,21 @@ export interface Recipe {
   description: string;
   items: RecipeItem[];
   updatedAt: number;
+  /** FR-M6-03 版本号 */
+  version?: number;
+}
+
+/** FR-M6-04 配方下发记录 */
+export interface RecipeDownloadRecord {
+  id: string;
+  recipeId: string;
+  recipeName: string;
+  version: number;
+  at: number;
+  by: string;
+  ok: boolean;
+  okCount: number;
+  totalCount: number;
 }
 
 export interface ScriptTrigger {
@@ -590,6 +605,41 @@ export interface DownloadResultItem { tagId: string; name?: string; value: unkno
 export const downloadRecipe = async (id: string): Promise<{ ok: boolean; results: DownloadResultItem[] }> => {
   return (await (await apiFetch(`/api/recipes/${id}/download`, { method: 'POST' })).json()) as { ok: boolean; results: DownloadResultItem[] };
 };
+
+/** FR-M6-04 下发记录（新→旧） */
+export const fetchRecipeDownloads = async (): Promise<RecipeDownloadRecord[]> =>
+  (await apiFetch('/api/recipes/downloads')).json() as Promise<RecipeDownloadRecord[]>;
+
+/** FR-M6-04 复制配方 */
+export const duplicateRecipe = async (id: string): Promise<Recipe> =>
+  (await (await apiFetch(`/api/recipes/${id}/duplicate`, { method: 'POST' })).json()) as Recipe;
+
+/** FR-M6-04 配方导出：JSON 文件下载（含 content-disposition 文件名） */
+export async function exportRecipe(id: string, fallbackName: string): Promise<void> {
+  const res = await apiFetch(`/api/recipes/${id}/export`);
+  if (!res.ok) throw new Error('export recipe failed');
+  const blob = await res.blob();
+  const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = m?.[1] ?? `${fallbackName}.recipe.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/** FR-M6-04 配方导入：重名 409、位号匹配失败返回中文明细 */
+export async function importRecipe(bundle: unknown): Promise<Recipe> {
+  const res = await apiFetch('/api/recipes/import', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(bundle),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; details?: string[] };
+    throw new Error([body.error, ...(body.details ?? []).slice(0, 5)].filter(Boolean).join('\n'));
+  }
+  return (await res.json()) as Recipe;
+}
 
 export const fetchScripts = async (): Promise<GatewayScript[]> =>
   (await apiFetch('/api/scripts')).json() as Promise<GatewayScript[]>;

@@ -181,6 +181,21 @@ export interface Recipe {
   description: string;
   items: Array<{ tagId: string; value: number | string | boolean }>;
   updatedAt: number;
+  /** FR-M6-03 版本号：新建为 1，参数集(items)变更保存时 +1 */
+  version?: number;
+}
+
+/** FR-M6-04 配方下发记录（网关持久化，最近 200 条） */
+export interface RecipeDownloadRecord {
+  id: string;
+  recipeId: string;
+  recipeName: string;
+  version: number;
+  at: number;
+  by: string;
+  ok: boolean;
+  okCount: number;
+  totalCount: number;
 }
 
 /** 边缘脚本触发方式（决策 D5：JS 沙箱） */

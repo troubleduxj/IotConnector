@@ -16,7 +16,7 @@ import { channelCommStats } from './engine/stats';
 import { toNodes7Address } from './engine/drivers/s7';
 import { StorageTaskEngine } from './storage-tasks';
 import { ScriptEngine } from './scripts';
-import type { Recipe, Script, StorageTask } from '@iotconnector/shared';
+import type { Recipe, RecipeDownloadRecord, Script, StorageTask } from '@iotconnector/shared';
 import type { NorthboundConfig } from './northbound/publisher';
 import { NorthboundPublisher } from './northbound/publisher';
 import { AuthStore, hashPassword, type Role, type SessionUser } from './auth';
@@ -789,6 +789,10 @@ async function main(): Promise<void> {
         '/api/storage-tasks/stats': { get: { summary: '任务运行状态（写入/速率/错误）' } },
         '/api/recipes': { get: { summary: '配方列表' } },
         '/api/recipes/{id}/download': { post: { summary: '配方下发到设备' } },
+        '/api/recipes/downloads': { get: { summary: '配方下发记录（FR-M6-04）' } },
+        '/api/recipes/{id}/duplicate': { post: { summary: '复制配方（FR-M6-04）' } },
+        '/api/recipes/{id}/export': { get: { summary: '配方导出 JSON（FR-M6-04）' } },
+        '/api/recipes/import': { post: { summary: '配方导入（FR-M6-04）' } },
         '/api/scripts': { get: { summary: '边缘脚本' } },
         '/api/scripts/{id}/run': { post: { summary: '试运行脚本' } },
         '/api/scheduler': { get: { summary: '调度统计' } },
@@ -1158,6 +1162,7 @@ async function main(): Promise<void> {
       description: b.description ?? '',
       items: b.items ?? [],
       updatedAt: Date.now(),
+      version: 1, // FR-M6-03 新建版本号为 1
     };
     config.recipes = [...(config.recipes ?? []), recipe];
     persist();
@@ -1172,7 +1177,10 @@ async function main(): Promise<void> {
     const i = (config.recipes ?? []).findIndex((r) => r.id === (req.params as { id: string }).id);
     if (i < 0) return reply.code(404).send({ ok: false, error: 'recipe not found' });
     const b = (req.body ?? {}) as Partial<Recipe>;
-    config.recipes[i] = { ...config.recipes[i], name: b.name ?? config.recipes[i].name, description: b.description ?? config.recipes[i].description, items: b.items ?? config.recipes[i].items, updatedAt: Date.now() };
+    const prev = config.recipes[i];
+    // FR-M6-03 参数集变更才 bump 版本；仅改名称/说明不动版本
+    const itemsChanged = b.items !== undefined && JSON.stringify(b.items) !== JSON.stringify(prev.items);
+    config.recipes[i] = { ...prev, name: b.name ?? prev.name, description: b.description ?? prev.description, items: b.items ?? prev.items, updatedAt: Date.now(), version: itemsChanged ? (prev.version ?? 1) + 1 : (prev.version ?? 1) };
     persist();
     broadcastConfigChanged();
     auditLog(actor, 'recipe.update', `${config.recipes[i].name}（${config.recipes[i].items.length} 参数）`);
@@ -1207,7 +1215,101 @@ async function main(): Promise<void> {
       auditLog(actor, 'recipe.download', `${recipe.name}: ${tag.name} = ${item.value} ${r.ok ? '成功' : '失败 ' + (r.error ?? '')}`);
       results.push({ tagId: item.tagId, name: tag.name, value: item.value, ok: r.ok, error: r.error });
     }
-    return { ok: results.every((r) => r.ok), results };
+    // FR-M6-04 下发记录：持久化最近 200 条
+    const okCount = results.filter((r) => r.ok).length;
+    const record: RecipeDownloadRecord = {
+      id: `dl_${Date.now()}`,
+      recipeId: recipe.id,
+      recipeName: recipe.name,
+      version: recipe.version ?? 1,
+      at: Date.now(),
+      by: actor.username,
+      ok: okCount === results.length,
+      okCount,
+      totalCount: results.length,
+    };
+    config.recipeDownloads = [record, ...(config.recipeDownloads ?? [])].slice(0, 200);
+    persist();
+    return { ok: record.ok, results };
+  });
+
+  // FR-M6-04 下发记录（新→旧）
+  app.get('/api/recipes/downloads', async () => config.recipeDownloads ?? []);
+
+  // FR-M6-04 复制配方：同参数集新副本，版本重置为 1
+  app.post('/api/recipes/:id/duplicate', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const src = (config.recipes ?? []).find((r) => r.id === (req.params as { id: string }).id);
+    if (!src) return reply.code(404).send({ ok: false, error: 'recipe not found' });
+    const copy: Recipe = {
+      ...JSON.parse(JSON.stringify(src)) as Recipe,
+      id: `rcp_${Date.now()}`,
+      name: `${src.name} 副本`,
+      updatedAt: Date.now(),
+      version: 1,
+    };
+    config.recipes = [...(config.recipes ?? []), copy];
+    persist();
+    broadcastConfigChanged();
+    auditLog(actor, 'recipe.duplicate', `${src.name} → ${copy.name}`);
+    return reply.code(201).send(copy);
+  });
+
+  // FR-M6-04 配方导出：JSON 下载（参数集按位号名+id 双写，跨网关可导入）
+  app.get('/api/recipes/:id/export', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const recipe = (config.recipes ?? []).find((r) => r.id === (req.params as { id: string }).id);
+    if (!recipe) return reply.code(404).send({ ok: false, error: 'recipe not found' });
+    const bundle = {
+      format: 'factorybridge-recipe@1',
+      exportedAt: new Date().toISOString(),
+      recipe: {
+        name: recipe.name,
+        description: recipe.description,
+        version: recipe.version ?? 1,
+        items: recipe.items.map((it) => ({ ...it, tagName: getTag(it.tagId)?.name ?? it.tagId })),
+      },
+    };
+    auditLog(actor, 'recipe.export', `${recipe.name}（v${recipe.version ?? 1}，${recipe.items.length} 参数）`);
+    return reply
+      .header('content-disposition', `attachment; filename="${recipe.name.replace(/[^A-Za-z0-9_-]/g, '_')}.recipe.json"`)
+      .send(bundle);
+  });
+
+  // FR-M6-04 配方导入：重名 409；位号按 id 优先匹配，缺 id 按名匹配，均缺则报错明细
+  app.post('/api/recipes/import', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const b = (req.body ?? {}) as { recipe?: { name?: string; description?: string; items?: Array<{ tagId?: string; tagName?: string; value?: number | string | boolean }> } };
+    const src = b.recipe;
+    if (!src?.name) return reply.code(400).send({ ok: false, error: 'recipe.name required' });
+    if ((config.recipes ?? []).some((r) => r.name === src.name)) {
+      return reply.code(409).send({ ok: false, error: `配方名已存在: ${src.name}` });
+    }
+    const items: Recipe['items'] = [];
+    const errors: string[] = [];
+    for (const [i, it] of (src.items ?? []).entries()) {
+      const tag = it.tagId ? getTag(it.tagId) : tags.find((tg) => tg.name === it.tagName);
+      if (!tag) { errors.push(`第 ${i + 1} 项位号无法匹配: ${it.tagName ?? it.tagId ?? '?'}`); continue; }
+      if (it.value === undefined) { errors.push(`第 ${i + 1} 项缺 value`); continue; }
+      items.push({ tagId: tag.id, value: it.value });
+    }
+    if (errors.length > 0) return reply.code(400).send({ ok: false, error: '位号匹配失败', details: errors.slice(0, 20) });
+    const recipe: Recipe = {
+      id: `rcp_${Date.now()}`,
+      name: src.name,
+      description: src.description ?? '',
+      items,
+      updatedAt: Date.now(),
+      version: 1,
+    };
+    config.recipes = [...(config.recipes ?? []), recipe];
+    persist();
+    broadcastConfigChanged();
+    auditLog(actor, 'recipe.import', `${recipe.name}（${items.length} 参数）`);
+    return reply.code(201).send(recipe);
   });
 
   // ===== 边缘脚本 CRUD / 运行 / 输出（决策 D5）=====

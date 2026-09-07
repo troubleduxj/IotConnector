@@ -14,6 +14,7 @@ import {
 } from 'node-opcua';
 import type { Quality, Tag } from '@iotconnector/shared';
 import type { Driver, DriverContext } from '../driver';
+import { bumpRx } from '../stats';
 
 const RECONNECT_MS = 5000;
 
@@ -125,6 +126,8 @@ export class OpcUaDriver implements Driver {
         item.on('changed', (dataValue) => {
           const raw = dataValue.value?.value;
           if (raw === null || raw === undefined) return;
+          // FR-M2-07：订阅式只计 RX（无逐请求报文）
+          bumpRx(this.ctx.channel.id);
           const q = qualityOf(dataValue.statusCode);
           if (tag.dataType === 'Bool') {
             this.ctx.publish(tag.id, Boolean(raw), q);

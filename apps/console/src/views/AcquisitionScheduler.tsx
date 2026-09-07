@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, Timer } from 'lucide-react';
-import { fetchScheduler, type SchedulerStats } from '../api';
+import { Activity, Timer, RefreshCcw, Loader2 } from 'lucide-react';
+import { fetchScheduler, rebalanceScheduler, type SchedulerStats } from '../api';
 import { useI18n } from '../i18n';
+import { toast } from '../components/Toast';
 
-/** 采集调度（PRD M3）：真实引擎指标 —— 每通道采样率/状态/错误与全局吞吐。 */
+/** 采集调度（PRD M3）：真实引擎指标 —— 每通道采样率/通讯统计/周期延迟与全局吞吐；手动重均衡（FR-M3-03）。 */
 
 function barColor(ratio: number): string {
   if (ratio > 0.8) return 'bg-rose-500';
@@ -14,6 +15,7 @@ function barColor(ratio: number): string {
 export default function AcquisitionScheduler() {
   const [stats, setStats] = useState<SchedulerStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rebalancing, setRebalancing] = useState(false);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -25,11 +27,26 @@ export default function AcquisitionScheduler() {
     return () => clearInterval(timer);
   }, []);
 
+  const doRebalance = async (): Promise<void> => {
+    setRebalancing(true);
+    try {
+      const r = await rebalanceScheduler();
+      toast(t('sched.rebalanceDone', { n: r.reloaded }));
+      const fresh = await fetchScheduler();
+      setStats(fresh);
+    } catch {
+      toast(t('sched.rebalanceFail'), false);
+    } finally {
+      setRebalancing(false);
+    }
+  };
+
   const kpis = [
     { label: t('sched.kpiThroughput'), value: `${stats?.rateHz ?? 0} /s` },
     { label: t('sched.kpiOnline'), value: `${stats?.onlineChannels ?? 0} / ${stats?.channels.length ?? 0}` },
     { label: t('sched.kpiSamples'), value: stats ? stats.totalSamples.toLocaleString() : '—' },
     { label: t('sched.kpiUptime'), value: stats ? t('sched.minutes', { n: Math.floor(stats.uptimeSec / 60) }) : '—' },
+    { label: t('sched.kpiLatency'), value: stats?.avgCycleMs !== undefined ? `${stats.avgCycleMs} ms` : '—' },
   ];
 
   return (
@@ -39,10 +56,20 @@ export default function AcquisitionScheduler() {
           <h2 className="text-lg font-bold text-slate-800">{t('sched.title')}</h2>
           <p className="text-sm text-slate-500 mt-1">{t('sched.subtitle')}</p>
         </div>
-        <span className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-          <span className={`w-2 h-2 rounded-full ${stats ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-          {stats ? 'Scheduler Active' : t('sched.loading')}
-        </span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => void doRebalance()}
+            disabled={rebalancing}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {rebalancing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+            {t('sched.rebalance')}
+          </button>
+          <span className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+            <span className={`w-2 h-2 rounded-full ${stats ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+            {stats ? 'Scheduler Active' : t('sched.loading')}
+          </span>
+        </div>
       </div>
 
       {error && (
@@ -50,7 +77,7 @@ export default function AcquisitionScheduler() {
       )}
 
       {/* KPI */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {kpis.map((kpi) => (
           <div key={kpi.label} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
             <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg"><Activity className="w-6 h-6" /></div>
@@ -96,6 +123,23 @@ export default function AcquisitionScheduler() {
                     {t('sched.channelStats', { rate: c.rateHz, period: c.pollIntervalMs, tags: c.tags })}
                     {c.lastError ? <span className="text-rose-500 ml-2">{c.lastError.slice(0, 40)}</span> : null}
                   </span>
+                </div>
+                {/* FR-M2-07 帧级通讯统计：TX/RX/错误 + 超时率 + 最近通讯/周期延迟 */}
+                <div className="flex items-center gap-3 text-[11px] font-medium text-slate-500 mb-1">
+                  <span className="font-mono">TX {c.tx}</span>
+                  <span className="font-mono">RX {c.rx}</span>
+                  <span className={`font-mono ${c.err > 0 ? 'text-rose-600 font-bold' : ''}`}>
+                    {t('sched.errCount', { n: c.err })}
+                  </span>
+                  {c.timeoutRate > 0 && (
+                    <span className="font-mono text-amber-600" title={t('sched.errCount', { n: c.err })}>
+                      {t('sched.timeoutRate', { pct: (c.timeoutRate * 100).toFixed(1) })}
+                    </span>
+                  )}
+                  <span className="text-slate-400">
+                    {c.lastCommAt ? t('sched.lastComm', { time: new Date(c.lastCommAt).toLocaleTimeString() }) : t('sched.noComm')}
+                  </span>
+                  {c.avgCycleMs !== undefined && <span className="font-mono text-indigo-600">{c.avgCycleMs} ms/轮</span>}
                 </div>
                 <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all duration-500 ${barColor(ratio)}`} style={{ width: `${Math.max(2, ratio * 100)}%` }} />

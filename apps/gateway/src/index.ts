@@ -12,6 +12,7 @@ import { AlarmEngine } from './alarms';
 import { getFrames, clearFrames } from './diagnostics';
 import { dispatchAlarm, sendTestMessage } from './notify';
 import { testChannel } from './engine/testers';
+import { channelCommStats } from './engine/stats';
 import { toNodes7Address } from './engine/drivers/s7';
 import { StorageTaskEngine } from './storage-tasks';
 import { ScriptEngine } from './scripts';
@@ -1033,6 +1034,7 @@ async function main(): Promise<void> {
     const uptimeSec = Math.round(process.uptime());
     const perChannel = channels.map((c) => {
       const st = engine.getChannelStats(c.id);
+      const comm = channelCommStats(c.id);
       return {
         id: c.id,
         name: c.name,
@@ -1044,16 +1046,39 @@ async function main(): Promise<void> {
         samples: st.samples,
         rateHz: uptimeSec > 0 ? Number((st.samples / uptimeSec).toFixed(2)) : 0,
         lastError: st.lastError,
+        // FR-M2-07 通道级通讯统计
+        tx: comm.tx,
+        rx: comm.rx,
+        err: comm.err,
+        timeoutRate: comm.tx > 0 ? Number((comm.err / comm.tx).toFixed(4)) : 0,
+        lastCommAt: comm.lastCommAt,
+        avgCycleMs: comm.avgCycleMs,
       };
     });
     const totalSamples = perChannel.reduce((sum, c) => sum + c.samples, 0);
+    const latencies = perChannel.filter((c) => c.avgCycleMs !== undefined).map((c) => c.avgCycleMs as number);
     return {
       uptimeSec,
       totalSamples,
       rateHz: uptimeSec > 0 ? Number((totalSamples / uptimeSec).toFixed(2)) : 0,
       onlineChannels: perChannel.filter((c) => c.state === 'online').length,
+      // FR-M3-04 调度监控：平均周期延迟（有周期上报的通道）
+      avgCycleMs: latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : undefined,
       channels: perChannel,
     };
+  });
+
+  // FR-M3-03 动态重均衡：以轮转相位重启全部启用通道的采集驱动，
+  // 把各通道轮询起点错开（原为启动时刻对齐，易同相突发）。
+  app.post('/api/scheduler/rebalance', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'engineer');
+    if (!actor) return;
+    const enabled = channels.filter((c) => c.enabled);
+    for (const c of enabled) {
+      await engine.reloadChannel(c.id);
+    }
+    auditLog(actor, 'scheduler.rebalance', `重均衡 ${enabled.length} 条通道（相位错开重启）`);
+    return { ok: true, reloaded: enabled.length };
   });
 
   // ===== 存储任务 CRUD（PRD FR-M4-01）=====

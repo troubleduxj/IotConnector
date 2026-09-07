@@ -1,6 +1,7 @@
 import NodeS7 from 'nodes7';
 import type { Tag } from '@iotconnector/shared';
 import type { Driver, DriverContext } from '../driver';
+import { bumpRx, bumpTx } from '../stats';
 
 const RECONNECT_MS = 5000;
 
@@ -129,6 +130,8 @@ export class S7Driver implements Driver {
     if (this.busy || !conn) return;
     this.busy = true;
     const t0 = Date.now();
+    // FR-M2-07：一轮 readAllItems = 1 请求/响应（nodes7 库内帧不可见，按周期计数）
+    bumpTx(this.ctx.channel.id);
     conn.readAllItems((err, values) => {
       this.busy = false;
       if (this.stopped) return;
@@ -136,6 +139,7 @@ export class S7Driver implements Driver {
         this.ctx.setStatus('offline', `read failed: ${err?.message ?? 'no values'}`);
         return;
       }
+      bumpRx(this.ctx.channel.id);
       for (const tag of this.ctx.tags) {
         const v = values[tag.id];
         if (v === undefined) continue;

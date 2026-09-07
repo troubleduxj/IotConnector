@@ -1,5 +1,6 @@
 import type { Channel, ChannelStatus, ChannelState, Quality, Tag, TagValueUpdate } from '@iotconnector/shared';
 import { createDriver, type Driver } from './driver';
+import { bumpErr, channelCommStats, recordCycle } from './stats';
 
 interface TagRuntime {
   tag: Tag;
@@ -44,6 +45,8 @@ export class Engine {
 
   /** 通道删除：停止驱动并清理其运行时状态 */
   async removeChannel(channelId: string): Promise<void> {
+    const timer = this.startTimers.get(channelId);
+    if (timer) { clearTimeout(timer); this.startTimers.delete(channelId); }
     const old = this.drivers.get(channelId);
     if (old) {
       await old.stop().catch(() => {});
@@ -65,10 +68,12 @@ export class Engine {
     this.runtimes.delete(tagId);
   }
 
-  /** 通道热重载：停止驱动 → 以当前位号表重建 → 重启（PRD FR-M2-06 配置热生效） */
+  /** 通道热重载：停止驱动 → 以当前位号表重建 → 按相位偏移重启（PRD FR-M2-06 配置热生效） */
   async reloadChannel(channelId: string): Promise<void> {
     const channel = this.channels.find((c) => c.id === channelId);
     if (!channel) return;
+    const timer = this.startTimers.get(channelId);
+    if (timer) { clearTimeout(timer); this.startTimers.delete(channelId); }
     const old = this.drivers.get(channelId);
     if (old) {
       await old.stop().catch(() => {});
@@ -83,16 +88,7 @@ export class Engine {
     this.onStatus?.({ id: channelId, state });
     if (!channel.enabled) return;
 
-    const ctx = {
-      channel,
-      tags: channelTags,
-      publish: (tagId: string, raw: number | string | boolean, quality: Quality = 'Good') =>
-        this.publish(tagId, raw, quality),
-      setStatus: (s: ChannelState, detail?: string) => this.setStatus(channelId, s, detail),
-    };
-    const driver = createDriver(channel, ctx);
-    this.drivers.set(channelId, driver);
-    void driver.start().catch((e) => this.setStatus(channelId, 'error', String(e)));
+    this.launchDriver(channel, channelTags);
   }
 
   start(): void {
@@ -109,21 +105,42 @@ export class Engine {
       const state: ChannelState = channel.enabled ? 'connecting' : 'disabled';
       this.statuses.set(channel.id, { id: channel.id, state });
       if (!channel.enabled) continue;
-
-      const ctx = {
-        channel,
-        tags: channelTags,
-        publish: (tagId: string, raw: number | string | boolean, quality: Quality = 'Good') =>
-          this.publish(tagId, raw, quality),
-        setStatus: (s: ChannelState, detail?: string) => this.setStatus(channel.id, s, detail),
-      };
-      const driver = createDriver(channel, ctx);
-      this.drivers.set(channel.id, driver);
-      void driver.start().catch((e) => this.setStatus(channel.id, 'error', String(e)));
+      void this.launchDriver(channel, channelTags);
     }
 
     // 300ms 批量 flush：合并变化值，避免高频小包
     this.flushTimer = setInterval(() => this.flush(), 300);
+  }
+
+  /** 相位错开：按通道 id 稳定散列取启动偏移，避免所有通道同相对齐突发（FR-M3-03） */
+  private startTimers = new Map<string, NodeJS.Timeout>();
+
+  private staggerOffset(channel: Channel): number {
+    let h = 0;
+    for (const ch of channel.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h % Math.max(100, channel.pollIntervalMs);
+  }
+
+  /** 创建并按相位偏移启动驱动（重均衡 = 全量重启，相位自然错开） */
+  private launchDriver(channel: Channel, channelTags: Tag[]): Driver {
+    const ctx = {
+      channel,
+      tags: channelTags,
+      publish: (tagId: string, raw: number | string | boolean, quality: Quality = 'Good') =>
+        this.publish(tagId, raw, quality),
+      setStatus: (s: ChannelState, detail?: string) => this.setStatus(channel.id, s, detail),
+    };
+    const driver = createDriver(channel, ctx);
+    this.drivers.set(channel.id, driver);
+    const old = this.startTimers.get(channel.id);
+    if (old) clearTimeout(old);
+    const offset = this.staggerOffset(channel);
+    const timer = setTimeout(() => {
+      this.startTimers.delete(channel.id);
+      void driver.start().catch((e) => this.setStatus(channel.id, 'error', String(e)));
+    }, offset);
+    this.startTimers.set(channel.id, timer);
+    return driver;
   }
 
   async stop(): Promise<void> {
@@ -189,7 +206,16 @@ export class Engine {
     const next: ChannelStatus = { id: channelId, state, detail };
     if (state === 'online' && prev?.state === 'online' && prev.detail === detail) return;
     this.statuses.set(channelId, next);
-    if (state === 'error' || state === 'offline') this.channelLastErrors.set(channelId, detail ?? state);
+    if (state === 'error' || state === 'offline') {
+      // 错误/超时计数（状态迁出 online 计一次，避免重连风暴刷屏）
+      if (prev?.state === 'online' || prev?.state === 'connecting') bumpErr(channelId);
+      this.channelLastErrors.set(channelId, detail ?? state);
+    }
+    // FR-M2-07/FR-M3-04：周期延迟取驱动上报的 "OK {ms}ms"（滚动平均）
+    if (state === 'online' && detail) {
+      const m = /^OK (\d+)ms$/.exec(detail);
+      if (m) recordCycle(channelId, Number(m[1]));
+    }
     this.onStatus?.(next);
   }
 

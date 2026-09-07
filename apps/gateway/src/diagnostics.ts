@@ -2,6 +2,7 @@
  * 报文诊断（PRD FR-M2-20）：每通道环形帧缓冲（内存，各 200 帧）。
  * 帧来源：驱动层真实 TCP 字节流（Modbus 通过 socket tap 捕获）。
  */
+import { bumpRx, bumpTx } from './engine/stats';
 
 export interface CapturedFrame {
   ts: number;
@@ -15,6 +16,9 @@ const BUFFERS = new Map<string, CapturedFrame[]>();
 const MAX_FRAMES = 200;
 
 export function pushFrame(channelId: string, dir: 'TX' | 'RX', frame: Buffer, note?: string): void {
+  // FR-M2-07：帧级收发计数（同帧也计入通讯统计的 tx/rx 与 lastCommAt）
+  if (dir === 'TX') bumpTx(channelId);
+  else bumpRx(channelId);
   const buf = BUFFERS.get(channelId) ?? [];
   buf.push({
     ts: Date.now(),

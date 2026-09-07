@@ -500,6 +500,14 @@ export interface SchedulerChannel {
   samples: number;
   rateHz: number;
   lastError?: string;
+  /** FR-M2-07 通道级通讯统计 */
+  tx: number;
+  rx: number;
+  err: number;
+  timeoutRate: number;
+  lastCommAt?: number;
+  /** FR-M3-04 平均采集周期延迟（订阅式驱动无此值） */
+  avgCycleMs?: number;
 }
 
 export interface SchedulerStats {
@@ -507,6 +515,7 @@ export interface SchedulerStats {
   totalSamples: number;
   rateHz: number;
   onlineChannels: number;
+  avgCycleMs?: number;
   channels: SchedulerChannel[];
 }
 
@@ -581,6 +590,10 @@ export const runScript = async (id: string): Promise<{ ok: boolean; outputs: str
 
 export const fetchScheduler = async (): Promise<SchedulerStats> =>
   (await apiFetch('/api/scheduler')).json() as Promise<SchedulerStats>;
+
+/** FR-M3-03 动态重均衡：相位错开重启全部启用通道的采集驱动 */
+export const rebalanceScheduler = async (): Promise<{ ok: boolean; reloaded: number }> =>
+  (await apiFetch('/api/scheduler/rebalance', { method: 'POST' })).json() as Promise<{ ok: boolean; reloaded: number }>;
 
 export const ackAlarm = async (eventId: string, note?: string): Promise<AlarmEvent> => {
   return (await (await apiFetch(`/api/alarms/events/${eventId}/ack`, jsonPost({ note }))).json()) as AlarmEvent;

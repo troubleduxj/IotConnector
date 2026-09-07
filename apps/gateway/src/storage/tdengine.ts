@@ -86,15 +86,21 @@ export class TDengineWriter {
     if (this.healthTimer) clearInterval(this.healthTimer);
   }
 
-  /** 执行 SQL（REST /rest/sql），返回解析后的 JSON */
+  /** 执行 SQL（REST /rest/sql），返回解析后的 JSON；网络异常转为 code=-1（TDengine 不可达降级为存储错误，不打崩进程） */
   async query(sql: string): Promise<{ code: number; data?: unknown[][]; rows?: number; msg?: string; desc?: string }> {
-    const res = await fetch(`${this.cfg.url}/rest/sql`, {
-      method: 'POST',
-      headers: { ...TDengineWriter.AUTH(this.cfg), 'content-type': 'text/plain' },
-      body: sql,
-      signal: AbortSignal.timeout(10_000),
-    });
-    return (await res.json()) as { code: number; data?: unknown[][]; rows?: number; msg?: string };
+    try {
+      const res = await fetch(`${this.cfg.url}/rest/sql`, {
+        method: 'POST',
+        headers: { ...TDengineWriter.AUTH(this.cfg), 'content-type': 'text/plain' },
+        body: sql,
+        signal: AbortSignal.timeout(10_000),
+      });
+      return (await res.json()) as { code: number; data?: unknown[][]; rows?: number; msg?: string };
+    } catch (e) {
+      this.state = 'offline';
+      this.error = String(e);
+      return { code: -1, msg: `TDengine unreachable: ${String(e)}` };
+    }
   }
 
   private async init(): Promise<void> {

@@ -430,7 +430,10 @@ async function main(): Promise<void> {
       }
     }
     if (channel.protocol === 'OPC UA' && channelTagList[0]) opcProbe = channelTagList[0].address;
-    const result = await testChannel(channel, s7Probe, opcProbe);
+    const rawProbe = ['Mitsubishi MELSEC', 'Omron FINS', 'EtherNet/IP (Rockwell)'].includes(channel.protocol)
+      ? channelTagList[0]?.address
+      : undefined;
+    const result = await testChannel(channel, s7Probe, opcProbe, rawProbe);
     return result;
   });
 

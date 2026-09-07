@@ -53,6 +53,47 @@ export function parseFinsAddress(address: string): FinsAddress {
   return { area, word: parseInt(word[2], 10), isBit: false };
 }
 
+// ===== 帧构造（模块级：驱动与连接测试探针共用）=====
+
+function finsWrap(fins: Buffer): Buffer {
+  const head = Buffer.alloc(8);
+  head.write('FINS', 0, 'ascii');
+  head.writeUInt32BE(2 + fins.length, 4);
+  return Buffer.concat([head, Buffer.from([0x02, 0x00]), fins]);
+}
+
+function finsDstHeader(): Buffer {
+  // ICF(请求 0x80) RSV GCT DA DNA DA1 DA2 SNA SA1 SA2 SID
+  return Buffer.from([0x80, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00]); // SID 由发送方填 @19
+}
+
+function finsAddrBytes(addr: FinsAddress): Buffer {
+  const b = Buffer.alloc(addr.isBit ? 3 : 2);
+  b.writeUInt16BE(addr.word, 0);
+  if (addr.isBit) b[2] = addr.bit ?? 0;
+  return b;
+}
+
+function finsReadWordsFrame(addr: FinsAddress, words: number): Buffer {
+  const fins = Buffer.concat([
+    finsDstHeader(),
+    Buffer.from([0x01, 0x01, addr.area]),
+    finsAddrBytes(addr),
+    (() => { const b = Buffer.alloc(2); b.writeUInt16BE(words, 0); return b; })(),
+  ]);
+  return finsWrap(fins);
+}
+
+function finsReadBitFrame(addr: FinsAddress): Buffer {
+  const fins = Buffer.concat([
+    finsDstHeader(),
+    Buffer.from([0x01, 0x02, 0x30]),
+    finsAddrBytes(addr),
+    Buffer.from([0x01]),
+  ]);
+  return finsWrap(fins);
+}
+
 /**
  * Omron FINS 驱动（自研 FINS/TCP 原生实现，与 melsec 同套路，帧：'FINS'+len+cmd+err+FINS帧）。
  * 支持：DM/W/CIO 字读（Int16/UInt16/Int32/Float，Float 为两字 BE 合成）+ CIO 位读（Bool）
@@ -107,45 +148,26 @@ export class FinsDriver implements Driver {
     await this.transceive(this.buildWriteWords(addr, this.encodeWords(tag, Number(rawValue))));
   }
 
-  // ===== 帧 =====
+  // ===== 帧（委托模块级构造，与连接测试探针共用）=====
 
   private finsWrap(fins: Buffer): Buffer {
-    const head = Buffer.alloc(8);
-    head.write('FINS', 0, 'ascii');
-    head.writeUInt32BE(2 + fins.length, 4);
-    return Buffer.concat([head, Buffer.from([0x02, 0x00]), fins]);
+    return finsWrap(fins);
   }
 
   private dstHeader(): Buffer {
-    // ICF(请求 0x80) RSV GCT DA DNA DA1 DA2 SNA SA1 SA2 SID
-    return Buffer.from([0x80, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00]); // SID 由 transceive 填 @19
+    return finsDstHeader();
   }
 
   private addrBytes(addr: FinsAddress): Buffer {
-    const b = Buffer.alloc(addr.isBit ? 3 : 2);
-    b.writeUInt16BE(addr.word, 0);
-    if (addr.isBit) b[2] = addr.bit ?? 0;
-    return b;
+    return finsAddrBytes(addr);
   }
 
   private buildReadWords(addr: FinsAddress, words: number): Buffer {
-    const fins = Buffer.concat([
-      this.dstHeader(),
-      Buffer.from([0x01, 0x01, addr.area]),
-      this.addrBytes(addr),
-      (() => { const b = Buffer.alloc(2); b.writeUInt16BE(words, 0); return b; })(),
-    ]);
-    return this.finsWrap(fins);
+    return finsReadWordsFrame(addr, words);
   }
 
   private buildReadBit(addr: FinsAddress): Buffer {
-    const fins = Buffer.concat([
-      this.dstHeader(),
-      Buffer.from([0x01, 0x02, 0x30]),
-      this.addrBytes(addr),
-      Buffer.from([0x01]),
-    ]);
-    return this.finsWrap(fins);
+    return finsReadBitFrame(addr);
   }
 
   private buildWriteWords(addr: FinsAddress, words: number[], ): Buffer {
@@ -278,4 +300,52 @@ export class FinsDriver implements Driver {
     }
   }
 
+}
+
+/**
+ * 连接测试探针（FR-M2-04）：临时 TCP 连接执行一次 FINS 读（字或 CIO 位），返回首值。
+ * 与驱动同一套帧构造，但不启动轮询、不注册诊断捕获。
+ */
+export async function probeFins(
+  host: string,
+  port: number,
+  address = 'D0',
+): Promise<{ rttMs: number; value: number | boolean }> {
+  const addr = parseFinsAddress(address);
+  const socket = net.createConnection({ host, port });
+  const t0 = Date.now();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('TCP 连接超时')), 4000);
+      socket.once('connect', () => { clearTimeout(t); resolve(); });
+      socket.once('error', (e) => { clearTimeout(t); reject(e); });
+    });
+    let frame = addr.isBit ? finsReadBitFrame(addr) : finsReadWordsFrame(addr, 1);
+    frame = Buffer.from(frame); // 副本，避免改到模块级共享帧的 SID 字节
+    frame[19] = 0x01; // SID
+    const data = await new Promise<Buffer>((resolve, reject) => {
+      let rx = Buffer.alloc(0);
+      const t = setTimeout(() => reject(new Error('FINS 响应超时')), 4000);
+      socket.on('data', (chunk) => {
+        rx = Buffer.concat([rx, chunk]);
+        while (rx.length >= 8) {
+          if (rx.toString('ascii', 0, 4) !== 'FINS') { rx = rx.subarray(1); continue; }
+          const total = 8 + rx.readUInt32BE(4);
+          if (rx.length < total) return;
+          const resp = rx.subarray(0, total);
+          clearTimeout(t);
+          if (resp[9] !== 0x00) return reject(new Error(`FINS/TCP err 0x${resp[9].toString(16)}`));
+          const end = resp.length >= 24 ? resp.readUInt16BE(22) : -1;
+          if (end !== 0) return reject(new Error(`FINS end code 0x${(end & 0xffff).toString(16)}`));
+          resolve(resp.subarray(24));
+          return;
+        }
+      });
+      socket.once('error', (e) => { clearTimeout(t); reject(e); });
+      socket.write(frame);
+    });
+    return { rttMs: Date.now() - t0, value: addr.isBit ? data[0] === 0x01 : Buffer.from(data).readInt16BE(0) };
+  } finally {
+    socket.destroy();
+  }
 }

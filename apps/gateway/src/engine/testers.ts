@@ -2,6 +2,9 @@ import ModbusRTU from 'modbus-serial';
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds } from 'node-opcua';
 import NodeS7 from 'nodes7';
 import type { Channel } from '@iotconnector/shared';
+import { probeMelsec } from './drivers/melsec';
+import { probeFins } from './drivers/fins';
+import { probeEnip } from './drivers/enip';
 
 export interface TestStep {
   label: string;
@@ -94,11 +97,42 @@ async function testOpcUa(channel: Channel, steps: TestStep[], probeNodeId?: stri
   steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
 }
 
+async function testMelsec(channel: Channel, steps: TestStep[], probeAddr?: string): Promise<void> {
+  const t0 = Date.now();
+  const addr = probeAddr ?? 'D0';
+  steps.push({ label: 'TCP 连接', ok: true, detail: `${channel.host}:${channel.port}` });
+  const { value } = await probeMelsec(channel.host, channel.port, addr);
+  steps.push({ label: 'MC 3E 批量读', ok: true, detail: addr });
+  steps.push({ label: '读探针点位', ok: true, detail: `${addr} = ${value}` });
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
+async function testFins(channel: Channel, steps: TestStep[], probeAddr?: string): Promise<void> {
+  const t0 = Date.now();
+  const addr = probeAddr ?? 'D0';
+  steps.push({ label: 'TCP 连接', ok: true, detail: `${channel.host}:${channel.port}` });
+  const { value } = await probeFins(channel.host, channel.port, addr);
+  steps.push({ label: 'FINS/TCP 握手 (01 01 读字)', ok: true, detail: addr });
+  steps.push({ label: '读探针点位', ok: true, detail: `${addr} = ${value}` });
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
+async function testEnip(channel: Channel, steps: TestStep[], probeTag?: string): Promise<void> {
+  const t0 = Date.now();
+  const tag = probeTag ?? 'test';
+  steps.push({ label: 'TCP 连接', ok: true, detail: `${channel.host}:${channel.port}` });
+  const { value } = await probeEnip(channel.host, channel.port, tag);
+  steps.push({ label: 'RegisterSession + Read Tag (0x4E)', ok: true, detail: tag });
+  steps.push({ label: '读探针点位', ok: true, detail: `${tag} = ${value}` });
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
 /** 执行通道真实连接测试（不干扰运行中的采集驱动） */
 export async function testChannel(
   channel: Channel,
   s7Probe?: { nodes7Addr: string; addrLabel: string },
   opcProbeNodeId?: string,
+  rawProbeAddr?: string,
 ): Promise<ChannelTestResult> {
   const steps: TestStep[] = [];
   try {
@@ -111,6 +145,15 @@ export async function testChannel(
         break;
       case 'OPC UA':
         await testOpcUa(channel, steps, opcProbeNodeId);
+        break;
+      case 'Mitsubishi MELSEC':
+        await testMelsec(channel, steps, rawProbeAddr);
+        break;
+      case 'Omron FINS':
+        await testFins(channel, steps, rawProbeAddr);
+        break;
+      case 'EtherNet/IP (Rockwell)':
+        await testEnip(channel, steps, rawProbeAddr);
         break;
       default:
         return {

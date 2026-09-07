@@ -37,6 +37,44 @@ interface McAddress {
   bit?: number;
 }
 
+/** 位软元件（MC 位单位读写） */
+const BIT_DEVICES = new Set(['M', 'X', 'Y', 'B']);
+
+// ===== 帧构造（模块级：驱动与连接测试探针共用）=====
+
+function mcHeader(dataLen: number): Buffer {
+  const h = Buffer.alloc(9);
+  h[0] = 0x50; h[1] = 0x00; // 副头
+  h[2] = 0x00; // 网络号
+  h[3] = 0xff; // PC 号
+  h[4] = 0x03; h[5] = 0xff; // 请求目标模块 I/O
+  h[6] = 0x00; // 请求目标站号
+  h.writeUInt16LE(dataLen, 7);
+  return h;
+}
+
+function mcReadWords(addr: McAddress, points: number): Buffer {
+  const body = Buffer.alloc(12);
+  body.writeUInt16LE(0x0010, 0); // 监视定时器
+  body.writeUInt16LE(0x0401, 2); // 批量读（字单位）
+  body.writeUInt16LE(0x0000, 4); // 子命令
+  body.writeUInt8(DEVICE_CODES[addr.device], 6);
+  body.writeUIntLE(addr.number, 7, 3);
+  body.writeUInt16LE(points, 10);
+  return Buffer.concat([mcHeader(body.length), body]);
+}
+
+function mcReadBits(addr: McAddress, points: number): Buffer {
+  const body = Buffer.alloc(12);
+  body.writeUInt16LE(0x0010, 0);
+  body.writeUInt16LE(0x0401, 2);
+  body.writeUInt16LE(0x0001, 4); // 位单位
+  body.writeUInt8(DEVICE_CODES[addr.device], 6);
+  body.writeUIntLE(addr.number, 7, 3);
+  body.writeUInt16LE(points, 10);
+  return Buffer.concat([mcHeader(body.length), body]);
+}
+
 export function parseMcAddress(address: string): McAddress {
   const m = address.trim().match(/^([DWRMBXYZ]{1,2})(\d{1,6})$/i);
   if (!m) throw new Error(`不支持的 MELSEC 地址: ${address}（示例 D100 / M20 / W0）`);
@@ -101,39 +139,18 @@ export class MelsecDriver implements Driver {
     await this.transceive(this.buildWriteWords(addr, this.encodeWords(tag, Number(rawValue))));
   }
 
-  // ===== 帧 =====
+  // ===== 帧（委托模块级构造，与连接测试探针共用）=====
 
   private buildHeader(dataLen: number): Buffer {
-    const h = Buffer.alloc(9);
-    h[0] = 0x50; h[1] = 0x00; // 副头
-    h[2] = 0x00; // 网络号
-    h[3] = 0xff; // PC 号
-    h[4] = 0x03; h[5] = 0xff; // 请求目标模块 I/O
-    h[6] = 0x00; // 请求目标站号
-    h.writeUInt16LE(dataLen, 7);
-    return h;
+    return mcHeader(dataLen);
   }
 
   private buildReadWords(addr: McAddress, points: number): Buffer {
-    const body = Buffer.alloc(12);
-    body.writeUInt16LE(0x0010, 0); // 监视定时器
-    body.writeUInt16LE(0x0401, 2); // 批量读（字单位）
-    body.writeUInt16LE(0x0000, 4); // 子命令
-    body.writeUInt8(DEVICE_CODES[addr.device], 6);
-    body.writeUIntLE(addr.number, 7, 3);
-    body.writeUInt16LE(points, 10);
-    return Buffer.concat([this.buildHeader(body.length), body]);
+    return mcReadWords(addr, points);
   }
 
   private buildReadBits(addr: McAddress, points: number): Buffer {
-    const body = Buffer.alloc(12);
-    body.writeUInt16LE(0x0010, 0);
-    body.writeUInt16LE(0x0401, 2);
-    body.writeUInt16LE(0x0001, 4); // 位单位
-    body.writeUInt8(DEVICE_CODES[addr.device], 6);
-    body.writeUIntLE(addr.number, 7, 3);
-    body.writeUInt16LE(points, 10);
-    return Buffer.concat([this.buildHeader(body.length), body]);
+    return mcReadBits(addr, points);
   }
 
   private buildWriteWords(addr: McAddress, words: number[]): Buffer {
@@ -253,5 +270,52 @@ export class MelsecDriver implements Driver {
   private async readOnce(frame: Buffer): Promise<Buffer> {
     const resp = await this.transceive(frame);
     return resp; // 数据区（已跳过 end code；首字节为数据）
+  }
+}
+
+/**
+ * 连接测试探针（FR-M2-04）：临时 TCP 连接执行一次 MC 3E 批量读，返回首值。
+ * 与驱动同一套帧构造，但不启动轮询、不注册诊断捕获。
+ */
+export async function probeMelsec(
+  host: string,
+  port: number,
+  address = 'D0',
+): Promise<{ rttMs: number; value: number | boolean }> {
+  const addr = parseMcAddress(address);
+  const isBit = BIT_DEVICES.has(addr.device);
+  const socket = net.createConnection({ host, port });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('TCP 连接超时')), 4000);
+      socket.once('connect', () => { clearTimeout(t); resolve(); });
+      socket.once('error', (e) => { clearTimeout(t); reject(e); });
+    });
+    const frame = isBit ? mcReadBits(addr, 1) : mcReadWords(addr, 1);
+    const data = await new Promise<Buffer>((resolve, reject) => {
+      let rx = Buffer.alloc(0);
+      const t = setTimeout(() => reject(new Error('MC 响应超时')), 4000);
+      socket.on('data', (chunk) => {
+        rx = Buffer.concat([rx, chunk]);
+        while (rx.length >= 9) {
+          const total = 9 + rx.readUInt16LE(7);
+          if (rx.length < total) return;
+          const resp = rx.subarray(0, total);
+          clearTimeout(t);
+          if (resp[0] !== 0xd0) return reject(new Error('非 MC 响应帧'));
+          const end = resp.readUInt16LE(9);
+          if (end !== 0) return reject(new Error(`MC end code 0x${end.toString(16)}`));
+          resolve(resp.subarray(11));
+          return;
+        }
+      });
+      socket.once('error', (e) => { clearTimeout(t); reject(e); });
+      socket.write(frame);
+    });
+    const t1 = Date.now();
+    const value = isBit ? (data[0] & 0x01) === 0x01 : Buffer.from(data).readInt16BE(0);
+    return { rttMs: t1, value };
+  } finally {
+    socket.destroy();
   }
 }

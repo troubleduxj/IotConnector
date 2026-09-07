@@ -37,6 +37,26 @@ function cipValueBytes(dataType: string, value: number | string | boolean): Buff
   return v;
 }
 
+/** SendRRData（Unconnected Send 包装）：背板 1 / 槽 0 路由 */
+function enipUnconnected(session: number, embedded: Buffer): Buffer {
+  const route = Buffer.from([0x01, 0x00, 0x20, 0x02, 0x24, 0x01]); // 背板 1，槽 0（Message Router 0xF5/1）
+  const rr = Buffer.concat([
+    Buffer.from([0x4c]), // Unconnected Send
+    (() => { const b = Buffer.alloc(2); b.writeUInt16LE(embedded.length, 0); return b; })(),
+    embedded,
+    route,
+    (embedded.length + route.length) % 2 ? Buffer.from([0x00]) : Buffer.alloc(0),
+  ]);
+  const body = Buffer.alloc(6);
+  body.writeUInt32LE(0, 0); // interface handle
+  body.writeUInt16LE(0, 4); // timeout
+  const items = Buffer.from([0x02, 0x00]);
+  const addrItem = Buffer.from([0xa1, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  const dataItem = Buffer.concat([Buffer.from([0xb1, 0x00]), (() => { const b = Buffer.alloc(2); b.writeUInt16LE(rr.length, 0); return b; })(), rr]);
+  const out = Buffer.concat([body, items, addrItem, dataItem]);
+  return encap(0x006f, session, out);
+}
+
 // ===== 报文诊断解码 =====
 
 const ENIP_CMDS: Record<number, string> = {
@@ -156,25 +176,10 @@ export class EnipDriver implements Driver {
     await this.transceive(this.buildUnconnected(embedded));
   }
 
-  // ===== Unconnected Send 包装 =====
+  // ===== Unconnected Send 包装（委托模块级构造，与连接测试探针共用）=====
 
   private buildUnconnected(embedded: Buffer): Buffer {
-    const route = Buffer.from([0x01, 0x00, 0x20, 0x02, 0x24, 0x01]); // 背板 1，槽 0（Message Router 0xF5/1）
-    const rr = Buffer.concat([
-      Buffer.from([0x4c]), // Unconnected Send
-      (() => { const b = Buffer.alloc(2); b.writeUInt16LE(embedded.length, 0); return b; })(),
-      embedded,
-      route,
-      (embedded.length + route.length) % 2 ? Buffer.from([0x00]) : Buffer.alloc(0),
-    ]);
-    const body = Buffer.alloc(6);
-    body.writeUInt32LE(0, 0); // interface handle
-    body.writeUInt16LE(0, 4); // timeout
-    const items = Buffer.from([0x02, 0x00]);
-    const addrItem = Buffer.from([0xa1, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]);
-    const dataItem = Buffer.concat([Buffer.from([0xb1, 0x00]), (() => { const b = Buffer.alloc(2); b.writeUInt16LE(rr.length, 0); return b; })(), rr]);
-    const out = Buffer.concat([body, items, addrItem, dataItem]);
-    return encap(0x006f, this.session, out);
+    return enipUnconnected(this.session, embedded);
   }
 
   // ===== 收发 =====
@@ -279,5 +284,79 @@ export class EnipDriver implements Driver {
     } finally {
       this.busy = false;
     }
+  }
+}
+
+/**
+ * 连接测试探针（FR-M2-04）：临时 TCP 连接执行 RegisterSession + Read Tag Service，
+ * 返回首值。与驱动同一套帧构造，但不启动轮询、不注册诊断捕获。
+ */
+export async function probeEnip(
+  host: string,
+  port: number,
+  tagName = 'test',
+): Promise<{ rttMs: number; value: number | boolean }> {
+  const socket = net.createConnection({ host, port });
+  const t0 = Date.now();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('TCP 连接超时')), 4000);
+      socket.once('connect', () => { clearTimeout(t); resolve(); });
+      socket.once('error', (e) => { clearTimeout(t); reject(e); });
+    });
+    // 每次发送一帧、收一帧的极简收发（探针串行，无并发）
+    const roundtrip = async (frame: Buffer): Promise<Buffer> => {
+      const resp = await new Promise<Buffer>((resolve, reject) => {
+        let rx = Buffer.alloc(0);
+        const t = setTimeout(() => reject(new Error('ENIP 响应超时')), 4000);
+        socket.on('data', (chunk) => {
+          rx = Buffer.concat([rx, chunk]);
+          while (rx.length >= 24) {
+            const total = 24 + rx.readUInt16LE(2);
+            if (rx.length < total) return;
+            const f = rx.subarray(0, total);
+            clearTimeout(t);
+            const status = f.readUInt32LE(8);
+            if (status !== 0) return reject(new Error(`ENIP status 0x${status.toString(16)}`));
+            resolve(Buffer.from(f));
+            return;
+          }
+        });
+        socket.once('error', (e) => { clearTimeout(t); reject(e); });
+        socket.write(frame);
+      });
+      return resp;
+    };
+    // 1) RegisterSession
+    const regBody = Buffer.alloc(4);
+    regBody.writeUInt16LE(1, 0); // version
+    const reg = await roundtrip(encap(0x0065, 0, regBody));
+    const session = reg.readUInt32LE(4);
+    // 2) Read Tag Service (0x4E)
+    const ioi = ioiSymbolic(tagName);
+    const embedded = Buffer.concat([Buffer.from([0x4e, ioi.length / 2]), ioi]);
+    const resp = await roundtrip(enipUnconnected(session, embedded));
+    const p0 = 24;
+    const itemCount = resp.readUInt16LE(p0 + 6);
+    let p = p0 + 8;
+    const addrLen = resp.readUInt16LE(p + 2); p += 4 + addrLen;
+    const dataType = resp.readUInt16LE(p); p += 2;
+    const dataLen = resp.readUInt16LE(p); p += 2;
+    if (itemCount !== 2 || dataType !== 0xb1) throw new Error('响应结构异常');
+    let rr = p;
+    const wrapService = resp[rr];
+    if (wrapService === 0xcc) rr += 4;
+    const service = resp[rr];
+    const cipStatus = resp[rr + 1];
+    const valType = dataLen >= 4 ? resp.readUInt16LE(rr + 2) : 0;
+    if (cipStatus !== 0 || (wrapService !== 0xcc && service !== 0xce)) {
+      throw new Error(`CIP 读失败 service=0x${service?.toString(16)} status=0x${cipStatus?.toString(16)}`);
+    }
+    const valOff = rr + 4;
+    const raw = resp.subarray(valOff, valOff + (valType === 0xca ? 4 : valType === 0xc1 ? 1 : 2));
+    const value = valType === 0xc1 ? raw[0] === 0x01 : valType === 0xca ? Number(raw.readFloatLE(0).toFixed(4)) : raw.readInt16LE(0);
+    return { rttMs: Date.now() - t0, value };
+  } finally {
+    socket.destroy();
   }
 }

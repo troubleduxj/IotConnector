@@ -78,6 +78,9 @@ importers:
       aedes:
         specifier: ^1.1.2
         version: 1.1.2
+      bacstack:
+        specifier: 0.0.1-beta.14
+        version: 0.0.1-beta.14
       fastify:
         specifier: ^5.0.0
         version: 5.12.3
@@ -1165,6 +1168,10 @@ packages:
     resolution: {integrity: sha512-wC5ihrnUXmR2douXmXLCe5O3zg3GKIyvRi/hi58a/XyRxVI+3/yM0PYueQOZXPXQ9pxBislYkw+sF9b7C/RuMA==}
     engines: {node: '>= 0.6'}
 
+  bacstack@0.0.1-beta.14:
+    resolution: {integrity: sha512-hmDL0MgGV8UNWffkMXIczlnqXC0g/9tfSXw0MjZ8Wd0dkgAYqNAPV4R6+n78zgUw52cezbzsTEFL3YK6kjspjQ==}
+    engines: {node: '>= 12.0.0'}
+
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
@@ -1582,6 +1589,10 @@ packages:
 
   humanize@0.0.9:
     resolution: {integrity: sha512-bvZZ7vXpr1RKoImjuQ45hJb5OvE2oJafHysiD/AL3nkqTZH2hFCjQ3YZfCd63FefDitbJze/ispUPP0gfDsT2Q==}
+
+  iconv-lite@0.6.3:
+    resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
+    engines: {node: '>=0.10.0'}
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
@@ -3475,6 +3486,13 @@ snapshots:
     dependencies:
       precond: 0.2.3
 
+  bacstack@0.0.1-beta.14:
+    dependencies:
+      debug: 4.4.3
+      iconv-lite: 0.6.3
+    transitivePeerDependencies:
+      - supports-color
+
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.11.21: {}
@@ -3932,6 +3950,10 @@ snapshots:
   hexy@0.4.0: {}
 
   humanize@0.0.9: {}
+
+  iconv-lite@0.6.3:
+    dependencies:
+      safer-buffer: 2.1.2
 
   ieee754@1.2.1: {}
 

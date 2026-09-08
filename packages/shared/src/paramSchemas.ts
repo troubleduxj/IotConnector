@@ -167,6 +167,21 @@ export const PROTOCOL_PARAM_SCHEMAS: Partial<Record<Protocol, ParamField[]>> = {
     { key: 'password', label: 'Password', type: 'text', default: '' },
   ],
 
+  // ===== 南向采集：BACnet/IP（楼宇自控 HVAC/冷机/照明/电力表） =====
+  'BACnet/IP': [
+    {
+      key: 'localPort',
+      label: '本地 UDP 端口',
+      type: 'number',
+      min: 47808,
+      max: 65535,
+      default: 47808,
+      help: '保持 47808（BACnet/IP 标准端口）；bacstack 发送端口与本地绑定端口一致',
+    },
+    { key: 'apduTimeout', label: 'APDU 超时 (ms)', type: 'number', min: 200, max: 10000, default: 1500 },
+    { key: 'retries', label: '重试次数', type: 'number', min: 0, max: 5, default: 2 },
+  ],
+
   // ===== 南向采集：SNMP 轮询（UPS/PDU/环动/能耗表） =====
   'SNMP': [
     {

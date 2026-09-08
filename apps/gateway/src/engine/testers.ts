@@ -1,6 +1,7 @@
 import ModbusRTU from 'modbus-serial';
 import mqtt from 'mqtt';
 import snmp, { ObjectType, type Varbind } from 'net-snmp';
+import BacnetClient from 'bacstack';
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds, TimestampsToReturn, ClientSubscription } from 'node-opcua';
 import NodeS7 from 'nodes7';
 import type { Channel } from '@iotconnector/shared';
@@ -257,6 +258,60 @@ async function testSnmp(channel: Channel, steps: TestStep[], probeOid?: string):
   steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
 }
 
+async function testBacnet(channel: Channel, steps: TestStep[], probeAddr?: string): Promise<void> {
+  // bacstack 发送端口与本地绑定端口绑死（常驻驱动独占 47808 时无法共存），探针改 raw dgram 实现
+  const dgram = await import('node:dgram');
+  const t0 = Date.now();
+  const target = { port: channel.port, address: channel.host };
+  const probe = (probeAddr ?? 'AI:1').match(/^(AI|AO|AV|BI|BO|BV|MSI):(\d+)$/i);
+  if (!probe) throw new Error(`探针地址非法: ${probeAddr}`);
+  const TYPE: Record<string, number> = { AI: 0, AO: 1, AV: 2, BI: 3, BO: 4, BV: 5, MSI: 13 };
+  const objType = TYPE[probe[1].toUpperCase()];
+  const instance = Number(probe[2]);
+  const objectId4B = ((objType & 0x3ff) << 22) | (instance & 0x3fffff);
+
+  const invokeId = 0x2a;
+  const apdu = Buffer.from([
+    0x05, invokeId, 0x00, 0x0c, // confirmed request, ReadProperty
+    0x0c, (objectId4B >> 24) & 0xff, (objectId4B >> 16) & 0xff, (objectId4B >> 8) & 0xff, objectId4B & 0xff, // context0 objectId
+    0x19, 85, // context1 propertyId = 85 PresentValue
+  ]);
+  // BVLC: type 0x81, function 0x0A (Original-Unicast-NPDU), 长度 2B 大端 = APDU + NPDU(1)
+  const bvlcLen = apdu.length + 1;
+  const bvlc = Buffer.concat([Buffer.from([0x81, 0x0a, (bvlcLen >> 8) & 0xff, bvlcLen & 0xff, 0x01]), apdu]);
+
+  steps.push({ label: 'UDP 探针', ok: true, detail: `${probeAddr} → ${target.address}:${target.port}` });
+  const result = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
+    const sock = dgram.createSocket('udp4');
+    const timer = setTimeout(() => { sock.close(); resolve({ ok: false, detail: 'ReadProperty 超时' }); }, 3000);
+    sock.on('message', (msg: Buffer) => {
+      clearTimeout(timer);
+      try {
+        console.log(`[bacnet-test] rx ${msg.length}B: ${msg.toString('hex')}`);
+        // BVLC(4)+NPDU(1) → APDU；Confirmed-Response 在 APDU[0]=0x30
+        const apdu0 = msg[5];
+        if (msg[0] !== 0x81 || apdu0 !== 0x30) throw new Error(`非 Confirmed-Response (apdu0=${apdu0.toString(16)} msg0=${msg[0].toString(16)} len=${msg.length} raw=${msg.toString('hex')})`);
+        const apdu = msg.subarray(5);
+        // 简单定位：找 REAL tag (0x44) 或 Boolean tag (0x01)
+        const iReal = apdu.indexOf(0x44);
+        const iBool = apdu.indexOf(0x01);
+        let text: string;
+        if (iReal >= 0) text = String(apdu.readFloatBE(iReal + 1));
+        else if (iBool >= 0 && iBool + 1 < apdu.length) text = apdu[iBool + 1] ? 'true' : 'false';
+        else text = `raw ${msg.toString('hex')}`;
+        sock.close();
+        resolve({ ok: true, detail: `${probeAddr} = ${text}` });
+      } catch (e) {
+        sock.close();
+        resolve({ ok: false, detail: `响应解析失败: ${(e as Error).message}` });
+      }
+    });
+    sock.send(bvlc, target.port, target.address, () => undefined);
+  });
+  steps.push({ label: 'ReadProperty (PresentValue)', ok: result.ok, detail: result.detail });
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
 /** 执行通道真实连接测试（不干扰运行中的采集驱动） */
 export async function testChannel(
   channel: Channel,
@@ -281,6 +336,9 @@ export async function testChannel(
         break;
       case 'SNMP':
         await testSnmp(channel, steps, rawProbeAddr);
+        break;
+      case 'BACnet/IP':
+        await testBacnet(channel, steps, rawProbeAddr);
         break;
       case 'Mitsubishi MELSEC':
         await testMelsec(channel, steps, rawProbeAddr);

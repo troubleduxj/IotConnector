@@ -636,7 +636,7 @@ async function main(): Promise<void> {
       if (probes.length > 0) s7Probes = probes;
     }
     if (channel.protocol === 'OPC UA' && channelTagList[0]) opcProbe = channelTagList[0].address;
-    const rawProbe = ['Mitsubishi MELSEC', 'Omron FINS', 'EtherNet/IP (Rockwell)', 'SNMP', 'MQTT / Sparkplug B'].includes(channel.protocol)
+    const rawProbe = ['Mitsubishi MELSEC', 'Omron FINS', 'EtherNet/IP (Rockwell)', 'SNMP', 'MQTT / Sparkplug B', 'BACnet/IP'].includes(channel.protocol)
       ? channelTagList[0]?.address // SNMP：探针 OID；MQTT：探针订阅主题
       : undefined;
     const result = await testChannel(channel, s7Probes, opcProbe, rawProbe);

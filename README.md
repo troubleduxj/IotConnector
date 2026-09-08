@@ -55,6 +55,10 @@
 * **MQTT / Sparkplug B (1883/8883)**：支持工业 Sparkplug B v2.2 规范 (Group ID / Edge Node ID / Device ID)、QoS 0/1/2、TLS/SSL 及断网离线缓存。
 * **BACnet/IP (47808)**：支持楼宇与暖通自控 (HVAC/冷机)，配置 Device Instance ID、Max APDU 长度与 BBMD 注册。
 * **IEC 60870-5-104 (2404)**：支持电力电网远动通讯，配置 Common ASDU 地址、COT/IOA 字节长度与 T1/T2/T3 超时定时器。
+* **BACnet/IP (47808)**：楼宇自控 HVAC/冷机/照明/电力表，位号地址 = 对象类型:实例（AI:1/AV:3/BI:1/BV:2），
+  读 PresentValue（readPropertyMultiple 批量轮询），AV/AO/BV 支持下发；驱动以 raw dgram 实现
+  （bacstack beta 的发送端口=绑定端口，同机模拟器必然冲突）；内置模拟器
+  `pnpm --filter @iotconnector/gateway bacnet-sim`（复用 bacstack 编解码，含可写 AV/BV）。
 * **SNMP v1/v2c (161)**：UPS / PDU / 环境传感器 / 网络设备 / 能耗表轮询，位号地址为点分 OID，
   OctetString 自动转数值/字符串；内置 net-snmp Agent 模拟器（`pnpm --filter @iotconnector/gateway snmp-sim`）。
 * **MQTT 南向采集 (1883)**：订阅型驱动——位号地址 = 订阅主题，支持「主题#字段路径」语法

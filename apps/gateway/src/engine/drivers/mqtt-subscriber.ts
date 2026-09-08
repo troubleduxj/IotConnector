@@ -56,47 +56,10 @@ export class MqttSubscriberDriver implements Driver {
     });
   }
 
-  /**
-   * 按 payloadMode 解析并广播给所有匹配主题的位号。
-   * 位号地址支持「主题#字段路径」语法：# 后为 JSON 点分路径（空 = 整个 payload 按标量解析），
-   * 未带 # 则用通道级 jsonPath 缺省 —— 使多位号可共用主题各取字段。
-   */
   private onMessage(topic: string, payload: Buffer): void {
-    const text = payload.toString('utf-8');
     const p = this.ctx.channel.params as Record<string, unknown>;
-    const channelDefault = String(p.jsonPath ?? 'value');
-    const isRaw = String(p.payloadMode ?? 'json') === 'raw';
-
-    const extractScalar = (): number | string | boolean => {
-      const raw = text.trim();
-      if (raw === 'true') return true;
-      if (raw === 'false') return false;
-      const n = Number(raw);
-      return Number.isNaN(n) ? raw : n;
-    };
-
-    const extractJson = (jsonPath: string): number | string | boolean | undefined => {
-      if (jsonPath === '') return extractScalar(); // 空路径 = payload 本身是标量
-      try {
-        let cur: unknown = JSON.parse(text);
-        for (const seg of jsonPath.split('.').filter(Boolean)) {
-          if (cur === null || typeof cur !== 'object') return undefined;
-          cur = (cur as Record<string, unknown>)[seg];
-        }
-        if (cur === undefined || cur === null) return undefined;
-        if (typeof cur === 'number' || typeof cur === 'boolean' || typeof cur === 'string') return cur;
-        return JSON.stringify(cur);
-      } catch {
-        return undefined;
-      }
-    };
-
     for (const tag of this.ctx.tags) {
-      const hash = tag.address.indexOf('#');
-      const addrTopic = hash >= 0 ? tag.address.slice(0, hash) : tag.address;
-      if (addrTopic !== topic) continue;
-      const path = hash >= 0 ? tag.address.slice(hash + 1) : channelDefault;
-      const v = isRaw && hash < 0 ? extractScalar() : extractJson(path);
+      const v = resolveTagValue(tag.address, topic, payload, p);
       if (v === undefined) continue;
       this.ctx.publish(tag.id, v);
     }
@@ -110,3 +73,49 @@ export class MqttSubscriberDriver implements Driver {
     this.client = undefined;
   }
 }
+/**
+ * 按位号地址与收到的 MQTT 消息解析值（导出供单测）：
+ * 地址支持「主题#字段路径」——# 后为 JSON 点分路径（空 = payload 整体按标量解析）；
+ * 未带 # 用通道级 jsonPath 缺省；payloadMode=raw 按原始标量解析。
+ */
+export function resolveTagValue(
+  address: string,
+  topic: string,
+  payload: Buffer,
+  channelParams: Record<string, unknown>,
+): number | string | boolean | undefined {
+  const text = payload.toString('utf-8');
+  const channelDefault = String(channelParams.jsonPath ?? 'value');
+  const isRaw = String(channelParams.payloadMode ?? 'json') === 'raw';
+
+  const extractScalar = (): number | string | boolean => {
+    const raw = text.trim();
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    const n = Number(raw);
+    return Number.isNaN(n) ? raw : n;
+  };
+
+  const extractJson = (jsonPath: string): number | string | boolean | undefined => {
+    if (jsonPath === '') return extractScalar();
+    try {
+      let cur: unknown = JSON.parse(text);
+      for (const seg of jsonPath.split('.').filter(Boolean)) {
+        if (cur === null || typeof cur !== 'object') return undefined;
+        cur = (cur as Record<string, unknown>)[seg];
+      }
+      if (cur === undefined || cur === null) return undefined;
+      if (typeof cur === 'number' || typeof cur === 'boolean' || typeof cur === 'string') return cur;
+      return JSON.stringify(cur);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const hash = address.indexOf('#');
+  const addrTopic = hash >= 0 ? address.slice(0, hash) : address;
+  if (addrTopic !== topic) return undefined;
+  const path = hash >= 0 ? address.slice(hash + 1) : channelDefault;
+  return isRaw && hash < 0 ? extractScalar() : extractJson(path);
+}
+

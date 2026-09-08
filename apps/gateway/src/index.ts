@@ -894,6 +894,8 @@ async function main(): Promise<void> {
   // OpenAPI 3.0 描述（真实端点清单；UI 提供下载，供第三方集成查阅）
   app.get('/api/system/openapi.json', async (req, reply) => {
     if (!requireAuth(req, reply, 'operator')) return;
+    // A3 一致性断言：清单 ↔ 实际路由双向比对（缺失/多余仅告警，不阻断下载）
+    checkOpenApiCoverage(app);
     const bearer = { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' };
     const json = {
       openapi: '3.0.3',
@@ -901,35 +903,122 @@ async function main(): Promise<void> {
       servers: [{ url: `http://<gateway-host>:${PORT}` }],
       components: { securitySchemes: { bearerAuth: bearer } },
       security: [{ bearerAuth: [] }],
-      paths: {
-        '/api/auth/login': { post: { summary: '登录获取 Bearer 令牌', security: [] } },
-        '/api/auth/me': { get: { summary: '当前会话用户' } },
-        '/api/tags': { get: { summary: '位号配置列表' } },
-        '/api/tags/live': { get: { summary: '位号实时值快照' } },
-        '/api/shadow': { get: { summary: '设备影子快照（reported vs desired，FR-M9-04）' } },
-        '/api/tags/{id}/write': { post: { summary: '下行写值（审计留痕）' } },
-        '/api/history': { get: { summary: '历史查询（TDengine 聚合）' } },
-        '/api/alarms': { get: { summary: '告警事件' }, post: { summary: '新建告警规则' } },
-        '/api/alarms/{id}/ack': { post: { summary: '告警确认' } },
-        '/api/channels': { get: { summary: '通道列表' }, post: { summary: '新建通道' } },
-        '/api/channels/{id}/test': { post: { summary: '真实连接测试（分步握手）' } },
-        '/api/storage-tasks': { get: { summary: '存储任务' }, post: { summary: '新建存储任务' } },
-        '/api/storage-tasks/stats': { get: { summary: '任务运行状态（写入/速率/错误）' } },
-        '/api/recipes': { get: { summary: '配方列表' } },
-        '/api/recipes/{id}/download': { post: { summary: '配方下发到设备' } },
-        '/api/recipes/downloads': { get: { summary: '配方下发记录（FR-M6-04）' } },
-        '/api/recipes/{id}/duplicate': { post: { summary: '复制配方（FR-M6-04）' } },
-        '/api/recipes/{id}/export': { get: { summary: '配方导出 JSON（FR-M6-04）' } },
-        '/api/recipes/import': { post: { summary: '配方导入（FR-M6-04）' } },
-        '/api/scripts': { get: { summary: '边缘脚本' } },
-        '/api/scripts/{id}/run': { post: { summary: '试运行脚本' } },
-        '/api/scheduler': { get: { summary: '调度统计' } },
-        '/api/audit': { get: { summary: '审计日志（admin）' } },
-        '/ws': { get: { summary: 'WebSocket 实时推送（tags-batch / alarms / storage-status）' } },
-      },
+      paths: manifestPaths(),
     };
     return reply.header('content-disposition', 'attachment; filename="openapi.json"').send(json);
   });
+
+// ===== OpenAPI 清单一致性（A3 工程质量）：真实路由 ↔ paths 清单双向比对 =====
+let openapiWarned = false;
+
+/** 真实路由（app.routes）与清单路径双向比对；不一致时告警一次（防新增端点漏登记） */
+function checkOpenApiCoverage(app: unknown): void {
+  if (openapiWarned) return;
+  openapiWarned = true; // 无论结果只检查一次
+  try {
+    // Fastify v5 无公开 routes 属性：从 printRoutes() 树文本提取（叶子行含完整路径）
+    const tree = (app as { printRoutes?: () => string }).printRoutes?.() ?? '';
+    const normalize = (u: string): string => u.replace(/:([A-Za-z_]+)/g, '{$1}');
+    const actual = new Set<string>();
+    // printRoutes 输出压缩 radix 树：每层缩进 4 字符（'│   '/'    ' 过渡、'├── '/'└── ' 节点标记）
+    const stack: string[] = [];
+    for (const line of tree.split(String.fromCharCode(10))) {
+      let i = 0;
+      let depth = 0;
+      for (;;) {
+        const chunk = line.slice(i, i + 4);
+        if (chunk === '│   ' || chunk === '    ') { depth += 1; i += 4; continue; }
+        if (chunk === '├── ' || chunk === '└── ' || chunk === '╰── ' || chunk === '╭── ') { depth += 1; i += 4; break; }
+        break;
+      }
+      const text = line.slice(i).trim();
+      const m = text.match(/^([^\s(]+)\s*(?:\(([A-Z, ]+)\))?$/);
+      if (!m) continue;
+      const seg = m[1] ?? '';
+      while (stack.length > depth) stack.pop();
+      stack[depth] = seg;
+      const methods = m[2] ?? '';
+      if (!/GET|POST|PUT|DELETE|PATCH/.test(methods)) continue; // 内部节点无方法，仅维护栈
+      const full = stack.slice(1, depth + 1).join('');
+      if (full.startsWith('/api/') || full === '/ws') actual.add(normalize(full));
+    }
+    const manifest = new Set(Object.keys(manifestPaths()));
+    const missing = [...actual].filter((u) => !manifest.has(u)).sort(); // 已注册未登记
+    const stale = [...manifest].filter((u) => !actual.has(u)).sort();   // 已登记未注册
+    if (missing.length > 0) {
+      console.warn(`[openapi] 未登记进清单的真实路由 (${missing.length}):\n  ${missing.join('\n  ')}`);
+    }
+    if (stale.length > 0) {
+      console.warn(`[openapi] 清单中已不存在的路由 (${stale.length}):\n  ${stale.join('\n  ')}`);
+    }
+    if (missing.length === 0 && stale.length === 0) {
+      console.log(`[openapi] 一致性 OK：${actual.size} 路由 ↔ ${manifest.size} 清单路径`);
+    }
+  } catch (e) {
+    console.warn(`[openapi] 一致性检查异常: ${String(e)}`);
+  }
+}
+
+/** OpenAPI paths 清单（单一数据源：openapi.json 输出与一致性断言共用） */
+function manifestPaths(): Record<string, { get?: { summary: string; security?: unknown[] }; post?: { summary: string; security?: unknown[] }; put?: { summary: string }; delete?: { summary: string } }> {
+  return {
+    '/api/auth/login': { post: { summary: '登录获取 Bearer 令牌', security: [] } },
+    '/api/auth/me': { get: { summary: '当前会话用户' } },
+    '/api/auth/logout': { post: { summary: '退出登录' } },
+    '/api/auth/sessions': { get: { summary: '会话列表（admin）' } },
+    '/api/auth/sessions/{token}': { delete: { summary: '踢出会话（admin）' } },
+    '/api/auth/change-password': { post: { summary: '修改口令' } },
+    '/api/tags': { get: { summary: '位号配置列表' } },
+    '/api/config': { get: { summary: '全量配置（通道/位号/任务/配方/脚本）' } },
+    '/api/health': { get: { summary: '存活探针' } },
+    '/api/tags/live': { get: { summary: '位号实时值快照' } },
+    '/api/shadow': { get: { summary: '设备影子快照（reported vs desired，FR-M9-04）' } },
+    '/api/tags/{id}/write': { post: { summary: '下行写值（审计留痕）' } },
+    '/api/tags/{id}': { put: { summary: '更新位号' }, delete: { summary: '删除位号' } },
+    '/api/history': { get: { summary: '历史查询（TDengine 聚合）' } },
+    '/api/alarms': { get: { summary: '告警事件' }, post: { summary: '新建告警规则' } },
+    '/api/alarms/events/{id}/ack': { post: { summary: '告警事件确认（备注）' } },
+    '/api/alarms/{id}': { put: { summary: '更新告警规则' }, delete: { summary: '删除告警规则' } },
+    '/api/alarms/history': { get: { summary: '告警历史（TDengine 审计表）' } },
+    '/api/channels': { get: { summary: '通道列表' }, post: { summary: '新建通道' } },
+    '/api/channels/{id}': { put: { summary: '更新通道（热重载）' }, delete: { summary: '删除通道' } },
+    '/api/channels/{id}/test': { post: { summary: '真实连接测试（分步握手）' } },
+    '/api/channels/{id}/frames': { get: { summary: '报文诊断帧（最近 N 条）' } },
+    '/api/channels/{id}/export': { get: { summary: '通道配置导出（JSON）' } },
+    '/api/channels/import': { post: { summary: '通道配置导入' } },
+    '/api/storage-tasks': { get: { summary: '存储任务' }, post: { summary: '新建存储任务' } },
+    '/api/storage-tasks/stats': { get: { summary: '任务运行状态（写入/速率/错误）' } },
+    '/api/storage-tasks/{id}': { put: { summary: '更新存储任务' }, delete: { summary: '删除存储任务' } },
+    '/api/recipes': { get: { summary: '配方列表' }, post: { summary: '新建配方' } },
+    '/api/recipes/{id}/download': { post: { summary: '配方下发到设备' } },
+    '/api/recipes/downloads': { get: { summary: '配方下发记录（FR-M6-04）' } },
+    '/api/recipes/{id}/duplicate': { post: { summary: '复制配方（FR-M6-04）' } },
+    '/api/recipes/{id}/export': { get: { summary: '配方导出 JSON（FR-M6-04）' } },
+    '/api/recipes/import': { post: { summary: '配方导入（FR-M6-04）' } },
+    '/api/recipes/{id}': { put: { summary: '更新配方（参数变更版本 +1）' }, delete: { summary: '删除配方' } },
+    '/api/scripts': { get: { summary: '边缘脚本' }, post: { summary: '新建脚本' } },
+    '/api/scripts/{id}/run': { post: { summary: '试运行脚本' } },
+    '/api/scripts/{id}/output': { get: { summary: '脚本输出（环形缓冲）' } },
+    '/api/scripts/{id}': { put: { summary: '更新脚本' }, delete: { summary: '删除脚本' } },
+    '/api/scheduler': { get: { summary: '调度统计（采样/通讯/周期延迟）' } },
+    '/api/scheduler/rebalance': { post: { summary: '通道相位错开重均衡' } },
+    '/api/audit': { get: { summary: '审计日志（admin）' } },
+    '/api/notifications': { put: { summary: '通知配置' } },
+    '/api/notifications/v2': { put: { summary: '通知配置（四渠道全量）' } },
+    '/api/notifications/test': { post: { summary: '渠道测试消息' } },
+    '/api/northbound': { get: { summary: '北向 MQTT 配置与状态' }, put: { summary: '更新北向配置' } },
+    '/api/northbound/rebirth': { post: { summary: 'REBIRTH 重发 BIRTH' } },
+    '/api/system/info': { get: { summary: '系统信息（版本/存储/规模）' } },
+    '/api/system/openapi.json': { get: { summary: 'OpenAPI 3.0 文档' } },
+    '/api/system/db-test': { post: { summary: 'TDengine 连通实测' } },
+    '/api/system/db-init': { post: { summary: '初始化建库/超级表' } },
+    '/api/system/diag': { get: { summary: '诊断导出（审计尾部）' } },
+    '/api/system/factory-reset': { post: { summary: '恢复出厂（可选清空 TDengine）' } },
+    '/api/users': { get: { summary: '用户列表（admin）' }, post: { summary: '创建用户（admin）' } },
+    '/api/users/{id}': { put: { summary: '更新用户（admin）' }, delete: { summary: '删除用户（admin）' } },
+    '/ws': { get: { summary: 'WebSocket 实时推送（tags-batch / alarms / storage-status）' } },
+  };
+}
 
   // TDengine 连通性实测：SELECT SERVER_VERSION() 往返
   app.post('/api/system/db-test', async (req, reply) => {

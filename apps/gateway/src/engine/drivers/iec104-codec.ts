@@ -56,8 +56,8 @@ export function decodeFrame(buf: Buffer): ParsedFrame {
     return { kind: 'unknown' };
   }
   if ((c0 & 0x03) === 0x01) {
-    // S 帧
-    const recvSeq = ((buf[3] << 7) | (buf[2] >> 1)) & 0x7fff;
+    // S 帧：字节2=0x01 标志；接收序号在字节4-5（小端，bit0 恒 0）
+    const recvSeq = ((buf[5] << 7) | (buf[4] >> 1)) & 0x7fff;
     return { kind: 's', recvSeq };
   }
   // I 帧
@@ -93,11 +93,14 @@ export function decodeAsdu(b: Buffer): ParsedFrame['asdu'] {
       const qds = b[o + 4];
       o += 5;
       points.points.push({ ioa, value, qds });
+    } else if (typeId === TYPE.C_IC_NA) {
+      const qoi = o < b.length ? b[o] : 20;
+      o += 1;
+      points.points.push({ ioa, value: true, qds: qoi });
     } else {
       break; // 未知类型跳过整帧数据
     }
   }
-  points.points = points.points.filter((p) => p.ioa > 0);
   return points;
 }
 

@@ -57,29 +57,7 @@ export class SnmpDriver implements Driver {
   }
 
   private convert(vb: Varbind): number | string | boolean | null {
-    switch (vb.type) {
-      case ObjectType.Boolean:
-        return Boolean(vb.value);
-      case ObjectType.Integer:
-      case ObjectType.Counter:
-      case ObjectType.Gauge:
-      case ObjectType.Counter64:
-      case ObjectType.TimeTicks:
-      case ObjectType.IpAddress:
-        return typeof vb.value === 'number' ? vb.value : Number(vb.value);
-      case ObjectType.OctetString: {
-        const text = vb.value.toString();
-        const n = Number(text);
-        return Number.isNaN(n) ? text : n;
-      }
-      case ObjectType.Null:
-      case ObjectType.NoSuchObject:
-      case ObjectType.NoSuchInstance:
-      case ObjectType.EndOfMibView:
-        return null;
-      default:
-        return vb.value.toString();
-    }
+    return convertVarbind(vb);
   }
 
   async stop(): Promise<void> {
@@ -87,5 +65,34 @@ export class SnmpDriver implements Driver {
     this.timer = undefined;
     this.session?.close();
     this.session = undefined;
+  }
+}
+
+/** 将 SNMP Varbind 转为网关值（导出供单测）：OctetString 优先转数字，Null/NoSuch* 返回 null */
+export function convertVarbind(vb: Varbind): number | string | boolean | null {
+  switch (vb.type) {
+    case ObjectType.Boolean:
+      return Boolean(vb.value);
+    case ObjectType.Integer:
+    case ObjectType.Counter:
+    case ObjectType.Gauge:
+    case ObjectType.Counter64:
+    case ObjectType.TimeTicks:
+    case ObjectType.IpAddress:
+      // net-snmp IpAddress 值为 4 字节 Buffer → 点分格式
+      if (Buffer.isBuffer(vb.value) && vb.value.length === 4) return [...vb.value].join('.');
+      return typeof vb.value === 'number' ? vb.value : String(vb.value);
+    case ObjectType.OctetString: {
+      const text = vb.value.toString();
+      const n = Number(text);
+      return Number.isNaN(n) ? text : n;
+    }
+    case ObjectType.Null:
+    case ObjectType.NoSuchObject:
+    case ObjectType.NoSuchInstance:
+    case ObjectType.EndOfMibView:
+      return null;
+    default:
+      return vb.value.toString();
   }
 }

@@ -164,13 +164,7 @@ export class BacnetDriver implements Driver {
   }
 
   private coerce(type: number, value: unknown): number | string | boolean {
-    if (type === baEnum.ApplicationTags.BOOLEAN) return Boolean(value);
-    if (type === baEnum.ApplicationTags.REAL || type === baEnum.ApplicationTags.DOUBLE || type === baEnum.ApplicationTags.UNSIGNED_INTEGER || type === baEnum.ApplicationTags.SIGNED_INTEGER) {
-      const n = Number(value);
-      return Number.isNaN(n) ? String(value) : n;
-    }
-    if (type === baEnum.ApplicationTags.CHARACTER_STRING) return String(value);
-    return String(value);
+    return coerceBacnetValue(type, value);
   }
 
   async stop(): Promise<void> {
@@ -179,4 +173,16 @@ export class BacnetDriver implements Driver {
     this.sock?.close();
     this.sock = undefined;
   }
+}
+
+/** BACnet 应用标签值 → 网关值（导出供单测） */
+export function coerceBacnetValue(type: number, value: unknown): number | string | boolean {
+  if (type === baEnum.ApplicationTags.BOOLEAN) return Boolean(value);
+  if (type === baEnum.ApplicationTags.REAL || type === baEnum.ApplicationTags.DOUBLE
+    || type === baEnum.ApplicationTags.UNSIGNED_INTEGER || type === baEnum.ApplicationTags.SIGNED_INTEGER) {
+    const n = Number(value);
+    return Number.isNaN(n) ? String(value) : n;
+  }
+  if (type === baEnum.ApplicationTags.CHARACTER_STRING) return String(value);
+  return String(value);
 }

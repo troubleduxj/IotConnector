@@ -1,5 +1,3 @@
-version: "3.9"
-
 # 开发/演示栈：TDengine + 三协议模拟器 + 网关 + 控制台
 # 用法：docker compose up -d
 # 控制台: http://localhost:3001  网关: http://localhost:8080  Explorer: http://localhost:16060
@@ -25,6 +23,11 @@ services:
     working_dir: /workspace/apps/gateway
     volumes:
       - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway" # 与网关共享网络栈：通道 host=127.0.0.1 直接可达
+    depends_on:
+      - gateway
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm s7-sim"
 
   modbus-sim:
@@ -32,6 +35,11 @@ services:
     working_dir: /workspace/apps/gateway
     volumes:
       - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm modbus-sim"
 
   opcua-sim:
@@ -39,13 +47,69 @@ services:
     working_dir: /workspace/apps/gateway
     volumes:
       - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm opcua-sim"
+
+  melsec-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm melsec-sim"
+
+  fins-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm fins-sim"
+
+  enip-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm enip-sim"
+
+  iec104-sim:
+    image: node:22-alpine
+    working_dir: /workspace/apps/gateway
+    volumes:
+      - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+    network_mode: "service:gateway"
+    depends_on:
+      - gateway
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && IEC104_SIM_PORT=2404 pnpm iec104-sim"
 
   gateway:
     image: node:22-alpine
     working_dir: /workspace
     volumes:
       - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+      - node_modules_con:/workspace/apps/console/node_modules
       - gateway-data:/workspace/apps/gateway/data
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && TDENGINE_URL=http://tdengine:6041 pnpm --filter @iotconnector/gateway start"
     ports:
@@ -59,6 +123,9 @@ services:
     working_dir: /workspace/apps/console
     volumes:
       - .:/workspace
+      - node_modules_root:/workspace/node_modules
+      - node_modules_gw:/workspace/apps/gateway/node_modules
+      - node_modules_con:/workspace/apps/console/node_modules
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --port=3001 --host=0.0.0.0 --strictPort"
     ports:
       - "3001:3001"
@@ -66,3 +133,6 @@ services:
 volumes:
   tdengine-data:
   gateway-data:
+  node_modules_root:
+  node_modules_gw:
+  node_modules_con:

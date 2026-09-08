@@ -15,6 +15,8 @@ export interface NorthboundConfig {
 }
 
 export interface GatewayConfig {
+  /** C 组运维：配置 schema 版本（当前 2）；跨版本升级经 migrateConfig 逐级迁移 */
+  schemaVersion?: number;
   channels: Channel[];
   tags: Tag[];
   alarms: AlarmRule[];
@@ -40,6 +42,7 @@ const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 /** 出厂种子配置（恢复出厂用；正常启动走 loadConfig 的"文件优先、缺失段补种子"逻辑） */
 export function seedConfig(): GatewayConfig {
   return {
+    schemaVersion: SCHEMA_VERSION,
     channels: [
       {
         id: 's7-01',
@@ -200,33 +203,58 @@ export function seedConfig(): GatewayConfig {
   };
 }
 
+/** 当前配置 schema 版本（结构变更时 +1 并在 migrateConfig 增加对应迁移步骤） */
+export const SCHEMA_VERSION = 2;
+
+/**
+ * C 组运维：跨版本配置迁移。
+ * v1（无 schemaVersion 字段的存量文件）→ v2：配方补 version=1、补齐各可选段默认值。
+ * 后续结构变更在此函数追加迁移步骤（switch/version if 链），保证旧文件平滑升级。
+ */
+export function migrateConfig(parsed: GatewayConfig): GatewayConfig {
+  const from = parsed.schemaVersion ?? 1;
+  // --- v1 → v2 ---
+  if (from < 2) {
+    parsed.alarms = parsed.alarms ?? [];
+    parsed.notifications = {
+      enabled: false,
+      webhookUrl: '',
+      dingtalk: { enabled: false, webhookUrl: '', secret: '' },
+      wecom: { enabled: false, webhookUrl: '' },
+      email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
+      ...(parsed.notifications ?? {}),
+    } as NotificationConfig;
+    const seed = seedConfig();
+    parsed.users = parsed.users ?? seed.users;
+    parsed.storageTasks = parsed.storageTasks ?? seed.storageTasks;
+    parsed.recipes = (parsed.recipes ?? seed.recipes).map((r) => ({ ...r, version: r.version ?? 1 }));
+    parsed.recipeDownloads = parsed.recipeDownloads ?? [];
+    parsed.scripts = parsed.scripts ?? seed.scripts;
+    parsed.northbound = {
+      enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000,
+      ...(parsed.northbound ?? {}),
+    };
+  }
+  parsed.schemaVersion = SCHEMA_VERSION;
+  return parsed;
+}
+
 export function loadConfig(): GatewayConfig {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig;
-      parsed.alarms = parsed.alarms ?? []; // 旧版本配置迁移
-      parsed.notifications = {
-        enabled: false,
-        webhookUrl: '',
-        dingtalk: { enabled: false, webhookUrl: '', secret: '' },
-        wecom: { enabled: false, webhookUrl: '' },
-        email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
-        ...(parsed.notifications ?? {}),
-      } as NotificationConfig;
-      // 旧配置迁移：缺失的段用种子默认填充（已存在但为空的段尊重现状）
-      const seed = seedConfig();
-      parsed.users = parsed.users ?? seed.users;
-      parsed.storageTasks = parsed.storageTasks ?? seed.storageTasks;
-      parsed.recipes = parsed.recipes ?? seed.recipes;
-      parsed.recipeDownloads = parsed.recipeDownloads ?? [];
-      parsed.scripts = parsed.scripts ?? seed.scripts;
-      parsed.northbound = { enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000, ...parsed.northbound };
+      const parsed = migrateConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')) as GatewayConfig);
+      // 版本迁移后立即固化（避免每次启动重复迁移）
+      if (JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')).schemaVersion !== SCHEMA_VERSION) {
+        saveConfig(parsed);
+        console.log(`[config] schema 迁移完成 → v${SCHEMA_VERSION}`);
+      }
       return parsed;
     }
   } catch (e) {
     console.error('[config] load failed, falling back to seed:', e);
   }
   const cfg = seedConfig();
+  cfg.schemaVersion = SCHEMA_VERSION;
   saveConfig(cfg);
   return cfg;
 }

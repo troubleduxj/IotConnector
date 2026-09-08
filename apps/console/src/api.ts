@@ -753,6 +753,26 @@ export const testDbConnection = async (): Promise<{ ok: boolean; version?: strin
 export const initDb = async (): Promise<{ ok: boolean; code?: number; error?: string }> =>
   (await apiFetch('/api/system/db-init', { method: 'POST' })).json() as Promise<{ ok: boolean; code?: number; error?: string }>;
 
+/** B6 全量配置备份下载（含用户/北向凭据，admin） */
+export async function downloadConfigBackup(): Promise<void> {
+  const res = await apiFetch('/api/system/config-backup');
+  if (!res.ok) throw new Error('backup failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `factorybridge-config-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/** B6 全量配置恢复（admin）：整体替换并同步引擎 */
+export async function restoreConfigBackup(bundle: unknown): Promise<{ counts?: { channels: number; tags: number } }> {
+  const res = await apiFetch('/api/system/config-restore', jsonPost(bundle));
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; counts?: { channels: number; tags: number } };
+  if (!res.ok || body.ok !== true) throw new Error(body.error ?? 'restore failed');
+  return body;
+}
+
 export const factoryReset = async (purgeStorage = false): Promise<Response> =>
   apiFetch('/api/system/factory-reset', jsonPost({ confirm: 'RESET', purgeStorage }));
 

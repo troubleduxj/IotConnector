@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Database, Globe, Wifi, Save, Play, CheckCircle2, Loader2, Users, Trash2, KeyRound, Plus, ScrollText, RefreshCw, Cpu, Download, RotateCcw, XCircle } from 'lucide-react';
-import { fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, fetchSystemInfo, testDbConnection, initDb, factoryReset, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus, type SystemInfo } from '../api';
+import React, { useRef, useEffect, useState } from 'react';
+import { Database, Globe, Wifi, Save, Play, CheckCircle2, Loader2, Users, Trash2, KeyRound, Plus, ScrollText, RefreshCw, Cpu, Download, Upload, RotateCcw, XCircle } from 'lucide-react';
+import { fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, fetchSystemInfo, testDbConnection, initDb, factoryReset, downloadConfigBackup, restoreConfigBackup, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus, type SystemInfo } from '../api';
 import { useI18n } from '../i18n';
 import { toast } from '../components/Toast';
 
@@ -113,6 +113,21 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
       setResetPurge(false);
     } finally {
       setResetBusy(false);
+    }
+  };
+
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
+  const doRestoreBackup = async (file: File): Promise<void> => {
+    try {
+      const bundle = JSON.parse(await file.text()) as { format?: string; config?: unknown };
+      if (bundle.format !== 'factorybridge-config@1') { toast(t('sys.info.restoreBadFormat'), false); return; }
+      const r = await restoreConfigBackup(bundle);
+      toast(t('sys.info.restoreDone', { n: r.counts?.channels ?? 0 }));
+      fetchSystemInfo().then(setSysInfo).catch(() => {});
+      void refreshUsers();
+    } catch (e) {
+      toast(`${t('sys.info.restoreFail')}: ${e instanceof Error ? e.message : String(e)}`, false);
     }
   };
 
@@ -483,6 +498,38 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                   >
                     <Download className="w-3.5 h-3.5 mr-1.5" /> {t('sys.info.diag')}
                   </button>
+                </div>
+              )}
+              {/* 运维区（admin）：全量备份下载 / 恢复（B6，灾备；与恢复出厂对称） */}
+              {me?.role === 'admin' && (
+                <div className="pt-3 border-t border-slate-100">
+                  <div className="text-xs font-bold text-slate-500 mb-2">{t('sys.info.ops')}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => { void downloadConfigBackup().then(() => toast(t('sys.info.backupDone'))).catch(() => toast(t('sys.info.backupFail'), false)); }}
+                      className="flex items-center px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                    >
+                      <Download className="w-3.5 h-3.5 mr-1.5" /> {t('sys.info.backup')}
+                    </button>
+                    <input
+                      ref={restoreInputRef}
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void doRestoreBackup(f);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button
+                      onClick={() => restoreInputRef.current?.click()}
+                      className="flex items-center px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
+                    >
+                      <Upload className="w-3.5 h-3.5 mr-1.5" /> {t('sys.info.restore')}
+                    </button>
+                    <span className="text-[11px] text-slate-400">{t('sys.info.opsHint')}</span>
+                  </div>
                 </div>
               )}
               {/* 危险区：恢复出厂（admin） */}

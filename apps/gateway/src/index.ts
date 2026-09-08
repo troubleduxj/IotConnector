@@ -7,7 +7,7 @@ import path from 'node:path';
 import type { AlarmEvent, AlarmRule, Channel, NotificationConfig, Tag } from '@iotconnector/shared';
 import { PROTOCOL_CONFIGS, validateAddress, validateChannelParams } from '@iotconnector/shared';
 import { Engine } from './engine/engine';
-import { loadConfig, saveConfig, seedConfig } from './config';
+import { loadConfig, saveConfig, seedConfig, type GatewayConfig } from './config';
 import { AlarmEngine } from './alarms';
 import { getFrames, clearFrames } from './diagnostics';
 import { dispatchAlarm, sendTestMessage } from './notify';
@@ -1014,6 +1014,8 @@ function manifestPaths(): Record<string, { get?: { summary: string; security?: u
     '/api/system/db-init': { post: { summary: '初始化建库/超级表' } },
     '/api/system/diag': { get: { summary: '诊断导出（审计尾部）' } },
     '/api/system/factory-reset': { post: { summary: '恢复出厂（可选清空 TDengine）' } },
+    '/api/system/config-backup': { get: { summary: '全量配置备份下载（B6）' } },
+    '/api/system/config-restore': { post: { summary: '全量配置恢复（B6，admin）' } },
     '/api/users': { get: { summary: '用户列表（admin）' }, post: { summary: '创建用户（admin）' } },
     '/api/users/{id}': { put: { summary: '更新用户（admin）' }, delete: { summary: '删除用户（admin）' } },
     '/ws': { get: { summary: 'WebSocket 实时推送（tags-batch / alarms / storage-status）' } },
@@ -1096,6 +1098,56 @@ function manifestPaths(): Record<string, { get?: { summary: string; security?: u
     auditLog(actor, 'system.factory-reset',
       `配置恢复出厂默认（种子账号口令恢复为 账号+123）${purgeStorage ? (storagePurged ? '；TDengine 历史库已清空' : `；清库失败：${storagePurgeError}`) : ''}`);
     return { ok: true, storagePurged, storagePurgeError };
+  });
+
+
+  // ===== B6 全量配置备份 / 恢复（灾备，与恢复出厂对称）=====
+  // 快照应用：全量替换运行时配置并同步各引擎（原地 splice 保引用，供广播/发布器使用）
+  function applyConfigSnapshot(snap: GatewayConfig): { ok: boolean; error?: string } {
+    if (!Array.isArray(snap.channels) || !Array.isArray(snap.tags)) {
+      return { ok: false, error: 'snapshot 缺少 channels/tags 数组' };
+    }
+    for (const key of ['channels', 'tags', 'alarms', 'storageTasks', 'recipes', 'scripts'] as const) {
+      const next = snap[key] ?? [];
+      (config[key] as unknown[]).splice(0, config[key].length, ...(next as unknown[]));
+    }
+    if (snap.notifications) Object.assign(notifications, snap.notifications);
+    if (snap.northbound) Object.assign(northbound, snap.northbound);
+    if (snap.users) authStore.setUsers(snap.users);
+    saveConfig(config);
+    engine.syncConfig(channels, tags);
+    storageTaskEngine.sync(config.storageTasks);
+    alarmEngine.setRules(config.alarms ?? []);
+    northboundPublisher.applyConfig();
+    return { ok: true };
+  }
+
+  app.get('/api/system/config-backup', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    const payload = {
+      format: 'factorybridge-config@1',
+      exportedAt: new Date().toISOString(),
+      config: JSON.parse(JSON.stringify({ ...config, users: authStore.getUsers() })),
+    };
+    auditLog(actor, 'system.config-backup', `导出全量配置（${config.channels.length} 通道 / ${config.tags.length} 位号）`);
+    return reply
+      .header('content-disposition', 'attachment; filename="factorybridge-config.json"')
+      .send(payload);
+  });
+
+  app.post('/api/system/config-restore', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    const b = (req.body ?? {}) as { format?: string; config?: GatewayConfig };
+    if (b.format !== 'factorybridge-config@1' || !b.config) {
+      return reply.code(400).send({ ok: false, error: 'body.format 必须为 factorybridge-config@1 且含 config' });
+    }
+    const r = applyConfigSnapshot(b.config);
+    if (!r.ok) return reply.code(400).send(r);
+    broadcastConfigChanged();
+    auditLog(actor, 'system.config-restore', `恢复全量配置（${b.config.channels?.length ?? 0} 通道 / ${b.config.tags?.length ?? 0} 位号）`);
+    return { ok: true, counts: { channels: config.channels.length, tags: config.tags.length } };
   });
 
   app.put('/api/northbound', async (req, reply) => {

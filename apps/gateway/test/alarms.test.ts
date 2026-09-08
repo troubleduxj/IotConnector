@@ -87,6 +87,41 @@ describe('AlarmEngine（限值 + 回差状态机）', () => {
     expect(states).toEqual(['Active', 'Cleared']);
   });
 
+  it('B4 风暴抑制：minIntervalSec 内同规则振荡不重复触发', async () => {
+    const engine = new AlarmEngine([
+      { id: 'r1', tagId: 't1', kind: 'high', threshold: 36, hysteresis: 0.1, minIntervalSec: 5, enabled: true },
+    ]);
+    const states: string[] = [];
+    engine.onEvent = (e) => states.push(e.state);
+    // 触发 → Active
+    engine.evaluate(tag, 40);
+    // 回落清除
+    engine.evaluate(tag, 35);
+    expect(states).toEqual(['Active', 'Cleared']);
+    // 立即再越限：抑制窗口内 → 不触发
+    engine.evaluate(tag, 41);
+    expect(states).toEqual(['Active', 'Cleared']); // 无新事件
+    expect(engine.getActive()).toHaveLength(0);
+    // 再次回落
+    engine.evaluate(tag, 35);
+    // 抑制窗口过后再越限 → 恢复触发
+    await new Promise((r) => setTimeout(r, 5100));
+    engine.evaluate(tag, 42);
+    expect(states).toEqual(['Active', 'Cleared', 'Active']);
+    expect(engine.getActive()).toHaveLength(1);
+  }, 12_000);
+
+  it('B4 无 minIntervalSec 时振荡照常触发（兼容旧行为）', () => {
+    const engine = makeEngine(36, 0.5);
+    const states: string[] = [];
+    engine.onEvent = (e) => states.push(e.state);
+    for (let i = 0; i < 3; i += 1) {
+      engine.evaluate(tag, 40);
+      engine.evaluate(tag, 35);
+    }
+    expect(states).toEqual(['Active', 'Cleared', 'Active', 'Cleared', 'Active', 'Cleared']);
+  });
+
   it('删除 roc 规则清理其采样基线', async () => {
     const engine = new AlarmEngine([
       { id: 'r4', tagId: 't1', kind: 'roc', threshold: 5, hysteresis: 0, enabled: true },

@@ -103,6 +103,8 @@ export interface AlarmRule {
   reference?: number;
   /** 回差（消除临界抖动）：high 规则回落到 threshold - hysteresis 以下才清除 */
   hysteresis: number;
+  /** B4 风暴抑制：同规则两次 Active 触发的最小间隔（秒）；0/缺省 = 不抑制（振荡可能刷屏） */
+  minIntervalSec?: number;
   enabled: boolean;
   message?: string;
 }

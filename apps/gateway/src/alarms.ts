@@ -12,6 +12,8 @@ export class AlarmEngine {
   private seq = 0;
   /** roc 规则的上一次采样（ruleId → {value, ts}），用于计算每秒变化率 */
   private rocState = new Map<string, { value: number; ts: number }>();
+  /** B4 风暴抑制：规则最近一次 Active 触发时间（ruleId → ts） */
+  private lastTriggerAt = new Map<string, number>();
 
   /** 告警事件回调（WS 广播用） */
   onEvent?: (event: AlarmEvent) => void;
@@ -42,6 +44,7 @@ export class AlarmEngine {
     const before = this.rules.length;
     this.rules = this.rules.filter((r) => r.id !== id);
     this.rocState.delete(id);
+    this.lastTriggerAt.delete(id);
     // 规则删除时，若其告警仍处于激活态则自动清除
     const active = this.active.get(id);
     if (active) {
@@ -97,6 +100,16 @@ export class AlarmEngine {
       }
 
       if (shouldActivate) {
+        // B4 风暴抑制：距上次触发不足 minIntervalSec 时抑制本次触发（事件不产生，Active 不置位）
+        const minIntervalMs = Math.max(0, rule.minIntervalSec ?? 0) * 1000;
+        const lastTrigger = this.lastTriggerAt.get(rule.id) ?? 0;
+        if (minIntervalMs > 0 && Date.now() - lastTrigger < minIntervalMs) {
+          shouldActivate = false;
+        }
+      }
+
+      if (shouldActivate) {
+        this.lastTriggerAt.set(rule.id, Date.now());
         const defaultMsg = {
           high: `${tag.name} > ${rule.threshold}`,
           low: `${tag.name} < ${rule.threshold}`,

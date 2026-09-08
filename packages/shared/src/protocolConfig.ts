@@ -97,7 +97,7 @@ export const PROTOCOL_CONFIGS: Record<Protocol, ProtocolMetadata> = {
     vendor: 'Eclipse Foundation',
     description: 'Lightweight publish/subscribe architecture with stateful industrial Sparkplug B v2.2 payload standard.',
     sampleAddress: 'spBv1.0/Plant/DDATA/Cell1/Temp',
-    addressSyntaxHelp: 'Topic namespace: spBv1.0/<GroupId>/<MessageType>/<EdgeNodeId>/[<DeviceId>] or JSON payload metric name',
+    addressSyntaxHelp: 'Topic[#.field.path] — e.g. factory/line1/status#temp (JSON field), factory/line1/counter# (raw scalar)',
     standard: 'ISO/IEC 20922 / Sparkplug B',
     color: 'text-purple-600 border-purple-300 bg-purple-50',
     bgColor: 'bg-purple-500'
@@ -125,6 +125,18 @@ export const PROTOCOL_CONFIGS: Record<Protocol, ProtocolMetadata> = {
     standard: 'IEC 60870-5-104:2006',
     color: 'text-amber-700 border-amber-400 bg-amber-50',
     bgColor: 'bg-amber-600'
+  },
+  'SNMP': {
+    name: 'SNMP',
+    category: 'Building & Power',
+    defaultPort: '161',
+    vendor: 'IETF RFC 3411-3418',
+    description: 'SNMP v1/v2c polling for UPS, PDU, environment sensors, network gear and energy meters (MIB-2 / vendor OIDs).',
+    sampleAddress: '1.3.6.1.4.1.9.9.13.1.3.1.3.1',
+    addressSyntaxHelp: 'Dotted numeric OID, e.g. 1.3.6.1.2.1.1.3.0 (sysUpTime), 1.3.6.1.4.1.<enterprise>.<instance>',
+    standard: 'IETF SNMP v2c (RFC 1905-1907)',
+    color: 'text-lime-700 border-lime-400 bg-lime-50',
+    bgColor: 'bg-lime-600'
   }
 };
 

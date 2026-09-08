@@ -83,7 +83,16 @@ export function validateAddress(protocol: Protocol, address: string): AddressVal
       return { ok: false, error: 'IEC104 地址格式：IOA:1001', hint: addressHint(protocol) };
     }
     case 'MQTT / Sparkplug B': {
-      return { ok: true }; // 主题自由度大，不做强校验
+      // 地址支持「主题#字段路径」；主题段不允许空白符与订阅通配符（+/#）
+      const topic = addr.split('#')[0];
+      if (!topic || /[\s+]/.test(topic)) {
+        return { ok: false, error: 'MQTT 地址格式：主题#字段路径（如 factory/line1/status#temp；#后省略用通道缺省）', hint: addressHint(protocol) };
+      }
+      return { ok: true };
+    }
+    case 'SNMP': {
+      if (/^\d+(\.\d+)+$/.test(addr) && addr.split('.').every((seg) => seg.length <= 10 && Number(seg) <= 4294967295)) return { ok: true };
+      return { ok: false, error: 'SNMP 地址格式：点分数字 OID，如 1.3.6.1.4.1.9.9.13.1.3.1.3.1', hint: addressHint(protocol) };
     }
     default:
       return { ok: true };

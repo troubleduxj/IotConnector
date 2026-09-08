@@ -14,7 +14,10 @@
     "melsec-sim": "tsx scripts/melsec-sim.ts",
     "mqtt-broker": "node scripts/mqtt-broker.cjs",
     "fins-sim": "tsx scripts/fins-sim.ts",
-    "enip-sim": "node scripts/enip-sim.cjs"
+    "enip-sim": "node scripts/enip-sim.cjs",
+    "snmp-sim": "tsx scripts/snmp-sim.ts",
+    "mqtt-sim": "tsx scripts/mqtt-sim.ts",
+    "mqtt-dev-broker": "node scripts/mqtt-dev-broker.cjs"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
@@ -24,6 +27,7 @@
     "fastify": "^5.0.0",
     "modbus-serial": "^8.0.25",
     "mqtt": "^5.15.2",
+    "net-snmp": "^3.26.3",
     "node-opcua": "^2.134.0",
     "nodemailer": "^10.0.0",
     "nodes7": "^0.3.18",
@@ -31,6 +35,7 @@
     "st-ethernet-ip": "^2.7.5"
   },
   "devDependencies": {
+    "@types/net-snmp": "^3.23.0",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.1",
     "tsx": "^4.21.0",

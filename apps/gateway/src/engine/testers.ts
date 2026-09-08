@@ -1,4 +1,6 @@
 import ModbusRTU from 'modbus-serial';
+import mqtt from 'mqtt';
+import snmp, { ObjectType, type Varbind } from 'net-snmp';
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds, TimestampsToReturn, ClientSubscription } from 'node-opcua';
 import NodeS7 from 'nodes7';
 import type { Channel } from '@iotconnector/shared';
@@ -190,6 +192,71 @@ async function testEnip(channel: Channel, steps: TestStep[], probeTag?: string):
   steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
 }
 
+
+async function testMqtt(channel: Channel, steps: TestStep[], probeTopic?: string): Promise<void> {
+  const p = channel.params as Record<string, unknown>;
+  const t0 = Date.now();
+  const brokerUrl = String(p.brokerUrl ?? `mqtt://${channel.host}:${channel.port}`);
+  steps.push({ label: 'Broker 连接', ok: true, detail: brokerUrl });
+  const client = mqtt.connect(brokerUrl, {
+    connectTimeout: 6000,
+    username: p.username ? String(p.username) : undefined,
+    password: p.password ? String(p.password) : undefined,
+  });
+  try {
+    await withTimeout(new Promise<void>((resolve, reject) => {
+      client.once('connect', () => resolve());
+      client.once('error', (e) => reject(new Error(e.message)));
+    }), 6000, 'MQTT CONNACK');
+    // 位号地址可能为「主题#字段路径」，订阅仅取主题段
+    const rawTopic = probeTopic ?? 'factorybridge/test/probe';
+    const topic = rawTopic.indexOf('#') >= 0 ? rawTopic.slice(0, rawTopic.indexOf('#')) : rawTopic;
+    await withTimeout(new Promise<void>((resolve, reject) => {
+      client.subscribe(topic, { qos: 0 }, (err) => (err ? reject(err) : resolve()));
+    }), 4000, 'SUBSCRIBE');
+    steps.push({ label: 'CONNACK / SUBACK', ok: true, detail: `订阅探针主题 ${topic}` });
+    // 尝试等待首条消息（3s，无消息不否定连接——演示环境可能无人发布）
+    const first = await new Promise<string | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 3000);
+      client.once('message', (topic, payload) => {
+        clearTimeout(timer);
+        resolve(`${topic} = ${payload.toString().slice(0, 60)}`);
+      });
+    });
+    if (first) steps.push({ label: '订阅采样', ok: true, detail: first });
+    else steps.push({ label: '订阅采样', ok: true, detail: '3s 内无消息（CONNACK/SUBACK 已验证通道）' });
+  } finally {
+    await new Promise<void>((resolve) => client.end(false, {}, () => resolve()));
+  }
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
+async function testSnmp(channel: Channel, steps: TestStep[], probeOid?: string): Promise<void> {
+  const p = channel.params as Record<string, unknown>;
+  const t0 = Date.now();
+  const version = String(p.snmpVersion ?? '2c') === '1' ? snmp.Version1 : snmp.Version2c;
+  const oid = probeOid ?? '1.3.6.1.2.1.1.3.0'; // sysUpTime
+  steps.push({ label: 'UDP 会话', ok: true, detail: `${channel.host}:${channel.port} (v${version === snmp.Version1 ? '1' : '2c'} / ${p.community ?? 'public'})` });
+  const session = snmp.createSession(channel.host, String(p.community ?? 'public'), {
+    port: channel.port,
+    version,
+    timeout: Math.max(200, Number(p.timeoutMs ?? 1500)),
+    retries: Math.max(0, Number(p.retries ?? 1)),
+  });
+  try {
+    const varbinds = await withTimeout(new Promise<Varbind[]>((resolve, reject) => {
+      session.get([oid], (err, vbs) => (err ? reject(err) : resolve(vbs)));
+    }), Math.max(1000, Number(p.timeoutMs ?? 1500) + 1000), 'SNMP GET');
+    const vb = varbinds[0];
+    const readable = vb.type === ObjectType.OctetString ? vb.value.toString() : String(vb.value);
+    const typeName = { 2: 'Integer', 4: 'OctetString', 5: 'Null', 6: 'OID', 64: 'IpAddress', 65: 'Counter', 66: 'Gauge', 67: 'TimeTicks', 68: 'Counter64', 129: 'NoSuchObject', 130: 'NoSuchInstance' }[vb.type] ?? `type ${vb.type}`;
+    steps.push({ label: 'SNMP GET', ok: vb.type !== ObjectType.Null && vb.type !== ObjectType.NoSuchObject, detail: `${oid} (${typeName}) = ${readable}` });
+  } finally {
+    session.close();
+  }
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
 /** 执行通道真实连接测试（不干扰运行中的采集驱动） */
 export async function testChannel(
   channel: Channel,
@@ -208,6 +275,12 @@ export async function testChannel(
         break;
       case 'OPC UA':
         await testOpcUa(channel, steps, opcProbeNodeId);
+        break;
+      case 'MQTT / Sparkplug B':
+        await testMqtt(channel, steps, rawProbeAddr);
+        break;
+      case 'SNMP':
+        await testSnmp(channel, steps, rawProbeAddr);
         break;
       case 'Mitsubishi MELSEC':
         await testMelsec(channel, steps, rawProbeAddr);

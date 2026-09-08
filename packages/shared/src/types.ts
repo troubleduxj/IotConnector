@@ -13,7 +13,8 @@ export type Protocol =
   | 'Omron FINS'
   | 'MQTT / Sparkplug B'
   | 'BACnet/IP'
-  | 'IEC 60870-5-104';
+  | 'IEC 60870-5-104'
+  | 'SNMP';
 
 /** 位号数据类型（网关原始类型；P0 阶段支持 Bool/Int16/Float） */
 export type DataType = 'Bool' | 'Int16' | 'UInt16' | 'Int32' | 'Float' | 'Double' | 'String';

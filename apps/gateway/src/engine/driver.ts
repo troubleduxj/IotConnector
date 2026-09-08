@@ -6,6 +6,8 @@ import { EnipDriver } from './drivers/enip';
 import { SimulationDriver } from './drivers/simulation';
 import { S7Driver } from './drivers/s7';
 import { OpcUaDriver } from './drivers/opcua';
+import { MqttSubscriberDriver } from './drivers/mqtt-subscriber';
+import { SnmpDriver } from './drivers/snmp';
 import { UnsupportedDriver } from './drivers/unsupported';
 
 /** 驱动宿主环境：由 Engine 注入，驱动只通过它上报数据与状态 */
@@ -39,6 +41,10 @@ export function createDriver(channel: Channel, ctx: DriverContext): Driver {
       return new EnipDriver(ctx);
     case 'OPC UA':
       return new OpcUaDriver(ctx);
+    case 'MQTT / Sparkplug B':
+      return new MqttSubscriberDriver(ctx);
+    case 'SNMP':
+      return new SnmpDriver(ctx);
     default:
       return new UnsupportedDriver(ctx);
   }

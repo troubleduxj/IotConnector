@@ -55,7 +55,14 @@
 * **MQTT / Sparkplug B (1883/8883)**：支持工业 Sparkplug B v2.2 规范 (Group ID / Edge Node ID / Device ID)、QoS 0/1/2、TLS/SSL 及断网离线缓存。
 * **BACnet/IP (47808)**：支持楼宇与暖通自控 (HVAC/冷机)，配置 Device Instance ID、Max APDU 长度与 BBMD 注册。
 * **IEC 60870-5-104 (2404)**：支持电力电网远动通讯，配置 Common ASDU 地址、COT/IOA 字节长度与 T1/T2/T3 超时定时器。
-* **协议辅助工具**：内置各协议标准地址语法说明表 (Address Syntax Reference)、实时通讯链路握手测试 (Connection Test) 与十六进制协议诊断抓包分析器。
+* **SNMP v1/v2c (161)**：UPS / PDU / 环境传感器 / 网络设备 / 能耗表轮询，位号地址为点分 OID，
+  OctetString 自动转数值/字符串；内置 net-snmp Agent 模拟器（`pnpm --filter @iotconnector/gateway snmp-sim`）。
+* **MQTT 南向采集 (1883)**：订阅型驱动——位号地址 = 订阅主题，支持「主题#字段路径」语法
+  （如 `factory/line1/status#temp` 取 JSON 字段、`factory/line1/counter#` 取原始标量），
+  多位号可共用主题各取字段；配套 aedes 完整 broker（`mqtt-dev-broker`）与发布模拟器（`mqtt-sim`）。
+* **协议辅助工具**：内置各协议标准地址语法说明表 (Address Syntax Reference)、实时通讯链路握手测试
+  （六协议分步握手 + S7 全位号批量探针 + OPC UA 订阅采样 + MQTT CONNACK/SUBACK/采样 + SNMP GET）
+  与十六进制协议诊断抓包分析器。
 
 ---
 

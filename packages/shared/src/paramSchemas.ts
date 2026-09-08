@@ -134,6 +134,56 @@ export const PROTOCOL_PARAM_SCHEMAS: Partial<Record<Protocol, ParamField[]>> = {
     },
     { key: 'publishInterval', label: 'Publish Interval (ms)', type: 'number', min: 50, max: 60000, default: 250 },
   ],
+
+  // ===== 南向采集：MQTT 订阅（把发布 JSON/原始值的传感器/网关桥接进采集引擎） =====
+  'MQTT / Sparkplug B': [
+    {
+      key: 'brokerUrl',
+      label: 'Broker URL',
+      type: 'text',
+      default: 'mqtt://127.0.0.1:1883',
+      required: true,
+      help: '源 MQTT Broker 地址（位号地址 = 订阅主题）',
+    },
+    {
+      key: 'payloadMode',
+      label: 'Payload 解析',
+      type: 'select',
+      default: 'json',
+      options: [
+        { value: 'json', label: 'JSON（按 jsonPath 取字段）' },
+        { value: 'raw', label: '原始值（数字/布尔/字符串）' },
+      ],
+    },
+    {
+      key: 'jsonPath',
+      label: 'JSON 字段路径',
+      type: 'text',
+      default: 'value',
+      help: '点分路径，如 value 或 data.temp；payloadMode=json 时生效',
+    },
+    { key: 'qos', label: 'QoS', type: 'select', default: '0', options: [{ value: '0', label: '0 (至多一次)' }, { value: '1', label: '1 (至少一次)' }] },
+    { key: 'username', label: 'Username', type: 'text', default: '' },
+    { key: 'password', label: 'Password', type: 'text', default: '' },
+  ],
+
+  // ===== 南向采集：SNMP 轮询（UPS/PDU/环动/能耗表） =====
+  'SNMP': [
+    {
+      key: 'snmpVersion',
+      label: 'SNMP 版本',
+      type: 'select',
+      default: '2c',
+      options: [
+        { value: '2c', label: 'v2c' },
+        { value: '1', label: 'v1' },
+      ],
+      required: true,
+    },
+    { key: 'community', label: 'Community', type: 'text', default: 'public', required: true },
+    { key: 'timeoutMs', label: '超时 (ms)', type: 'number', min: 200, max: 10000, default: 1500 },
+    { key: 'retries', label: '重试次数', type: 'number', min: 0, max: 5, default: 1 },
+  ],
 };
 
 /** 取协议参数 schema（未定义协议返回空数组，向后兼容） */

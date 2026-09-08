@@ -9,6 +9,7 @@ import { OpcUaDriver } from './drivers/opcua';
 import { MqttSubscriberDriver } from './drivers/mqtt-subscriber';
 import { SnmpDriver } from './drivers/snmp';
 import { BacnetDriver } from './drivers/bacnet';
+import { Iec104Driver } from './drivers/iec104';
 import { UnsupportedDriver } from './drivers/unsupported';
 
 /** 驱动宿主环境：由 Engine 注入，驱动只通过它上报数据与状态 */
@@ -48,6 +49,8 @@ export function createDriver(channel: Channel, ctx: DriverContext): Driver {
       return new SnmpDriver(ctx);
     case 'BACnet/IP':
       return new BacnetDriver(ctx);
+    case 'IEC 60870-5-104':
+      return new Iec104Driver(ctx);
     default:
       return new UnsupportedDriver(ctx);
   }

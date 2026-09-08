@@ -18,7 +18,8 @@
     "snmp-sim": "tsx scripts/snmp-sim.ts",
     "mqtt-sim": "tsx scripts/mqtt-sim.ts",
     "mqtt-dev-broker": "node scripts/mqtt-dev-broker.cjs",
-    "bacnet-sim": "node scripts/bacnet-sim.cjs"
+    "bacnet-sim": "node scripts/bacnet-sim.cjs",
+    "iec104-sim": "tsx scripts/iec104-sim.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

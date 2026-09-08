@@ -167,6 +167,12 @@ export const PROTOCOL_PARAM_SCHEMAS: Partial<Record<Protocol, ParamField[]>> = {
     { key: 'password', label: 'Password', type: 'text', default: '' },
   ],
 
+  // ===== 南向采集：IEC 60870-5-104（电力远动） =====
+  'IEC 60870-5-104': [
+    { key: 'commonAddress', label: '公共地址（站地址）', type: 'number', min: 1, max: 65535, default: 1, required: true },
+    { key: 'kValue', label: 'K 值（最大未确认帧）', type: 'number', min: 1, max: 32767, default: 12 },
+  ],
+
   // ===== 南向采集：BACnet/IP（楼宇自控 HVAC/冷机/照明/电力表） =====
   'BACnet/IP': [
     {

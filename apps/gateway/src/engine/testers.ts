@@ -2,6 +2,8 @@ import ModbusRTU from 'modbus-serial';
 import mqtt from 'mqtt';
 import snmp, { ObjectType, type Varbind } from 'net-snmp';
 import BacnetClient from 'bacstack';
+import net from 'node:net';
+import { U, TYPE, COT, splitFrames, decodeFrame, encodeIFrame, encodeSFrame, cIc } from './drivers/iec104-codec';
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds, TimestampsToReturn, ClientSubscription } from 'node-opcua';
 import NodeS7 from 'nodes7';
 import type { Channel } from '@iotconnector/shared';
@@ -312,6 +314,55 @@ async function testBacnet(channel: Channel, steps: TestStep[], probeAddr?: strin
   steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
 }
 
+async function testIec104(channel: Channel, steps: TestStep[]): Promise<void> {
+  const t0 = Date.now();
+  const common = Math.max(1, Number((channel.params as Record<string, unknown>).commonAddress ?? 1));
+  steps.push({ label: 'TCP 连接', ok: true, detail: `${channel.host}:${channel.port}` });
+  const sock = net.connect(channel.port, channel.host);
+  let seq = 0;
+  let recv = 0;
+  let acc = Buffer.alloc(0);
+  const outcome = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
+    const timer = setTimeout(() => { sock.destroy(); resolve({ ok: false, detail: '协议超时' }); }, 6000);
+    let gotCon = false;
+    let gotData = 0;
+    let gotActerm = false;
+    sock.on('connect', () => sock.write(U.STARTDT_ACT));
+    sock.on('data', (chunk: Buffer) => {
+      acc = Buffer.concat([acc, chunk]);
+      const { frames, rest } = splitFrames(acc);
+      acc = rest;
+      for (const f of frames) {
+        const p = decodeFrame(f);
+        if (p.kind === 'u-startdt-con') {
+          gotCon = true;
+          sock.write(encodeIFrame(cIc(COT.ACTIVATION, common), seq++, recv)); // 总召唤
+        } else if (p.kind === 'i' && p.asdu) {
+          recv = (p.sendSeq ?? 0) + 1;
+          if (p.asdu.typeId === TYPE.C_IC_NA && p.asdu.cot === COT.ACTIVATION_CONFIRM) {
+            sock.write(encodeSFrame(recv));
+          } else if (p.asdu.typeId === TYPE.C_IC_NA && p.asdu.cot === COT.ACTIVATION_TERMINATION) {
+            gotActerm = true;
+            sock.write(encodeSFrame(recv));
+          } else if ((p.asdu.typeId === TYPE.M_SP_NA || p.asdu.typeId === TYPE.M_ME_NC) && p.asdu.cot === COT.RESPONSE_INTERROGATION) {
+            gotData += p.asdu.points.length;
+            sock.write(encodeSFrame(recv));
+          }
+          if (gotCon && gotData > 0 && gotActerm) {
+            clearTimeout(timer);
+            sock.write(U.STOPDT_ACT);
+            sock.destroy();
+            resolve({ ok: true, detail: `总召唤闭环：${gotData} 点数据 + 激活终止` });
+          }
+        }
+      }
+    });
+    sock.on('error', (e: Error) => { clearTimeout(timer); sock.destroy(); resolve({ ok: false, detail: e.message }); });
+  });
+  steps.push({ label: 'STARTDT 握手', ok: outcome.ok, detail: outcome.detail });
+  steps.push({ label: '往返耗时', ok: true, detail: `${Date.now() - t0}ms` });
+}
+
 /** 执行通道真实连接测试（不干扰运行中的采集驱动） */
 export async function testChannel(
   channel: Channel,
@@ -339,6 +390,9 @@ export async function testChannel(
         break;
       case 'BACnet/IP':
         await testBacnet(channel, steps, rawProbeAddr);
+        break;
+      case 'IEC 60870-5-104':
+        await testIec104(channel, steps);
         break;
       case 'Mitsubishi MELSEC':
         await testMelsec(channel, steps, rawProbeAddr);

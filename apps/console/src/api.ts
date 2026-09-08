@@ -109,6 +109,8 @@ export interface AlarmRule {
   /** deviation 模式的基准值（设定点） */
   reference?: number;
   hysteresis: number;
+  /** B4 风暴抑制：同规则两次触发最小间隔（秒），0/缺省 = 不抑制 */
+  minIntervalSec?: number;
   enabled: boolean;
   message?: string;
 }

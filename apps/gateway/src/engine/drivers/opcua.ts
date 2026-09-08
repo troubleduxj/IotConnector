@@ -49,18 +49,11 @@ function variantType(dataType: Tag['dataType']): DataType {
   switch (dataType) {
     case 'Bool':
       return DataType.Boolean;
-    case 'Int16':
-      return DataType.Int16;
-    case 'UInt16':
-      return DataType.UInt16;
-    case 'Int32':
-      return DataType.Int32;
-    case 'Float':
-      return DataType.Float;
-    case 'Double':
-      return DataType.Double;
-    default:
+    case 'String':
       return DataType.String;
+    default:
+      // 数值统一按 Double 下发：模拟器/多数服务端节点为 Double；按位号类型精确写会 BadTypeMismatch
+      return DataType.Double;
   }
 }
 
@@ -162,7 +155,9 @@ export class OpcUaDriver implements Driver {
       {
         nodeId: tag.address,
         attributeId: AttributeIds.Value,
-        value: new DataValue(new Variant({ dataType: variantType(tag.dataType), value: rawValue })),
+        // 注意：勿用 new DataValue(new Variant(...))——data-value 包内部持另一 Variant 类副本，
+        // instanceof 失效会把实例当 plain options 处理（value 数字被当 options）→ 崩
+        value: new DataValue({ value: { dataType: variantType(tag.dataType), value: rawValue } }),
       },
     ]);
     if (!results[0]?.equals(StatusCodes.Good)) {

@@ -146,6 +146,72 @@ function readVarint(buf: Uint8Array, pos: number): { value: bigint; next: number
   return { value: result, next: p };
 }
 
+export interface CommandMetric {
+  name: string;
+  datatype?: number;
+  value?: number | string | boolean;
+}
+
+/** 解码 CMD/下行载荷：返回 metric 名 + 值（B5：北向命令下发） */
+export function decodeCommandMetrics(buf: Uint8Array): CommandMetric[] {
+  const metrics: CommandMetric[] = [];
+  let p = 0;
+  while (p < buf.length) {
+    const key = readVarint(buf, p);
+    p = key.next;
+    const field = Number(key.value >> 3n);
+    const wt = Number(key.value & 7n);
+    if (wt === 2) {
+      const len = readVarint(buf, p);
+      p = len.next;
+      const bytes = Buffer.from(buf.subarray(p, p + Number(len.value)));
+      if (field === 2) {
+        const metric = decodeMetric(bytes);
+        if (metric.name) metrics.push(metric);
+      }
+      p += Number(len.value);
+    } else if (wt === 0) {
+      const v = readVarint(buf, p);
+      p = v.next;
+    } else if (wt === 5) p += 4;
+    else if (wt === 1) p += 8;
+  }
+  return metrics;
+}
+
+function decodeMetric(raw: Uint8Array): CommandMetric {
+  const b = Buffer.from(raw);
+  const m: CommandMetric = { name: '' };
+  let p = 0;
+  while (p < b.length) {
+    const k = readVarint(b, p);
+    p = k.next;
+    const f = Number(k.value >> 3n);
+    const w = Number(k.value & 7n);
+    if (w === 0) {
+      const v = readVarint(b, p);
+      p = v.next;
+      if (f === 4) m.datatype = Number(v.value);
+      if (f === 11) m.value = Number(v.value); // int_value
+      if (f === 13) m.value = v.value !== 0n;   // boolean_value
+    } else if (w === 5) {
+      if (f === 10) m.value = b.readFloatLE(p); // float_value
+      p += 4;
+    } else if (w === 1) {
+      if (f === 9) m.value = b.readDoubleLE(p); // double_value
+      p += 8;
+    } else if (w === 2) {
+      const l = readVarint(b, p);
+      p = l.next;
+      const content = Buffer.from(b.subarray(p, p + Number(l.value)));
+      if (f === 1) m.name = content.toString('utf-8');
+      if (f === 14) m.value = content.toString('utf-8'); // string_value
+      p += Number(l.value);
+    }
+  }
+  return m;
+}
+
 export function decodePayload(buf: Uint8Array): { seq?: number; metricNames: string[] } {
   let p = 0;
   let seq: number | undefined;

@@ -1,6 +1,6 @@
 import mqtt from 'mqtt';
 import {
-  encodePayload, spbTopic, tagToMetric, SPARKPLUG_DATATYPE,
+  encodePayload, spbTopic, tagToMetric, SPARKPLUG_DATATYPE, decodeCommandMetrics,
   type MessageType,
 } from './sparkplug';
 
@@ -52,6 +52,8 @@ export class NorthboundPublisher {
   private lastError?: string;
   private outbox: OutboxEntry[] = [];
   private dataBuffer = new Map<string, Map<string, { value: number | string | boolean; ts: number }>>();
+  /** B5 北向命令下发：CMD 载荷 metric（名=位号名/通道.位号，值=目标值）→ 网关写管道 */
+  onCommand?: (metricName: string, value: number | string | boolean) => Promise<{ ok: boolean; error?: string }>;
   private flushTimer?: NodeJS.Timeout;
   private flushing = false;
 
@@ -153,8 +155,12 @@ export class NorthboundPublisher {
     this.client.on('connect', () => {
       this.connected = true;
       this.lastError = undefined;
-      // 订阅 Host STATE（REBIRTH 命令）
-      this.client?.subscribe('spBv1.0/STATE/+');
+      // 订阅 Host STATE（REBIRTH 命令）+ 本节点 CMD（B5 下发）
+      const cmdTopic = `spBv1.0/${cfg.groupId}/CMD/${cfg.edgeNodeId}/#`;
+      this.client?.subscribe(['spBv1.0/STATE/+', cmdTopic], { qos: 1 }, (err) => {
+        if (err) console.error(`[northbound] 订阅失败: ${err.message}`);
+        else console.log(`[northbound] 已订阅 ${cmdTopic}`);
+      });
       void this.publishBirths();
       this.flushOutbox();
       this.flushTimer ??= setInterval(() => this.flushData(), Math.max(500, this.getConfig().dataFlushMs));
@@ -170,6 +176,10 @@ export class NorthboundPublisher {
     });
 
     this.client.on('message', (topic, payload) => {
+      if (topic.includes('/CMD/')) {
+        void this.handleCommand(topic, payload);
+        return;
+      }
       if (topic.startsWith('spBv1.0/STATE/')) {
         try {
           const body = JSON.parse(payload.toString('utf-8'));
@@ -259,6 +269,19 @@ export class NorthboundPublisher {
    * 影子快照以 retain 发布（订阅即得最新状态，等价"查询"）。
    * 断线时同样进 Reliable Outbox，重连后按序补传。
    */
+  /** B5 CMD 下发处理：解析载荷 metric → onCommand（写管道 + 影子 desired 由注入方完成） */
+  private async handleCommand(topic: string, payload: Uint8Array): Promise<void> {
+    if (!this.onCommand) return;
+    const metrics = decodeCommandMetrics(payload);
+    if (metrics.length === 0) return;
+    console.log(`[northbound] CMD ${topic}: ${metrics.map((m) => `${m.name}=${String(m.value)}`).join(', ')}`);
+    for (const m of metrics) {
+      if (m.value === undefined || m.datatype === SPARKPLUG_DATATYPE.UNKNOWN) continue;
+      const r = await this.onCommand(m.name, m.value);
+      if (!r.ok) console.error(`[northbound] CMD ${m.name} 执行失败: ${r.error ?? '?'}`);
+    }
+  }
+
   async publishShadow(shadows: unknown): Promise<void> {
     const cfg = this.getConfig();
     if (!cfg.enabled) return;

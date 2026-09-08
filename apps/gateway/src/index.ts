@@ -60,7 +60,13 @@ async function main(): Promise<void> {
       /* 审计失败不阻塞业务 */
     }
   };
-  const notifications: NotificationConfig = config.notifications;
+  let notifications: NotificationConfig = config.notifications ?? {
+    enabled: false, webhookUrl: '',
+    dingtalk: { enabled: false, webhookUrl: '', secret: '' },
+    wecom: { enabled: false, webhookUrl: '' },
+    email: { enabled: false, host: '', port: 465, username: '', password: '', to: '', secure: true },
+  };
+  config.notifications = notifications;
 
   // 告警事件持久化：JSONL 追加（启动恢复）+ TDengine 审计表（可查询，best-effort）
   const ALARM_FILE = path.resolve(process.cwd(), 'data', 'alarms.jsonl');
@@ -96,9 +102,10 @@ async function main(): Promise<void> {
   alarmEngine.onPersist = persistAlarmEvent;
 
   // ===== 北向 Sparkplug B 发布器（决策 D7）=====
-  const northbound: NorthboundConfig = config.northbound ?? {
+  let northbound: NorthboundConfig = config.northbound ?? {
     enabled: false, url: 'mqtt://127.0.0.1:1883', groupId: 'Factory', edgeNodeId: 'FB_Edge_GW01', dataFlushMs: 1000,
   };
+  config.northbound = northbound; // 挂回 config：PUT 修改的是同一引用，persist 才能落盘（重启不丢）
   const STATE_DIR = path.resolve(process.cwd(), 'data');
   const northboundPublisher = new NorthboundPublisher(
     () => northbound,
@@ -116,6 +123,18 @@ async function main(): Promise<void> {
   );
   northboundPublisher.loadPersisted();
   northboundPublisher.start();
+  // B5 北向 CMD 下发：位号名（或 通道.位号 双写名）匹配 → 写管道 + 影子期望值
+  northboundPublisher.onCommand = async (metricName, value) => {
+    const tag = tags.find((t) => t.name === metricName)
+      ?? tags.find((t) => {
+        const ch = channels.find((c) => c.id === t.channelId);
+        return ch ? `${ch.name}.${t.name}` === metricName : false;
+      });
+    if (!tag) return { ok: false, error: `位号不存在: ${metricName}` };
+    const r = await engine.write(tag.id, value);
+    if (r.ok) deviceShadow.setDesired(tag.id, value, 'northbound');
+    return r;
+  };
 
   // ===== 设备影子（FR-M9-04 / TASKS #22）=====
   const deviceShadow = new DeviceShadow({
@@ -214,6 +233,7 @@ async function main(): Promise<void> {
       channels, tags, alarms: alarmEngine.getRules(),
       users: authStore.getUsers(), notifications,
       storageTasks: config.storageTasks, recipes: config.recipes, scripts: config.scripts,
+      northbound: config.northbound,
     });
   };
 

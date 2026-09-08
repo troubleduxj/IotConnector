@@ -171,6 +171,7 @@ export class Engine {
       this.publish(tagId, value, 'Good');
       return { ok: true };
     } catch (e) {
+      console.error('[engine.write]', e instanceof Error ? e.stack : String(e));
       return { ok: false, error: String(e) };
     }
   }

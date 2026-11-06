@@ -1,0 +1,600 @@
+package northbound
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/eclipse/paho.mqtt.golang"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
+)
+
+type Config struct {
+	Enabled                                      bool
+	URL, Username, Password, GroupID, EdgeNodeID string
+	DataFlushMs                                  int
+}
+type Status struct {
+	Connected     bool   `json:"connected"`
+	BDSeq         uint64 `json:"bdSeq"`
+	Seq           uint64 `json:"seq"`
+	Queued        int    `json:"queued"`
+	Dropped       int    `json:"dropped"`
+	Published     int    `json:"published"`
+	LastPublishAt int64  `json:"lastPublishAt,omitempty"`
+	LastError     string `json:"lastError,omitempty"`
+}
+type Publisher struct {
+	mu        sync.Mutex
+	cfg       Config
+	stateFile string
+	client    mqtt.Client
+	status    Status
+	queue     []queuedMessage
+	tags      []acquisition.Tag
+	channels  []acquisition.Channel
+	OnCommand func(string, any) error
+}
+type queuedMessage struct {
+	Topic   string `json:"topic"`
+	Payload []byte `json:"payload"`
+	Retain  bool   `json:"retain,omitempty"`
+}
+
+func New(cfg Config, stateFile string, channels []acquisition.Channel, tags []acquisition.Tag) *Publisher {
+	p := &Publisher{cfg: cfg, stateFile: stateFile, channels: channels, tags: tags}
+	p.load()
+	return p
+}
+func (p *Publisher) Status() Status {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	s := p.status
+	s.Queued = len(p.queue)
+	return s
+}
+func (p *Publisher) Start() {
+	if !p.cfg.Enabled || p.cfg.URL == "" {
+		return
+	}
+	p.connect()
+}
+func (p *Publisher) Stop() {
+	p.mu.Lock()
+	client := p.client
+	p.client = nil
+	p.status.Connected = false
+	p.mu.Unlock()
+	if client != nil && client.IsConnected() {
+		client.Disconnect(100)
+	}
+}
+func (p *Publisher) Rebirth() { p.publishBirths() }
+
+func (p *Publisher) connect() {
+	p.mu.Lock()
+	p.status.BDSeq++
+	bd := p.status.BDSeq
+	p.persistLocked()
+	p.mu.Unlock()
+	will := encodePayload(uint64(time.Now().UnixMilli()), []metric{{Name: "bdSeq", Timestamp: time.Now().UnixMilli(), DataType: 9, Value: float64(bd)}}, 0)
+	brokerURL := normalizeBrokerURL(p.cfg.URL)
+	opts := mqtt.NewClientOptions().AddBroker(brokerURL).SetClientID(fmt.Sprintf("%s_%d", p.cfg.EdgeNodeID, os.Getpid())).SetCleanSession(true).SetAutoReconnect(true).SetConnectRetry(true).SetConnectRetryInterval(5 * time.Second)
+	if p.cfg.Username != "" {
+		opts.SetUsername(p.cfg.Username)
+		opts.SetPassword(p.cfg.Password)
+	}
+	opts.SetWill(topic(p.cfg, "NDEATH", ""), string(will), 1, false)
+	opts.OnConnect = func(client mqtt.Client) {
+		p.mu.Lock()
+		p.client = client
+		p.status.Connected = true
+		p.status.LastError = ""
+		p.mu.Unlock()
+		client.Subscribe(fmt.Sprintf("spBv1.0/%s/STATE/+", p.cfg.GroupID), 1, p.handleMessage)
+		client.Subscribe(fmt.Sprintf("spBv1.0/%s/CMD/%s/#", p.cfg.GroupID, p.cfg.EdgeNodeID), 1, p.handleMessage)
+		p.publishBirths()
+		p.flush()
+	}
+	opts.OnConnectionLost = func(_ mqtt.Client, err error) {
+		p.mu.Lock()
+		p.status.Connected = false
+		if err != nil {
+			p.status.LastError = err.Error()
+		}
+		p.mu.Unlock()
+	}
+	opts.SetConnectTimeout(5 * time.Second)
+	client := mqtt.NewClient(opts)
+	p.mu.Lock()
+	p.client = client
+	p.mu.Unlock()
+	go func() {
+		token := client.Connect()
+		if token.Wait() && token.Error() != nil {
+			p.mu.Lock()
+			p.status.LastError = token.Error().Error()
+			p.status.Connected = false
+			p.mu.Unlock()
+		}
+	}()
+}
+
+func normalizeBrokerURL(raw string) string {
+	switch {
+	case strings.HasPrefix(raw, "mqtt://"):
+		return "tcp://" + strings.TrimPrefix(raw, "mqtt://")
+	case strings.HasPrefix(raw, "mqtts://"):
+		return "ssl://" + strings.TrimPrefix(raw, "mqtts://")
+	default:
+		return raw
+	}
+}
+
+func (p *Publisher) handleMessage(_ mqtt.Client, message mqtt.Message) {
+	var state struct {
+		Cmd string `json:"cmd"`
+	}
+	if json.Unmarshal(message.Payload(), &state) == nil && state.Cmd == "REBIRTH" {
+		p.publishBirths()
+		return
+	}
+	var command struct {
+		Name  string `json:"name"`
+		Value any    `json:"value"`
+	}
+	if json.Unmarshal(message.Payload(), &command) == nil && command.Name != "" && p.OnCommand != nil {
+		_ = p.OnCommand(command.Name, command.Value)
+		return
+	}
+	if p.OnCommand != nil {
+		for _, item := range decodeCommandMetrics(message.Payload()) {
+			if item.Name != "" && item.Value != nil {
+				_ = p.OnCommand(item.Name, item.Value)
+			}
+		}
+	}
+}
+
+func (p *Publisher) PublishSample(sample acquisition.Sample) {
+	if !p.cfg.Enabled {
+		return
+	}
+	var value any
+	if sample.Value.Number != nil {
+		value = *sample.Value.Number
+	} else if sample.Value.Bool != nil {
+		value = *sample.Value.Bool
+	} else if sample.Value.String != nil {
+		value = *sample.Value.String
+	} else {
+		return
+	}
+	var tag acquisition.Tag
+	for _, item := range p.tags {
+		if item.ID == sample.TagID {
+			tag = item
+			break
+		}
+	}
+	if tag.ID == "" {
+		return
+	}
+	data := encodePayload(uint64(time.Now().UnixMilli()), []metric{{Name: tag.Name, Timestamp: sample.SampledAt, DataType: dataType(tag.DataType), Value: value}}, p.nextSeq())
+	p.publishOrQueue(topic(p.cfg, "DDATA", channelName(p.channels, tag.ChannelID)), data)
+}
+
+func (p *Publisher) PublishShadow(snapshot any) {
+	if !p.cfg.Enabled {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{"ts": time.Now().UnixMilli(), "shadow": snapshot})
+	if err != nil {
+		return
+	}
+	p.publishOrQueueRetained(fmt.Sprintf("%s/shadow/%s", p.cfg.GroupID, p.cfg.EdgeNodeID), payload)
+}
+
+func (p *Publisher) publishBirths() {
+	if !p.cfg.Enabled {
+		return
+	}
+	nb := encodePayload(uint64(time.Now().UnixMilli()), []metric{{Name: "Node Control/Rebirth", Timestamp: time.Now().UnixMilli(), DataType: 12, Value: false}, {Name: "bdSeq", Timestamp: time.Now().UnixMilli(), DataType: 9, Value: float64(p.Status().BDSeq)}}, p.nextSeq())
+	p.publishOrQueue(topic(p.cfg, "NBIRTH", ""), nb)
+	for _, channel := range p.channels {
+		if !channel.Enabled {
+			continue
+		}
+		var metrics []metric
+		for _, tag := range p.tags {
+			if tag.ChannelID == channel.ID {
+				metrics = append(metrics, metric{Name: tag.Name, Timestamp: time.Now().UnixMilli(), DataType: dataType(tag.DataType), Value: float64(0)})
+			}
+		}
+		if len(metrics) > 0 {
+			p.publishOrQueue(topic(p.cfg, "DBIRTH", channel.ID), encodePayload(uint64(time.Now().UnixMilli()), metrics, p.nextSeq()))
+		}
+	}
+}
+
+func (p *Publisher) nextSeq() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.status.Seq++
+	p.persistLocked()
+	return p.status.Seq
+}
+func (p *Publisher) publishOrQueue(topicName string, payload []byte) {
+	p.publishOrQueueWithRetain(topicName, payload, false)
+}
+
+func (p *Publisher) publishOrQueueRetained(topicName string, payload []byte) {
+	p.publishOrQueueWithRetain(topicName, payload, true)
+}
+
+func (p *Publisher) publishOrQueueWithRetain(topicName string, payload []byte, retain bool) {
+	p.mu.Lock()
+	client := p.client
+	connected := p.status.Connected && client != nil && client.IsConnected()
+	p.mu.Unlock()
+	if connected {
+		token := client.Publish(topicName, 0, retain, payload)
+		token.Wait()
+		if token.Error() == nil {
+			p.recordPublished()
+			return
+		}
+	}
+	p.mu.Lock()
+	if isCoalescibleTopic(topicName) {
+		for i := range p.queue {
+			if p.queue[i].Topic == topicName {
+				p.queue[i].Payload = payload
+				p.queue[i].Retain = retain
+				p.persistLocked()
+				p.mu.Unlock()
+				return
+			}
+		}
+	}
+	if len(p.queue) >= 10000 {
+		p.queue = p.queue[1:]
+		p.status.Dropped++
+	}
+	p.queue = append(p.queue, queuedMessage{Topic: topicName, Payload: payload, Retain: retain})
+	p.persistLocked()
+	p.mu.Unlock()
+}
+
+// DDATA and BIRTH messages describe the latest state for a topic. Keeping only
+// the newest pending payload prevents a broker outage or repeated REBIRTH from
+// turning the durable queue into an unbounded history of stale snapshots.
+func isCoalescibleTopic(topicName string) bool {
+	return strings.Contains(topicName, "/DDATA/") ||
+		strings.Contains(topicName, "/NBIRTH/") ||
+		strings.Contains(topicName, "/DBIRTH/") ||
+		strings.Contains(topicName, "/shadow/")
+}
+func (p *Publisher) flush() {
+	p.mu.Lock()
+	client := p.client
+	queue := append([]queuedMessage(nil), p.queue...)
+	p.mu.Unlock()
+	if client == nil || !p.Status().Connected {
+		return
+	}
+	for _, item := range queue {
+		token := client.Publish(item.Topic, 0, item.Retain, item.Payload)
+		token.Wait()
+		if token.Error() != nil {
+			return
+		}
+		p.mu.Lock()
+		if len(p.queue) > 0 {
+			p.queue = p.queue[1:]
+		}
+		p.persistLocked()
+		p.mu.Unlock()
+		p.recordPublished()
+	}
+}
+func (p *Publisher) recordPublished() {
+	p.mu.Lock()
+	p.status.Published++
+	p.status.LastPublishAt = time.Now().UnixMilli()
+	p.mu.Unlock()
+}
+func (p *Publisher) load() {
+	b, err := os.ReadFile(p.stateFile)
+	if err != nil {
+		return
+	}
+	var state struct {
+		BDSeq, Seq uint64
+		Queue      []queuedMessage
+		Dropped    int
+	}
+	if json.Unmarshal(b, &state) == nil {
+		p.status.BDSeq, p.status.Seq, p.status.Dropped, p.queue = state.BDSeq, state.Seq, state.Dropped, state.Queue
+	}
+}
+func (p *Publisher) persistLocked() {
+	if p.stateFile == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p.stateFile), 0o750)
+	b, _ := json.Marshal(struct {
+		BDSeq, Seq uint64
+		Queue      []queuedMessage
+		Dropped    int
+	}{p.status.BDSeq, p.status.Seq, p.queue, p.status.Dropped})
+	_ = os.WriteFile(p.stateFile, b, 0o640)
+}
+
+type metric struct {
+	Name      string
+	Timestamp int64
+	DataType  int
+	Value     any
+}
+
+func topic(c Config, kind, device string) string {
+	base := fmt.Sprintf("spBv1.0/%s/%s/%s", c.GroupID, kind, c.EdgeNodeID)
+	if device != "" {
+		return base + "/" + device
+	}
+	return base
+}
+func channelName(channels []acquisition.Channel, id string) string {
+	for _, c := range channels {
+		if c.ID == id {
+			return c.ID
+		}
+	}
+	return id
+}
+func dataType(t string) int {
+	switch t {
+	case "Bool":
+		return 12
+	case "String":
+		return 13
+	case "Double":
+		return 11
+	case "Float":
+		return 10
+	case "Int32":
+		return 4
+	case "UInt16":
+		return 7
+	default:
+		return 11
+	}
+}
+func encodePayload(timestamp uint64, metrics []metric, seq uint64) []byte {
+	out := appendVarint(nil, 8, timestamp)
+	for _, m := range metrics {
+		encoded := encodeMetric(m)
+		out = append(out, fieldBytes(2, encoded)...)
+	}
+	return appendVarint(out, 24, seq)
+}
+func encodeMetric(m metric) []byte {
+	out := fieldString(1, m.Name)
+	out = appendVarint(out, 24, uint64(m.Timestamp))
+	out = appendVarint(out, 32, uint64(m.DataType))
+	switch v := m.Value.(type) {
+	case bool:
+		out = appendVarint(out, 104, boolNum(v))
+	case string:
+		out = append(out, fieldString(14, v)...)
+	case float64:
+		if m.DataType == 10 {
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, math.Float32bits(float32(v)))
+			out = append(out, 0x55)
+			out = append(out, b...)
+		} else if m.DataType == 11 {
+			b := make([]byte, 8)
+			binary.LittleEndian.PutUint64(b, math.Float64bits(v))
+			out = append(out, 0x49)
+			out = append(out, b...)
+		} else {
+			out = appendVarint(out, 88, uint64(v))
+		}
+	}
+	return out
+}
+func boolNum(v bool) uint64 {
+	if v {
+		return 1
+	}
+	return 0
+}
+func fieldString(field uint64, value string) []byte {
+	b := []byte(value)
+	out := appendVarint(nil, field<<3|2, uint64(len(b)))
+	return append(out, b...)
+}
+func fieldBytes(field uint64, value []byte) []byte {
+	out := appendVarint(nil, field<<3|2, uint64(len(value)))
+	return append(out, value...)
+}
+func appendVarint(out []byte, field, value uint64) []byte {
+	out = appendUvarint(out, field)
+	return appendUvarint(out, value)
+}
+func appendUvarint(out []byte, value uint64) []byte {
+	for value >= 128 {
+		out = append(out, byte(value)|128)
+		value >>= 7
+	}
+	return append(out, byte(value))
+}
+
+type commandMetric struct {
+	Name  string
+	Value any
+}
+
+// decodeCommandMetrics decodes the Sparkplug B Payload/Metric subset used by
+// CMD messages. It intentionally skips unknown protobuf fields so newer
+// Sparkplug producers remain interoperable.
+func decodeCommandMetrics(raw []byte) []commandMetric {
+	var result []commandMetric
+	for len(raw) > 0 {
+		field, wire, n, ok := readProtoKey(raw)
+		if !ok {
+			break
+		}
+		raw = raw[n:]
+		if wire == 2 {
+			length, n, ok := readProtoVarint(raw)
+			if !ok || length > uint64(len(raw)-n) {
+				break
+			}
+			value := raw[n : n+int(length)]
+			raw = raw[n+int(length):]
+			if field == 2 {
+				if metric, ok := decodeCommandMetric(value); ok {
+					result = append(result, metric)
+				}
+			}
+			continue
+		}
+		n, ok = skipProtoValue(raw, wire)
+		if !ok {
+			break
+		}
+		raw = raw[n:]
+	}
+	return result
+}
+
+func decodeCommandMetric(raw []byte) (commandMetric, bool) {
+	var metric commandMetric
+	var dataType uint64
+	var intValue uint64
+	var boolValue bool
+	var floatValue float32
+	var doubleValue float64
+	var stringValue string
+	var hasValue bool
+	for len(raw) > 0 {
+		field, wire, n, ok := readProtoKey(raw)
+		if !ok {
+			return commandMetric{}, false
+		}
+		raw = raw[n:]
+		switch wire {
+		case 0:
+			value, consumed, ok := readProtoVarint(raw)
+			if !ok {
+				return commandMetric{}, false
+			}
+			raw = raw[consumed:]
+			switch field {
+			case 4:
+				dataType = value
+			case 11:
+				intValue, hasValue = value, true
+			case 13:
+				boolValue, hasValue = value != 0, true
+			}
+		case 1:
+			if len(raw) < 8 {
+				return commandMetric{}, false
+			}
+			if field == 9 {
+				doubleValue, hasValue = math.Float64frombits(binary.LittleEndian.Uint64(raw)), true
+			}
+			raw = raw[8:]
+		case 5:
+			if len(raw) < 4 {
+				return commandMetric{}, false
+			}
+			if field == 10 {
+				floatValue, hasValue = math.Float32frombits(binary.LittleEndian.Uint32(raw)), true
+			}
+			raw = raw[4:]
+		case 2:
+			length, consumed, ok := readProtoVarint(raw)
+			if !ok || length > uint64(len(raw)-consumed) {
+				return commandMetric{}, false
+			}
+			value := raw[consumed : consumed+int(length)]
+			raw = raw[consumed+int(length):]
+			if field == 1 {
+				metric.Name = string(value)
+			} else if field == 14 {
+				stringValue, hasValue = string(value), true
+			}
+		default:
+			return commandMetric{}, false
+		}
+	}
+	if metric.Name == "" || !hasValue {
+		return commandMetric{}, false
+	}
+	switch dataType {
+	case 10:
+		metric.Value = float64(floatValue)
+	case 11:
+		metric.Value = doubleValue
+	case 12:
+		metric.Value = boolValue
+	case 13:
+		metric.Value = stringValue
+	default:
+		metric.Value = float64(int32(uint32(intValue)))
+	}
+	return metric, true
+}
+
+func readProtoKey(raw []byte) (field uint64, wire byte, consumed int, ok bool) {
+	value, consumed, ok := readProtoVarint(raw)
+	if !ok || value>>3 == 0 {
+		return 0, 0, 0, false
+	}
+	return value >> 3, byte(value & 7), consumed, true
+}
+
+func readProtoVarint(raw []byte) (uint64, int, bool) {
+	var value uint64
+	for i, b := range raw {
+		if i == 10 {
+			return 0, 0, false
+		}
+		value |= uint64(b&127) << (7 * i)
+		if b < 128 {
+			return value, i + 1, true
+		}
+	}
+	return 0, 0, false
+}
+
+func skipProtoValue(raw []byte, wire byte) (int, bool) {
+	switch wire {
+	case 0:
+		_, n, ok := readProtoVarint(raw)
+		return n, ok
+	case 1:
+		return 8, len(raw) >= 8
+	case 2:
+		length, n, ok := readProtoVarint(raw)
+		if !ok || length > uint64(len(raw)-n) {
+			return 0, false
+		}
+		return n + int(length), true
+	case 5:
+		return 4, len(raw) >= 4
+	default:
+		return 0, false
+	}
+}

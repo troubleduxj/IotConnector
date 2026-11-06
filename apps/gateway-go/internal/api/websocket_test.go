@@ -1,0 +1,116 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+
+	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
+	"github.com/gorilla/websocket"
+)
+
+type websocketTestDriver struct{}
+
+func (websocketTestDriver) Start(context.Context) error { return nil }
+func (websocketTestDriver) Stop(context.Context) error  { return nil }
+func (websocketTestDriver) Read(context.Context, []acquisition.Tag) ([]acquisition.Sample, error) {
+	return nil, nil
+}
+func (websocketTestDriver) Test(context.Context, []acquisition.Tag) error { return nil }
+func (websocketTestDriver) Write(context.Context, acquisition.Tag, acquisition.Value) error {
+	return nil
+}
+
+func TestWebSocketRequiresAuthAndBroadcastsCompatibleMessages(t *testing.T) {
+	engine := acquisition.NewEngine(
+		[]acquisition.Channel{{ID: "ch-1", Enabled: true}},
+		[]acquisition.Tag{{ID: "tag-1", ChannelID: "ch-1"}},
+		func(acquisition.Channel, []acquisition.Tag, func(acquisition.Sample), func(acquisition.ChannelStatus)) acquisition.Driver {
+			return websocketTestDriver{}
+		},
+	)
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Stop(context.Background())
+	server := NewServerWithOptions(config.Config{}, engine, SecurityOptions{ViewerToken: "viewer-token", OperatorToken: "operator-token"})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	wsURL := "ws" + httpServer.URL[len("http"):]
+
+	if _, _, err := websocket.DefaultDialer.Dial(wsURL+"/ws", nil); err == nil {
+		t.Fatal("unauthenticated websocket handshake unexpectedly succeeded")
+	}
+
+	header := make(map[string][]string)
+	header["Authorization"] = []string{"Bearer operator-token"}
+	connection, _, err := websocket.DefaultDialer.Dial(wsURL+"/ws", header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	var hello map[string]any
+	if err := connection.ReadJSON(&hello); err != nil {
+		t.Fatal(err)
+	}
+	if hello["type"] != "hello" {
+		t.Fatalf("unexpected hello: %#v", hello)
+	}
+	if err := connection.WriteJSON(map[string]any{"type": "subscribe"}); err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err := connection.ReadJSON(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot["type"] != "tags-batch" {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+
+	if err := connection.WriteJSON(map[string]any{"type": "write", "tagId": "tag-1", "value": 7}); err != nil {
+		t.Fatal(err)
+	}
+	var update map[string]any
+	if err := connection.ReadJSON(&update); err != nil {
+		t.Fatal(err)
+	}
+	if update["type"] != "tags-batch" {
+		t.Fatalf("unexpected update: %#v", update)
+	}
+	var result map[string]any
+	if err := connection.ReadJSON(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["type"] != "write-result" || result["ok"] != true {
+		t.Fatalf("unexpected write result: %#v", result)
+	}
+
+	// Confirm query-token compatibility for browser clients.
+	queryURL, err := url.Parse(wsURL + "/ws?token=viewer-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryConnection, _, err := websocket.DefaultDialer.Dial(queryURL.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queryConnection.Close()
+	var queryHello map[string]any
+	if err := queryConnection.ReadJSON(&queryHello); err != nil {
+		t.Fatal(err)
+	}
+	if queryHello["type"] != "hello" {
+		t.Fatalf("unexpected query-token hello: %s", mustJSON(queryHello))
+	}
+}
+
+func mustJSON(value any) string {
+	data, _ := json.Marshal(value)
+	return string(data)
+}

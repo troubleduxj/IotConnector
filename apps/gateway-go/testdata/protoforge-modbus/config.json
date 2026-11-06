@@ -1,0 +1,42 @@
+{
+  "alarms": [],
+  "channels": [
+    {
+      "id": "protoforge-modbus",
+      "name": "ProtoForge Modbus TCP Demo",
+      "protocol": "Modbus TCP",
+      "host": "127.0.0.1",
+      "port": 5020,
+      "enabled": true,
+      "pollIntervalMs": 500,
+      "params": {
+        "byteOrder32": "ABCD",
+        "driver": "modbus-go",
+        "slaveId": 1
+      }
+    }
+  ],
+  "schemaVersion": 2,
+  "tags": [
+    {
+      "id": "protoforge-temperature",
+      "channelId": "protoforge-modbus",
+      "name": "ProtoForge temperature",
+      "address": "40001",
+      "dataType": "Float",
+      "unit": "C",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "protoforge-humidity",
+      "channelId": "protoforge-modbus",
+      "name": "ProtoForge humidity",
+      "address": "40003",
+      "dataType": "Float",
+      "unit": "%",
+      "scale": 1,
+      "offset": 0
+    }
+  ]
+}

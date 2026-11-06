@@ -35,7 +35,14 @@ const VALID_VIEWS: View[] = ['dashboard', 'devices', 'scheduler', 'storage', 'di
 /** hash 路由（#/alarms 深链）：刷新/分享链接直达对应视图 */
 function viewFromHash(): View {
   const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
+  if (h === 'devices' || h.startsWith('devices/')) return 'devices';
   return (VALID_VIEWS as string[]).includes(h) ? (h as View) : 'dashboard';
+}
+
+function deviceRouteFromHash(): { id: string; mode: 'view' | 'edit' } | null {
+  const match = window.location.hash.match(/^#\/devices\/([^?]+)(?:\?mode=(view|edit))?$/);
+  if (!match) return null;
+  return { id: decodeURIComponent(match[1]), mode: match[2] === 'edit' ? 'edit' : 'view' };
 }
 
 const ROLE_KEYS: Record<string, string> = { admin: 'role.admin', engineer: 'role.engineer', operator: 'role.operator' };
@@ -76,11 +83,15 @@ function Shell(): React.JSX.Element {
 function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }): React.JSX.Element {
   const { t, lang, setLang } = useI18n();
   const [currentView, setCurrentViewState] = useState<View>(viewFromHash);
+  const [, setCurrentHash] = useState(() => window.location.hash);
   const [dbType, setDbType] = useState('TDengine'); // Default to TDengine to showcase the integration
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const onHash = (): void => setCurrentViewState(viewFromHash());
+    const onHash = (): void => {
+      setCurrentHash(window.location.hash);
+      setCurrentViewState(viewFromHash());
+    };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
@@ -113,7 +124,8 @@ function Console({ user, onLogout }: { user: ConsoleUser; onLogout: () => void }
       case 'dashboard':
         return <Dashboard onNavigate={(v) => setCurrentView(v)} />;
       case 'devices':
-        return <DeviceManagement />;
+        {const route = deviceRouteFromHash();
+        return <DeviceManagement key={route ? `${route.id}:${route.mode}` : 'device-list'} userRole={user.role} standalone={Boolean(route)} routeId={route?.id} routeMode={route?.mode} onBack={() => setCurrentView('devices')} />;}
       case 'scheduler':
         return <AcquisitionScheduler />;
       case 'storage':

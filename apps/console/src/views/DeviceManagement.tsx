@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Save, Download, Upload, Network, Trash2, CheckCircle2, X, Edit2, Search,
-  AlertTriangle, HelpCircle, Play, Radio, Loader2,
+  AlertTriangle, HelpCircle, Play, Radio, Loader2, Eye, ArrowLeft, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { PROTOCOL_CONFIGS, getParamSchema, validateAddress, type Protocol } from '@iotconnector/shared';
 import {
   createChannel, createTag, deleteChannel, deleteTag, exportChannelConfig, fetchConfig, importChannelConfig, testChannelConnection,
-  updateChannel, updateTag, type ChannelTestResult, type GatewayChannel, type GatewayTag,
+  getChannelDriver, updateChannel, updateChannelDriver, updateTag, type ChannelDriver, type ChannelTestResult, type GatewayChannel, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
 import { fetchChannelFrames, type CapturedFrame } from '../api';
@@ -31,14 +31,24 @@ const PROTOCOL_CAT_KEYS: Record<string, string> = {
   'Building & Power': 'dev.cat.building',
 };
 
-export default function DeviceManagement() {
+type DeviceManagementProps = {
+  userRole?: 'admin' | 'engineer' | 'operator';
+  standalone?: boolean;
+  routeId?: string;
+  routeMode?: 'view' | 'edit';
+  onBack?: () => void;
+};
+
+export default function DeviceManagement({ userRole = 'operator', standalone = false, routeId, routeMode = 'edit', onBack }: DeviceManagementProps) {
   const { channels: channelStatus, liveValues, connect } = useRuntime();
   const { t } = useI18n();
   const [channels, setChannels] = useState<GatewayChannel[]>([]);
   const [tags, setTags] = useState<GatewayTag[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(routeId ?? null);
   const [draft, setDraft] = useState<GatewayChannel | null>(null);
   const [protocolFilter, setProtocolFilter] = useState<string>('All');
+  const [channelSearch, setChannelSearch] = useState('');
+  const [channelPage, setChannelPage] = useState(1);
   const [activeTab, setActiveTab] = useState<'connection' | 'tags' | 'diagnostics'>('connection');
   const [frames, setFrames] = useState<CapturedFrame[]>([]);
   const [framesPaused, setFramesPaused] = useState(false);
@@ -48,13 +58,19 @@ export default function DeviceManagement() {
   const [tagModal, setTagModal] = useState<{ mode: 'add' | 'edit'; draft: GatewayTag } | null>(null);
   const [tagSearch, setTagSearch] = useState('');
   const [testResult, setTestResult] = useState<ChannelTestResult | null>(null);
+  const [driver, setDriver] = useState<ChannelDriver | null>(null);
+  const [driverBusy, setDriverBusy] = useState(false);
+  const [driverError, setDriverError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadConfig = async (): Promise<void> => {
     const config = await fetchConfig();
     setChannels(config.channels);
     setTags(config.tags);
-    setSelectedId((prev) => (prev && config.channels.some((c) => c.id === prev) ? prev : config.channels[0]?.id ?? null));
+    setSelectedId((prev) => {
+      if (routeId && config.channels.some((c) => c.id === routeId)) return routeId;
+      return prev && config.channels.some((c) => c.id === prev) ? prev : config.channels[0]?.id ?? null;
+    });
   };
 
   useEffect(() => {
@@ -70,16 +86,45 @@ export default function DeviceManagement() {
     setDraft(selected ? { ...selected, params: { ...selected.params } } : null);
     setActiveTab('connection');
     setTestResult(null);
-  }, [selectedId, selected?.name, selected?.host, selected?.port]);
+    setDriver(null);
+    setDriverError(null);
+    if (selected) {
+      getChannelDriver(selected.id)
+        .then((state) => setDriver(state.driver))
+        .catch(() => setDriverError(t('dev.driverUnavailable')));
+    }
+  }, [selectedId, selected?.name, selected?.host, selected?.port, t]);
 
-  const filteredChannels = useMemo(
-    () =>
-      channels.filter((c) => {
-        if (protocolFilter === 'All') return true;
-        return PROTOCOL_CONFIGS[c.protocol as Protocol]?.category === protocolFilter || c.protocol === protocolFilter;
-      }),
-    [channels, protocolFilter],
+  useEffect(() => {
+    if (routeId) setSelectedId(routeId);
+  }, [routeId]);
+
+  const filteredChannels = useMemo(() => {
+    const query = channelSearch.trim().toLowerCase();
+    return channels.filter((c) => {
+      const matchesProtocol = protocolFilter === 'All'
+        || PROTOCOL_CONFIGS[c.protocol as Protocol]?.category === protocolFilter
+        || c.protocol === protocolFilter;
+      if (!matchesProtocol) return false;
+      if (!query) return true;
+      return [c.name, c.id, c.protocol, c.host, String(c.port)].some((value) => value.toLowerCase().includes(query));
+    });
+  }, [channels, channelSearch, protocolFilter]);
+
+  const channelPageSize = 10;
+  const totalChannelPages = Math.max(1, Math.ceil(filteredChannels.length / channelPageSize));
+  const pagedChannels = useMemo(
+    () => filteredChannels.slice((channelPage - 1) * channelPageSize, channelPage * channelPageSize),
+    [filteredChannels, channelPage],
   );
+
+  useEffect(() => {
+    setChannelPage(1);
+  }, [channelSearch, protocolFilter]);
+
+  useEffect(() => {
+    setChannelPage((page) => Math.min(page, totalChannelPages));
+  }, [totalChannelPages]);
 
   const filterChips = useMemo(() => {
     const cats = ['All', ...new Set(channels.map((c) => PROTOCOL_CONFIGS[c.protocol as Protocol]?.category ?? c.protocol))];
@@ -90,7 +135,7 @@ export default function DeviceManagement() {
 
   // ===== 通道保存 / 删除 =====
   const saveChannel = async (): Promise<void> => {
-    if (!draft) return;
+    if (!draft || readOnly) return;
     setBusy(true);
     try {
       await updateChannel(draft.id, {
@@ -110,14 +155,15 @@ export default function DeviceManagement() {
     }
   };
 
-  const removeChannel = async (): Promise<void> => {
-    if (!selected) return;
-    if (!(await confirmDialog({ title: t('dev.confirm.deleteChannel', { name: selected.name, n: selectedTags.length }), danger: true }))) return;
+  const removeChannel = async (channel: GatewayChannel | null = selected): Promise<void> => {
+    if (!channel || readOnly) return;
+    const channelTagCount = tags.filter((tag) => tag.channelId === channel.id).length;
+    if (!(await confirmDialog({ title: t('dev.confirm.deleteChannel', { name: channel.name, n: channelTagCount }), danger: true }))) return;
     setBusy(true);
     try {
-      await deleteChannel(selected.id);
+      await deleteChannel(channel.id);
       await loadConfig();
-      toast(t('dev.toast.channelDeleted', { name: selected.name }));
+      toast(t('dev.toast.channelDeleted', { name: channel.name }));
     } finally {
       setBusy(false);
     }
@@ -206,7 +252,7 @@ export default function DeviceManagement() {
   const [tagAddrError, setTagAddrError] = useState<string | null>(null);
 
   const submitTag = async (): Promise<void> => {
-    if (!tagModal) return;
+    if (!tagModal || readOnly) return;
     const validation = validateAddress((selected?.protocol ?? 'Modbus TCP') as Protocol, tagModal.draft.address);
     if (!validation.ok) {
       setTagAddrError(validation.error ?? t('dev.addrInvalid'));
@@ -228,6 +274,7 @@ export default function DeviceManagement() {
   };
 
   const removeTag = async (id: string, name: string): Promise<void> => {
+    if (readOnly) return;
     if (!(await confirmDialog({ title: t('dev.confirm.deleteTag', { name }), danger: true }))) return;
     await deleteTag(id);
     await loadConfig();
@@ -303,6 +350,33 @@ export default function DeviceManagement() {
   );
   const paramSchema = draft ? getParamSchema(draft.protocol as Protocol) : [];
   const meta = draft ? PROTOCOL_CONFIGS[draft.protocol as Protocol] : null;
+  const readOnly = standalone && routeMode === 'view';
+  const canSwitchDriver = userRole === 'admin' && !readOnly;
+
+  const switchDriver = async (next: ChannelDriver): Promise<void> => {
+    if (!selected || !canSwitchDriver || next === driver) return;
+    const previous = driver;
+    setDriver(next);
+    setDriverBusy(true);
+    setDriverError(null);
+    try {
+      const state = await updateChannelDriver(selected.id, next);
+      setDriver(state.driver);
+      await loadConfig();
+      toast(t('dev.driverChanged', { driver: state.driver.toUpperCase() }));
+    } catch (e) {
+      setDriver(previous);
+      const message = e instanceof Error ? e.message : t('dev.driverSwitchFailed');
+      setDriverError(message);
+      toast(t('dev.driverSwitchFailed'));
+    } finally {
+      setDriverBusy(false);
+    }
+  };
+
+  const openDeviceRoute = (id: string, mode: 'view' | 'edit'): void => {
+    window.location.hash = `/devices/${encodeURIComponent(id)}?mode=${mode}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -312,42 +386,55 @@ export default function DeviceManagement() {
           <p className="text-sm text-slate-500 mt-1">{t('dev.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
-          <input
-            ref={importFileRef}
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void doImportChannel(f);
-              e.target.value = '';
-            }}
-          />
-          <button
-            onClick={() => importFileRef.current?.click()}
-            className="flex items-center px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
-          >
-            <Upload className="w-4 h-4 mr-2" /> {t('dev.importChannel')}
-          </button>
-          <button
-            onClick={() => setIsAddOpen(true)}
-            className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
-          >
-            <Plus className="w-4 h-4 mr-2" /> {t('dev.addChannel')}
-          </button>
+          {!standalone && <>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void doImportChannel(f);
+                e.target.value = '';
+              }}
+            />
+            <button
+              onClick={() => importFileRef.current?.click()}
+              className="flex items-center px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"
+            >
+              <Upload className="w-4 h-4 mr-2" /> {t('dev.importChannel')}
+            </button>
+            <button
+              onClick={() => setIsAddOpen(true)}
+              className="flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
+            >
+              <Plus className="w-4 h-4 mr-2" /> {t('dev.addChannel')}
+            </button>
+          </>}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="space-y-6">
         {/* 通道列表 */}
-        <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        {!standalone && <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50/70">
             <div className="flex items-center justify-between mb-2">
               <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
                 <Network className="w-4 h-4 text-indigo-600" /> {t('dev.channelList', { n: channels.length })}
               </span>
+              <div className="relative w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  value={channelSearch}
+                  onChange={(e) => setChannelSearch(e.target.value)}
+                  placeholder={t('dev.searchChannels')}
+                  aria-label={t('dev.searchChannels')}
+                  className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px]">
               {filterChips.map((chip) => (
                 <button
                   key={chip}
@@ -363,48 +450,95 @@ export default function DeviceManagement() {
                       : chip}
                 </button>
               ))}
+              </div>
+              <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                {t('dev.pagination.total', { n: filteredChannels.length })}
+              </span>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100 max-h-[560px]">
-            {filteredChannels.map((channel) => {
-              const cMeta = PROTOCOL_CONFIGS[channel.protocol as Protocol];
-              const st = statusOf(channel.id);
-              const isSelected = channel.id === selectedId;
-              return (
-                <button
-                  key={channel.id}
-                  onClick={() => setSelectedId(channel.id)}
-                  className={`w-full text-left p-3.5 transition-colors ${isSelected ? 'bg-indigo-50/50 border-l-2 border-indigo-500' : 'hover:bg-slate-50 border-l-2 border-transparent'}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-xs text-slate-800 truncate">{channel.name}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border shrink-0 ${cMeta?.color ?? ''}`}>
-                      {channel.protocol.split(' ')[0]}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {channel.host}:{channel.port} · {t('dev.tagCount', { n: tags.filter((t) => t.channelId === channel.id).length })}
-                    </span>
-                    <span className="flex items-center gap-1 text-[10px] font-semibold">
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          st === 'online' ? 'bg-green-500' : st === 'connecting' ? 'bg-amber-400 animate-pulse' : st === 'disabled' ? 'bg-slate-300' : 'bg-rose-500'
-                        }`}
-                      />
-                      <span className={st === 'online' ? 'text-green-600' : st === 'offline' || st === 'error' ? 'text-rose-500' : 'text-slate-400'}>
-                        {st === 'online' ? t('dev.status.online') : st === 'connecting' ? t('dev.status.connecting') : st === 'disabled' ? t('dev.status.disabled') : t('dev.status.offline')}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase font-bold tracking-wider border-b border-slate-200">
+                  <th className="px-4 py-3">{t('dev.col.name')}</th>
+                  <th className="px-4 py-3">{t('dev.field.protocol')}</th>
+                  <th className="px-4 py-3">{t('dev.field.hostAddress')}</th>
+                  <th className="px-4 py-3">{t('dev.common.port')}</th>
+                  <th className="px-4 py-3">{t('dev.col.type')}</th>
+                  <th className="px-4 py-3">{t('dev.col.liveValue')}</th>
+                  <th className="px-4 py-3 text-right">{t('dev.col.actions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pagedChannels.map((channel) => {
+                  const cMeta = PROTOCOL_CONFIGS[channel.protocol as Protocol];
+                  const st = statusOf(channel.id);
+                  const isSelected = channel.id === selectedId;
+                  const tagCount = tags.filter((tag) => tag.channelId === channel.id).length;
+                  const statusLabel = st === 'online' ? t('dev.status.online') : st === 'connecting' ? t('dev.status.connecting') : st === 'disabled' ? t('dev.status.disabled') : t('dev.status.offline');
+                  return (
+                    <tr key={channel.id} className={isSelected ? 'bg-indigo-50/60' : 'hover:bg-slate-50/80'}>
+                      <td className="px-4 py-3">
+                        <button onClick={() => setSelectedId(channel.id)} className="font-bold text-slate-800 hover:text-indigo-600 text-left">
+                          {channel.name}
+                        </button>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{channel.id}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${cMeta?.color ?? ''}`}>{channel.protocol}</span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-500">{channel.host}</td>
+                      <td className="px-4 py-3 font-mono text-slate-500">{channel.port}</td>
+                      <td className="px-4 py-3 text-slate-500">{t('dev.tagCount', { n: tagCount })}</td>
+                      <td className="px-4 py-3">
+                        <span className="flex items-center gap-1.5 font-semibold">
+                          <span className={`w-1.5 h-1.5 rounded-full ${st === 'online' ? 'bg-green-500' : st === 'connecting' ? 'bg-amber-400 animate-pulse' : st === 'disabled' ? 'bg-slate-300' : 'bg-rose-500'}`} />
+                          <span className={st === 'online' ? 'text-green-600' : st === 'offline' || st === 'error' ? 'text-rose-500' : 'text-slate-400'}>{statusLabel}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button onClick={() => openDeviceRoute(channel.id, 'view')} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md mr-1" title={t('dev.tip.view')} aria-label={t('dev.tip.view')}>
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => openDeviceRoute(channel.id, 'edit')} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md mr-1" title={t('dev.tip.edit')} aria-label={t('dev.tip.edit')}>
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => void removeChannel(channel)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md" title={t('dev.tip.deleteChannel')} aria-label={t('dev.tip.deleteChannel')}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filteredChannels.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">{t('dev.noChannelsFound')}</td></tr>}
+              </tbody>
+            </table>
           </div>
-        </div>
+          <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+            <span>{t('dev.pagination.page', { page: channelPage, total: totalChannelPages })}</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setChannelPage((page) => Math.max(1, page - 1))}
+                disabled={channelPage <= 1}
+                aria-label={t('dev.pagination.previous')}
+                className="p-1.5 rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setChannelPage((page) => Math.min(totalChannelPages, page + 1))}
+                disabled={channelPage >= totalChannelPages}
+                aria-label={t('dev.pagination.next')}
+                className="p-1.5 rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>}
 
-        {/* 详情面板 */}
-        <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* 详情面板：仅在独立查看/编辑路由渲染 */}
+        {standalone && <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {!draft || !selected ? (
             <div className="p-12 text-center text-slate-400 text-sm">{t('dev.selectChannelHint')}</div>
           ) : (
@@ -412,10 +546,16 @@ export default function DeviceManagement() {
               {/* 头部 */}
               <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
                 <div className="flex items-center gap-3">
+                  {standalone && onBack && (
+                    <button onClick={onBack} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md" title={t('dev.tip.back')} aria-label={t('dev.tip.back')}>
+                      <ArrowLeft className="w-4 h-4" />
+                    </button>
+                  )}
                   <div>
                     <input
                       value={draft.name}
                       onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      readOnly={readOnly}
                       className="font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none text-base w-56"
                     />
                     <div className="text-[11px] font-mono text-slate-400 mt-0.5">{meta?.standard}</div>
@@ -423,35 +563,37 @@ export default function DeviceManagement() {
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${meta?.color ?? ''}`}>{draft.protocol}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
+                  {!readOnly && <button
                     onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}
                     className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-colors ${
                       draft.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-100 text-slate-500 border-slate-200'
                     }`}
                   >
                     {draft.enabled ? t('dev.state.enabled') : t('dev.state.disabled')}
-                  </button>
-                  <button
+                  </button>}
+                  {!readOnly && <button
                     onClick={() => void doExportChannel()}
                     className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
                     title={t('dev.tip.exportChannel')}
                   >
                     <Download className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => void removeChannel()}
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                    title={t('dev.tip.deleteChannel')}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => void saveChannel()}
-                    disabled={busy}
-                    className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
-                  >
-                    {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('dev.saveAndApply')}
-                  </button>
+                  </button>}
+                  {!readOnly && <>
+                    <button
+                      onClick={() => void removeChannel()}
+                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                      title={t('dev.tip.deleteChannel')}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => void saveChannel()}
+                      disabled={busy}
+                      className="flex items-center px-3.5 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-60"
+                    >
+                      {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} {t('dev.saveAndApply')}
+                    </button>
+                  </>}
                 </div>
               </div>
 
@@ -479,6 +621,7 @@ export default function DeviceManagement() {
                       <input
                         value={draft.host}
                         onChange={(e) => setDraft({ ...draft, host: e.target.value })}
+                        readOnly={readOnly}
                         className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       />
                     </div>
@@ -487,6 +630,7 @@ export default function DeviceManagement() {
                       <input
                         value={draft.port}
                         onChange={(e) => setDraft({ ...draft, port: Number(e.target.value) })}
+                        readOnly={readOnly}
                         className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       />
                     </div>
@@ -495,6 +639,7 @@ export default function DeviceManagement() {
                       <input
                         value={draft.pollIntervalMs}
                         onChange={(e) => setDraft({ ...draft, pollIntervalMs: Number(e.target.value) })}
+                        readOnly={readOnly}
                         className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                       />
                     </div>
@@ -504,6 +649,33 @@ export default function DeviceManagement() {
                         {statusOf(draft.id)}
                       </div>
                     </div>
+                  </div>
+
+                  {/* 设备级 Go/Node 灰度开关：状态由网关读取，只有管理员可写 */}
+                  <div className="pt-4 border-t border-slate-100">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('dev.driverSwitchTitle')}</h4>
+                        <p className="text-[11px] text-slate-400 mt-1">{t(canSwitchDriver ? 'dev.driverSwitchHint' : 'dev.driverReadOnlyHint')}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {(['auto', 'go', 'node'] as const).map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => void switchDriver(option)}
+                            disabled={!canSwitchDriver || driverBusy || driver === null}
+                            aria-pressed={driver === option}
+                            className={`px-2.5 py-1.5 rounded-md border text-[11px] font-bold transition-colors ${
+                              driver === option ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            {option === 'auto' ? t('dev.driver.auto') : option === 'go' ? t('dev.driver.go') : t('dev.driver.node')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {driverError && <p className="text-[11px] text-rose-600 mt-2">{driverError}</p>}
                   </div>
 
                   {/* 协议专属参数（schema 动态渲染） */}
@@ -533,6 +705,7 @@ export default function DeviceManagement() {
                               <select
                                 value={String(value ?? field.default)}
                                 onChange={(e) => set(e.target.value)}
+                                disabled={readOnly}
                                 className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-medium bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                               >
                                 {field.options?.map((o) => (
@@ -542,6 +715,7 @@ export default function DeviceManagement() {
                             ) : field.type === 'boolean' ? (
                               <button
                                 onClick={() => set(!value)}
+                                disabled={readOnly}
                                 className={`px-3 py-2 w-full rounded-md text-xs font-bold border ${
                                   value ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-slate-50 text-slate-500 border-slate-200'
                                 }`}
@@ -556,6 +730,7 @@ export default function DeviceManagement() {
                                 max={field.max}
                                 step={field.step}
                                 onChange={(e) => set(field.type === 'number' ? Number(e.target.value) : e.target.value)}
+                                readOnly={readOnly}
                                 className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                               />
                             )}
@@ -614,6 +789,7 @@ export default function DeviceManagement() {
                           void fetch(`/api/channels/${selected.id}/frames?clear=1`);
                           setFrames([]);
                         }}
+                        disabled={readOnly}
                         className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50"
                       >
                         {t('dev.diag.clear')}
@@ -656,15 +832,15 @@ export default function DeviceManagement() {
                     </div>
                     <div className="flex items-center gap-2">
                       <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importTagsCsv(f); if (fileInputRef.current) fileInputRef.current.value = ''; }} />
-                      <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50">
+                      {!readOnly && <button onClick={() => fileInputRef.current?.click()} className="flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50">
                         <Upload className="w-3.5 h-3.5 mr-1" /> {t('dev.tags.importCsv')}
-                      </button>
+                      </button>}
                       <button onClick={exportTagsCsv} className="flex items-center px-2.5 py-1.5 text-xs font-bold text-slate-600 bg-white border border-slate-300 rounded-md hover:bg-slate-50">
                         <Download className="w-3.5 h-3.5 mr-1" /> {t('dev.tags.exportCsv')}
                       </button>
-                      <button onClick={openTagAdd} className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700">
+                      {!readOnly && <button onClick={openTagAdd} className="flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700">
                         <Plus className="w-3.5 h-3.5 mr-1" /> {t('dev.tags.addTag')}
-                      </button>
+                      </button>}
                     </div>
                   </div>
 
@@ -708,12 +884,14 @@ export default function DeviceManagement() {
                               ×{tag.scale} {tag.offset !== 0 ? `${tag.offset > 0 ? '+' : ''}${tag.offset}` : ''}
                             </td>
                             <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                              <button onClick={() => setTagModal({ mode: 'edit', draft: { ...tag } })} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 mr-1" title={t('dev.tip.edit')}>
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => void removeTag(tag.id, tag.name)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50" title={t('dev.tip.delete')}>
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {!readOnly && <>
+                                <button onClick={() => setTagModal({ mode: 'edit', draft: { ...tag } })} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 mr-1" title={t('dev.tip.edit')}>
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => void removeTag(tag.id, tag.name)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50" title={t('dev.tip.delete')}>
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>}
                             </td>
                           </tr>
                         ))}
@@ -727,7 +905,7 @@ export default function DeviceManagement() {
               )}
             </>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* 新增通道弹窗 */}

@@ -7,6 +7,7 @@ import type { AlarmEvent, NotificationConfig } from '@iotconnector/shared';
 export type { AlarmEvent };
 
 const TOKEN_KEY = 'fb_token';
+const GATEWAY_URL = (import.meta.env.VITE_GATEWAY_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 export type ConsoleRole = 'admin' | 'engineer' | 'operator';
 export interface ConsoleUser {
   id: string;
@@ -23,6 +24,11 @@ export function setToken(token: string | null): void {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+/** Optional direct Go/Node gateway target for cutover testing; empty keeps same-origin proxy behavior. */
+export function gatewayUrl(path: string): string {
+  return GATEWAY_URL ? `${GATEWAY_URL}${path}` : path;
+}
+
 /** 401 时由 apiFetch 派发，App 捕获后切回登录页 */
 export const AUTH_EXPIRED_EVENT = 'fb-auth-expired';
 
@@ -30,7 +36,7 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   const token = getToken();
   const headers = new Headers(init?.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetch(gatewayUrl(url), { ...init, headers });
   if (res.status === 401 && getToken()) {
     setToken(null);
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
@@ -208,6 +214,14 @@ export interface GatewayChannel {
   params: Record<string, string | number | boolean>;
 }
 
+export type ChannelDriver = 'auto' | 'go' | 'node';
+
+export interface ChannelDriverState {
+  channelId: string;
+  protocol: string;
+  driver: ChannelDriver;
+}
+
 export interface GatewayConfigFull {
   channels: GatewayChannel[];
   tags: GatewayTag[];
@@ -238,6 +252,25 @@ export async function updateChannel(id: string, patch: Partial<GatewayChannel>):
   });
   if (!res.ok) throw new Error('update channel failed');
   return (await res.json()) as GatewayChannel;
+}
+
+/** 读取设备级灰度驱动覆盖（Go 网关；Node 网关不支持时由页面降级为未接入）。 */
+export async function getChannelDriver(id: string): Promise<ChannelDriverState> {
+  const res = await apiFetch(`/api/channels/${encodeURIComponent(id)}/driver`);
+  if (!res.ok) throw new Error('get channel driver failed');
+  return (await res.json()) as ChannelDriverState;
+}
+
+/** 管理员切换设备级驱动，并由网关持久化后触发 Engine Reload。 */
+export async function updateChannelDriver(id: string, driver: ChannelDriver): Promise<ChannelDriverState> {
+  const res = await apiFetch(`/api/channels/${encodeURIComponent(id)}/driver`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ driver }),
+  });
+  const body = (await res.json().catch(() => ({}))) as Partial<ChannelDriverState> & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? 'update channel driver failed');
+  return body as ChannelDriverState;
 }
 
 export async function deleteChannel(id: string): Promise<void> {
@@ -301,7 +334,7 @@ export async function deleteTag(id: string): Promise<void> {
 // ===== 认证（PRD FR-M10-02）=====
 
 export async function login(username: string, password: string): Promise<{ token: string; user: ConsoleUser; mustChangePassword?: boolean }> {
-  const res = await fetch('/api/auth/login', {
+  const res = await fetch(gatewayUrl('/api/auth/login'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username, password }),

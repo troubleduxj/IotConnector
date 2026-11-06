@@ -5,7 +5,7 @@ import {
 import { DEFAULT_NOTIFY_TEMPLATE, NOTIFY_TEMPLATE_VARIABLES, type NotificationConfig } from '@iotconnector/shared';
 import {
   ackAlarm, createAlarm, deleteAlarm, fetchAlarmHistory, fetchAlarms, fetchGatewayTags,
-  saveNotifications, testNotificationChannel, updateAlarm,
+  gatewayUrl, saveNotifications, testNotificationChannel, updateAlarm,
   type AlarmEvent, type AlarmHistoryEvent, type AlarmRule, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
@@ -119,7 +119,7 @@ export default function AlarmCenter() {
 
   // ===== 通知配置加载 =====
   useEffect(() => {
-    fetch('/api/notifications')
+      fetch(gatewayUrl('/api/notifications'))
       .then((r) => r.json())
       .then((d) => setNotify({ ...DEFAULT_NOTIFY, ...d }))
       .catch(() => {});
@@ -729,4 +729,3 @@ function NotifyConfigTab({
     </div>
   );
 }
-

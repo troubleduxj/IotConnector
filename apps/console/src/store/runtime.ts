@@ -7,6 +7,7 @@ import type {
   StorageStatus,
   TagValueUpdate,
 } from '@iotconnector/shared';
+import { gatewayUrl, getToken } from '../api';
 
 /**
  * 网关实时数据 store：WebSocket 连接 + 位号最新值缓存。
@@ -47,9 +48,12 @@ export const useRuntime = create<RuntimeState>((set) => ({
 
   write: async (tagId, value) => {
     try {
-      const res = await fetch(`/api/tags/${encodeURIComponent(tagId)}/write`, {
+      const res = await fetch(gatewayUrl(`/api/tags/${encodeURIComponent(tagId)}/write`), {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+        },
         body: JSON.stringify({ value }),
       });
       return (await res.json()) as { ok: boolean; error?: string };
@@ -61,7 +65,11 @@ export const useRuntime = create<RuntimeState>((set) => ({
 
 function openSocket(): void {
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-  socket = new WebSocket(`${wsProto}://${location.host}/ws`);
+  const wsURL = new URL(gatewayUrl('/ws'), location.origin);
+  wsURL.protocol = wsProto;
+  const token = getToken();
+  if (token) wsURL.searchParams.set('token', token);
+  socket = new WebSocket(wsURL.toString());
 
   socket.onopen = () => {
     retries = 0;

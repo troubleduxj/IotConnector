@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Database, Globe, Wifi, Save, Play, CheckCircle2, Loader2, Users, Trash2, KeyRound, Plus, ScrollText, RefreshCw, Cpu, Download, Upload, RotateCcw, XCircle } from 'lucide-react';
-import { fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, saveNorthbound, fetchNorthbound, rebirthNorthbound, fetchSystemInfo, testDbConnection, initDb, factoryReset, downloadConfigBackup, restoreConfigBackup, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus, type SystemInfo } from '../api';
+import { fetchAudit, fetchMe, fetchUsers, createUser, updateUser, deleteUser, gatewayUrl, saveNorthbound, fetchNorthbound, rebirthNorthbound, fetchSystemInfo, testDbConnection, initDb, factoryReset, downloadConfigBackup, restoreConfigBackup, type AuditEntry, type ConsoleUser, type ManagedUser, type NorthboundConfig, type NorthboundStatus, type SystemInfo } from '../api';
 import { useI18n } from '../i18n';
 import { toast } from '../components/Toast';
 
@@ -65,7 +65,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
 
   // 带鉴权的文件下载（OpenAPI 文档 / 诊断包）
   const downloadFile = async (url: string, fallback: string): Promise<void> => {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('fb_token') ?? ''}` } });
+    const res = await fetch(gatewayUrl(url), { headers: { Authorization: `Bearer ${localStorage.getItem('fb_token') ?? ''}` } });
     if (!res.ok) { toast(t('sys.info.downloadFail'), false); return; }
     const blob = await res.blob();
     const m = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '');

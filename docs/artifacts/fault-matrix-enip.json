@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-09-22T11:59:36.489Z",
+  "gateway": "http://127.0.0.1:18080",
+  "scenarios": [
+    {
+      "protocol": "EtherNet/IP (Rockwell)",
+      "channelId": "enip-01",
+      "port": 14449,
+      "before": "online",
+      "stoppedPid": 421128,
+      "offline": "offline",
+      "recovered": "online",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": true,
+      "error": null,
+      "offlineMs": 3203,
+      "recoveryMs": 3779
+    }
+  ],
+  "pass": true
+}

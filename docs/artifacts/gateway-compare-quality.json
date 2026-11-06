@@ -1,0 +1,1001 @@
+﻿{
+    "generatedAt":  "2026-09-24T14:46:42.5377601Z",
+    "go":  {
+               "url":  "http://127.0.0.1:18080",
+               "health":  {
+                              "channels":  10,
+                              "ok":  true,
+                              "storage":  {
+                                              "dropped":  0,
+                                              "engine":  "tdengine",
+                                              "error":  "",
+                                              "queued":  13,
+                                              "state":  "online",
+                                              "written":  17392
+                                          },
+                              "tags":  37,
+                              "uptimeSec":  771
+                          },
+               "config":  {
+                              "channels":  [
+                                               {
+                                                   "id":  "ch_1788837033600",
+                                                   "protocol":  "MQTT / Sparkplug B",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  1883,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "opc-01",
+                                                   "protocol":  "OPC UA",
+                                                   "host":  "localhost",
+                                                   "port":  4840,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "ch_1788837033819",
+                                                   "protocol":  "SNMP",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  1161,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "ch_1788837034253",
+                                                   "protocol":  "IEC 60870-5-104",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  12404,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "ch_1788837034050",
+                                                   "protocol":  "BACnet/IP",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  47808,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "mb-01",
+                                                   "protocol":  "Modbus TCP",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  15020,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "s7-01",
+                                                   "protocol":  "Siemens Profinet",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  10102,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "melsec-01",
+                                                   "protocol":  "Mitsubishi MELSEC",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  11022,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "enip-01",
+                                                   "protocol":  "EtherNet/IP (Rockwell)",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  14449,
+                                                   "enabled":  true
+                                               },
+                                               {
+                                                   "id":  "fins-01",
+                                                   "protocol":  "Omron FINS",
+                                                   "host":  "127.0.0.1",
+                                                   "port":  19600,
+                                                   "enabled":  true
+                                               }
+                                           ],
+                              "tags":  [
+                                           {
+                                               "id":  "tg_1788837034050_0",
+                                               "channelId":  "ch_1788837034050",
+                                               "name":  "AHU.SupplyTemp",
+                                               "address":  "AI:1",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033819_2",
+                                               "channelId":  "ch_1788837033819",
+                                               "name":  "UPS.Location",
+                                               "address":  "1.3.6.1.4.1.99999.1.3.0",
+                                               "dataType":  "String"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034050_2",
+                                               "channelId":  "ch_1788837034050",
+                                               "name":  "AHU.FanRunning",
+                                               "address":  "BI:1",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034050_1",
+                                               "channelId":  "ch_1788837034050",
+                                               "name":  "AHU.Setpoint",
+                                               "address":  "AI:2",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033819_1",
+                                               "channelId":  "ch_1788837033819",
+                                               "name":  "UPS.BatteryLevel",
+                                               "address":  "1.3.6.1.4.1.99999.1.2.0",
+                                               "dataType":  "UInt16"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033600_2",
+                                               "channelId":  "ch_1788837033600",
+                                               "name":  "Line1.Running",
+                                               "address":  "factory/line1/status",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033600_1",
+                                               "channelId":  "ch_1788837033600",
+                                               "name":  "Line1.Speed",
+                                               "address":  "factory/line1/status",
+                                               "dataType":  "UInt16"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033819_0",
+                                               "channelId":  "ch_1788837033819",
+                                               "name":  "UPS.InputVoltage",
+                                               "address":  "1.3.6.1.4.1.99999.1.1.0",
+                                               "dataType":  "Int16"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033600_3",
+                                               "channelId":  "ch_1788837033600",
+                                               "name":  "Line1.Counter",
+                                               "address":  "factory/line1/counter",
+                                               "dataType":  "UInt16"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_5",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.CB2Closed",
+                                               "address":  "IOA:1002",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_4",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.CB1Closed",
+                                               "address":  "IOA:1001",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_7",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.LocalRemote",
+                                               "address":  "IOA:1004",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_6",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.ProtTripped",
+                                               "address":  "IOA:1003",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_3",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.Frequency",
+                                               "address":  "IOA:4",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_0",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.UaVoltage",
+                                               "address":  "IOA:1",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034050_3",
+                                               "channelId":  "ch_1788837034050",
+                                               "name":  "AHU.Alarm",
+                                               "address":  "AO:1",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_2",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.ActivePower",
+                                               "address":  "IOA:3",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "tg_1788837034253_1",
+                                               "channelId":  "ch_1788837034253",
+                                               "name":  "SUB.IaCurrent",
+                                               "address":  "IOA:2",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "tg_1788837033600_0",
+                                               "channelId":  "ch_1788837033600",
+                                               "name":  "Line1.Temp",
+                                               "address":  "factory/line1/status",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "7",
+                                               "channelId":  "mb-01",
+                                               "name":  "R0022.Current",
+                                               "address":  "40003",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "6",
+                                               "channelId":  "mb-01",
+                                               "name":  "R0022.Status",
+                                               "address":  "40002",
+                                               "dataType":  "Int16"
+                                           },
+                                           {
+                                               "id":  "9",
+                                               "channelId":  "opc-01",
+                                               "name":  "Main.FlowRate",
+                                               "address":  "ns=2;s=Flow_Sensor_01",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "8",
+                                               "channelId":  "opc-01",
+                                               "name":  "Main.Pressure",
+                                               "address":  "ns=2;s=Pressure_Sensor_01",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "5",
+                                               "channelId":  "mb-01",
+                                               "name":  "R0022.Speed",
+                                               "address":  "40001",
+                                               "dataType":  "Int16"
+                                           },
+                                           {
+                                               "id":  "2",
+                                               "channelId":  "s7-01",
+                                               "name":  "R0021.Temperature",
+                                               "address":  "DB301.Real14",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "1",
+                                               "channelId":  "s7-01",
+                                               "name":  "R0021.pH",
+                                               "address":  "DB301.Real10",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "4",
+                                               "channelId":  "s7-01",
+                                               "name":  "R0021.alm1",
+                                               "address":  "DB301.DBX20.0",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "3",
+                                               "channelId":  "s7-01",
+                                               "name":  "R0021.Pressure",
+                                               "address":  "DB301.Real18",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "34",
+                                               "channelId":  "fins-01",
+                                               "name":  "CJ2.WeldCount",
+                                               "address":  "D110",
+                                               "dataType":  "UInt16"
+                                           },
+                                           {
+                                               "id":  "33",
+                                               "channelId":  "fins-01",
+                                               "name":  "CJ2.WeldTemp",
+                                               "address":  "D100",
+                                               "dataType":  "UInt16"
+                                           },
+                                           {
+                                               "id":  "36",
+                                               "channelId":  "enip-01",
+                                               "name":  "Line1.Temperature",
+                                               "address":  "Line1.Temperature",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "35",
+                                               "channelId":  "enip-01",
+                                               "name":  "Line1.ConveyorSpeed",
+                                               "address":  "Line1.ConveyorSpeed",
+                                               "dataType":  "Int16"
+                                           },
+                                           {
+                                               "id":  "32",
+                                               "channelId":  "melsec-01",
+                                               "name":  "Packer.Alarm",
+                                               "address":  "M20",
+                                               "dataType":  "Bool"
+                                           },
+                                           {
+                                               "id":  "18",
+                                               "channelId":  "opc-01",
+                                               "name":  "Robot.CycleProgress",
+                                               "address":  "ns=2;s=Valve_01_Opening",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "15",
+                                               "channelId":  "opc-01",
+                                               "name":  "Welder.Voltage",
+                                               "address":  "ns=2;s=Welder_001_WeldingVoltage",
+                                               "dataType":  "Float"
+                                           },
+                                           {
+                                               "id":  "31",
+                                               "channelId":  "melsec-01",
+                                               "name":  "Packer.Speed",
+                                               "address":  "D0",
+                                               "dataType":  "Int16"
+                                           },
+                                           {
+                                               "id":  "30",
+                                               "channelId":  "melsec-01",
+                                               "name":  "Packer.SealTemp",
+                                               "address":  "D10",
+                                               "dataType":  "Float"
+                                           }
+                                       ]
+                          },
+               "channels":  [
+                                {
+                                    "id":  "s7-01",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "ch_1788837034253",
+                                    "state":  "offline"
+                                },
+                                {
+                                    "id":  "opc-01",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "mb-01",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "ch_1788837034050",
+                                    "state":  "offline"
+                                },
+                                {
+                                    "id":  "fins-01",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "melsec-01",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "enip-01",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "ch_1788837033819",
+                                    "state":  "online"
+                                },
+                                {
+                                    "id":  "ch_1788837033600",
+                                    "state":  "error"
+                                }
+                            ],
+               "liveCount":  21,
+               "liveQuality":  [
+                                   {
+                                       "id":  "3",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "9",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "36",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "5",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "35",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "7",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "tg_1788837033819_0",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "32",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "tg_1788837033819_2",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "30",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "31",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "4",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "tg_1788837033819_1",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "2",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "6",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "1",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "15",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "18",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "8",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "33",
+                                       "quality":  "Good"
+                                   },
+                                   {
+                                       "id":  "34",
+                                       "quality":  "Good"
+                                   }
+                               ],
+               "liveQualityKey":  "1=Good|15=Good|18=Good|2=Good|3=Good|30=Good|31=Good|32=Good|33=Good|34=Good|35=Good|36=Good|4=Good|5=Good|6=Good|7=Good|8=Good|9=Good|tg_1788837033819_0=Good|tg_1788837033819_1=Good|tg_1788837033819_2=Good"
+           },
+    "node":  {
+                 "url":  "http://127.0.0.1:18081",
+                 "health":  {
+                                "ok":  true,
+                                "uptimeSec":  1916,
+                                "channels":  10,
+                                "tags":  37,
+                                "storage":  {
+                                                "engine":  "tdengine",
+                                                "state":  "online",
+                                                "queued":  19,
+                                                "written":  34131,
+                                                "dropped":  950
+                                            }
+                            },
+                 "config":  {
+                                "channels":  [
+                                                 {
+                                                     "id":  "ch_1788837033600",
+                                                     "protocol":  "MQTT / Sparkplug B",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  1883,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "opc-01",
+                                                     "protocol":  "OPC UA",
+                                                     "host":  "localhost",
+                                                     "port":  4840,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "ch_1788837033819",
+                                                     "protocol":  "SNMP",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  1161,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "ch_1788837034253",
+                                                     "protocol":  "IEC 60870-5-104",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  12404,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "ch_1788837034050",
+                                                     "protocol":  "BACnet/IP",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  47808,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "mb-01",
+                                                     "protocol":  "Modbus TCP",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  15020,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "s7-01",
+                                                     "protocol":  "Siemens Profinet",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  10102,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "melsec-01",
+                                                     "protocol":  "Mitsubishi MELSEC",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  11022,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "enip-01",
+                                                     "protocol":  "EtherNet/IP (Rockwell)",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  14449,
+                                                     "enabled":  true
+                                                 },
+                                                 {
+                                                     "id":  "fins-01",
+                                                     "protocol":  "Omron FINS",
+                                                     "host":  "127.0.0.1",
+                                                     "port":  19600,
+                                                     "enabled":  true
+                                                 }
+                                             ],
+                                "tags":  [
+                                             {
+                                                 "id":  "tg_1788837034050_0",
+                                                 "channelId":  "ch_1788837034050",
+                                                 "name":  "AHU.SupplyTemp",
+                                                 "address":  "AI:1",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033819_2",
+                                                 "channelId":  "ch_1788837033819",
+                                                 "name":  "UPS.Location",
+                                                 "address":  "1.3.6.1.4.1.99999.1.3.0",
+                                                 "dataType":  "String"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034050_2",
+                                                 "channelId":  "ch_1788837034050",
+                                                 "name":  "AHU.FanRunning",
+                                                 "address":  "BI:1",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034050_1",
+                                                 "channelId":  "ch_1788837034050",
+                                                 "name":  "AHU.Setpoint",
+                                                 "address":  "AI:2",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033819_1",
+                                                 "channelId":  "ch_1788837033819",
+                                                 "name":  "UPS.BatteryLevel",
+                                                 "address":  "1.3.6.1.4.1.99999.1.2.0",
+                                                 "dataType":  "UInt16"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033600_2",
+                                                 "channelId":  "ch_1788837033600",
+                                                 "name":  "Line1.Running",
+                                                 "address":  "factory/line1/status",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033600_1",
+                                                 "channelId":  "ch_1788837033600",
+                                                 "name":  "Line1.Speed",
+                                                 "address":  "factory/line1/status",
+                                                 "dataType":  "UInt16"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033819_0",
+                                                 "channelId":  "ch_1788837033819",
+                                                 "name":  "UPS.InputVoltage",
+                                                 "address":  "1.3.6.1.4.1.99999.1.1.0",
+                                                 "dataType":  "Int16"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033600_3",
+                                                 "channelId":  "ch_1788837033600",
+                                                 "name":  "Line1.Counter",
+                                                 "address":  "factory/line1/counter",
+                                                 "dataType":  "UInt16"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_5",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.CB2Closed",
+                                                 "address":  "IOA:1002",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_4",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.CB1Closed",
+                                                 "address":  "IOA:1001",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_7",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.LocalRemote",
+                                                 "address":  "IOA:1004",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_6",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.ProtTripped",
+                                                 "address":  "IOA:1003",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_3",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.Frequency",
+                                                 "address":  "IOA:4",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_0",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.UaVoltage",
+                                                 "address":  "IOA:1",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034050_3",
+                                                 "channelId":  "ch_1788837034050",
+                                                 "name":  "AHU.Alarm",
+                                                 "address":  "AO:1",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_2",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.ActivePower",
+                                                 "address":  "IOA:3",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837034253_1",
+                                                 "channelId":  "ch_1788837034253",
+                                                 "name":  "SUB.IaCurrent",
+                                                 "address":  "IOA:2",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "tg_1788837033600_0",
+                                                 "channelId":  "ch_1788837033600",
+                                                 "name":  "Line1.Temp",
+                                                 "address":  "factory/line1/status",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "7",
+                                                 "channelId":  "mb-01",
+                                                 "name":  "R0022.Current",
+                                                 "address":  "40003",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "6",
+                                                 "channelId":  "mb-01",
+                                                 "name":  "R0022.Status",
+                                                 "address":  "40002",
+                                                 "dataType":  "Int16"
+                                             },
+                                             {
+                                                 "id":  "9",
+                                                 "channelId":  "opc-01",
+                                                 "name":  "Main.FlowRate",
+                                                 "address":  "ns=2;s=Flow_Sensor_01",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "8",
+                                                 "channelId":  "opc-01",
+                                                 "name":  "Main.Pressure",
+                                                 "address":  "ns=2;s=Pressure_Sensor_01",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "5",
+                                                 "channelId":  "mb-01",
+                                                 "name":  "R0022.Speed",
+                                                 "address":  "40001",
+                                                 "dataType":  "Int16"
+                                             },
+                                             {
+                                                 "id":  "2",
+                                                 "channelId":  "s7-01",
+                                                 "name":  "R0021.Temperature",
+                                                 "address":  "DB301.Real14",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "1",
+                                                 "channelId":  "s7-01",
+                                                 "name":  "R0021.pH",
+                                                 "address":  "DB301.Real10",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "4",
+                                                 "channelId":  "s7-01",
+                                                 "name":  "R0021.alm1",
+                                                 "address":  "DB301.DBX20.0",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "3",
+                                                 "channelId":  "s7-01",
+                                                 "name":  "R0021.Pressure",
+                                                 "address":  "DB301.Real18",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "34",
+                                                 "channelId":  "fins-01",
+                                                 "name":  "CJ2.WeldCount",
+                                                 "address":  "D110",
+                                                 "dataType":  "UInt16"
+                                             },
+                                             {
+                                                 "id":  "33",
+                                                 "channelId":  "fins-01",
+                                                 "name":  "CJ2.WeldTemp",
+                                                 "address":  "D100",
+                                                 "dataType":  "UInt16"
+                                             },
+                                             {
+                                                 "id":  "36",
+                                                 "channelId":  "enip-01",
+                                                 "name":  "Line1.Temperature",
+                                                 "address":  "Line1.Temperature",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "35",
+                                                 "channelId":  "enip-01",
+                                                 "name":  "Line1.ConveyorSpeed",
+                                                 "address":  "Line1.ConveyorSpeed",
+                                                 "dataType":  "Int16"
+                                             },
+                                             {
+                                                 "id":  "32",
+                                                 "channelId":  "melsec-01",
+                                                 "name":  "Packer.Alarm",
+                                                 "address":  "M20",
+                                                 "dataType":  "Bool"
+                                             },
+                                             {
+                                                 "id":  "18",
+                                                 "channelId":  "opc-01",
+                                                 "name":  "Robot.CycleProgress",
+                                                 "address":  "ns=2;s=Valve_01_Opening",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "15",
+                                                 "channelId":  "opc-01",
+                                                 "name":  "Welder.Voltage",
+                                                 "address":  "ns=2;s=Welder_001_WeldingVoltage",
+                                                 "dataType":  "Float"
+                                             },
+                                             {
+                                                 "id":  "31",
+                                                 "channelId":  "melsec-01",
+                                                 "name":  "Packer.Speed",
+                                                 "address":  "D0",
+                                                 "dataType":  "Int16"
+                                             },
+                                             {
+                                                 "id":  "30",
+                                                 "channelId":  "melsec-01",
+                                                 "name":  "Packer.SealTemp",
+                                                 "address":  "D10",
+                                                 "dataType":  "Float"
+                                             }
+                                         ]
+                            },
+                 "channels":  [
+                                  {
+                                      "id":  "ch_1788837033600",
+                                      "state":  "error"
+                                  },
+                                  {
+                                      "id":  "opc-01",
+                                      "state":  "online"
+                                  },
+                                  {
+                                      "id":  "ch_1788837033819",
+                                      "state":  "online"
+                                  },
+                                  {
+                                      "id":  "ch_1788837034253",
+                                      "state":  "offline"
+                                  },
+                                  {
+                                      "id":  "ch_1788837034050",
+                                      "state":  "offline"
+                                  },
+                                  {
+                                      "id":  "mb-01",
+                                      "state":  "online"
+                                  },
+                                  {
+                                      "id":  "s7-01",
+                                      "state":  "online"
+                                  },
+                                  {
+                                      "id":  "melsec-01",
+                                      "state":  "online"
+                                  },
+                                  {
+                                      "id":  "enip-01",
+                                      "state":  "online"
+                                  },
+                                  {
+                                      "id":  "fins-01",
+                                      "state":  "online"
+                                  }
+                              ],
+                 "liveCount":  21,
+                 "liveQuality":  [
+                                     {
+                                         "id":  "33",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "34",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "32",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "30",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "31",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "tg_1788837033819_1",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "tg_1788837033819_2",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "tg_1788837033819_0",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "35",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "36",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "18",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "4",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "5",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "3",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "1",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "2",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "9",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "15",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "8",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "6",
+                                         "quality":  "Good"
+                                     },
+                                     {
+                                         "id":  "7",
+                                         "quality":  "Good"
+                                     }
+                                 ],
+                 "liveQualityKey":  "1=Good|15=Good|18=Good|2=Good|3=Good|30=Good|31=Good|32=Good|33=Good|34=Good|35=Good|36=Good|4=Good|5=Good|6=Good|7=Good|8=Good|9=Good|tg_1788837033819_0=Good|tg_1788837033819_1=Good|tg_1788837033819_2=Good"
+             },
+    "checks":  [
+                   {
+                       "name":  "config-topology",
+                       "pass":  true,
+                       "detail":  "channel and tag identity/protocol/address/type"
+                   },
+                   {
+                       "name":  "channel-topology",
+                       "pass":  true,
+                       "detail":  "channel identity set"
+                   },
+                   {
+                       "name":  "channel-state-parity",
+                       "pass":  true,
+                       "detail":  [
+
+                                  ]
+                   },
+                   {
+                       "name":  "storage-health",
+                       "pass":  true,
+                       "detail":  "TDengine online on both backends"
+                   },
+                   {
+                       "name":  "live-samples",
+                       "pass":  true,
+                       "detail":  "both backends expose live samples"
+                   },
+                   {
+                       "name":  "live-quality-parity",
+                       "pass":  true,
+                       "detail":  "live tag identity and quality code"
+                   }
+               ],
+    "pass":  true
+}

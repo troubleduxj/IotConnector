@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-09-24T13:50:44.047Z",
+  "gateway": "http://127.0.0.1:18080",
+  "scenarios": [
+    {
+      "protocol": "OPC UA",
+      "channelId": "opc-01",
+      "port": 4840,
+      "before": "offline",
+      "stoppedPid": 16340,
+      "offline": "offline",
+      "recovered": "offline",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": false,
+      "error": "offline/recovery/live assertion failed",
+      "offlineMs": 274,
+      "recoveryMs": 37236
+    }
+  ],
+  "pass": false
+}

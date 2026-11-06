@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-09-24T13:49:38.345Z",
+  "gateway": "http://127.0.0.1:18080",
+  "scenarios": [
+    {
+      "protocol": "Siemens Profinet",
+      "channelId": "s7-01",
+      "port": 10102,
+      "before": "online",
+      "stoppedPid": 27872,
+      "offline": "offline",
+      "recovered": "online",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": true,
+      "error": null,
+      "offlineMs": 733,
+      "recoveryMs": 3401
+    }
+  ],
+  "pass": true
+}

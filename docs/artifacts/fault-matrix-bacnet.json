@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-09-24T13:43:19.561Z",
+  "gateway": "http://127.0.0.1:18080",
+  "scenarios": [
+    {
+      "protocol": "BACnet/IP",
+      "channelId": "ch_1788837034050",
+      "port": 47808,
+      "before": "offline",
+      "stoppedPid": 25692,
+      "offline": "offline",
+      "recovered": "offline",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": false,
+      "error": "offline/recovery/live assertion failed",
+      "offlineMs": 280,
+      "recoveryMs": 32952
+    }
+  ],
+  "pass": false
+}

@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-09-22T14:24:41.615Z",
+  "gateway": "http://127.0.0.1:18080",
+  "scenarios": [
+    {
+      "protocol": "SNMP",
+      "channelId": "ch_1788837033819",
+      "port": 1161,
+      "before": "online",
+      "stoppedPid": 421112,
+      "offline": "offline",
+      "recovered": "online",
+      "liveBefore": 20,
+      "liveAfter": 20,
+      "pass": true,
+      "error": null,
+      "offlineMs": 26311,
+      "recoveryMs": 26778
+    }
+  ],
+  "pass": true
+}

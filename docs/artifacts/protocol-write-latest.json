@@ -1,0 +1,56 @@
+﻿{
+    "generatedAt":  "2026-09-22T11:31:47.0334792Z",
+    "go":  {
+               "url":  "http://127.0.0.1:18080",
+               "results":  [
+                               {
+                                   "protocol":  "MELSEC",
+                                   "tagId":  "31",
+                                   "value":  1234,
+                                   "ok":  true,
+                                   "error":  ""
+                               },
+                               {
+                                   "protocol":  "EtherNet/IP",
+                                   "tagId":  "35",
+                                   "value":  333,
+                                   "ok":  false,
+                                   "error":  "CIP response status 0x02"
+                               },
+                               {
+                                   "protocol":  "FINS",
+                                   "tagId":  "34",
+                                   "value":  1500,
+                                   "ok":  true,
+                                   "error":  ""
+                               }
+                           ]
+           },
+    "node":  {
+                 "url":  "http://127.0.0.1:18081",
+                 "results":  [
+                                 {
+                                     "protocol":  "MELSEC",
+                                     "tagId":  "31",
+                                     "value":  1234,
+                                     "ok":  false,
+                                     "error":  "Error: 响应超时"
+                                 },
+                                 {
+                                     "protocol":  "EtherNet/IP",
+                                     "tagId":  "35",
+                                     "value":  333,
+                                     "ok":  false,
+                                     "error":  "Error: CIP response status 0x02"
+                                 },
+                                 {
+                                     "protocol":  "FINS",
+                                     "tagId":  "34",
+                                     "value":  1500,
+                                     "ok":  false,
+                                     "error":  "Error: 响应超时"
+                                 }
+                             ]
+             },
+    "pass":  false
+}

@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-09-22T10:51:57.279Z",
+  "gateway": "http://127.0.0.1:18080",
+  "scenarios": [
+    {
+      "protocol": "Mitsubishi MELSEC",
+      "channelId": "melsec-01",
+      "port": 11022,
+      "before": "online",
+      "stoppedPid": 392176,
+      "offline": "offline",
+      "recovered": "online",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": true,
+      "error": null,
+      "offlineMs": 4529,
+      "recoveryMs": 7672
+    },
+    {
+      "protocol": "Omron FINS",
+      "channelId": "fins-01",
+      "port": 19600,
+      "before": "online",
+      "stoppedPid": 408116,
+      "offline": "offline",
+      "recovered": "online",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": true,
+      "error": null,
+      "offlineMs": 4306,
+      "recoveryMs": 8151
+    },
+    {
+      "protocol": "MQTT / Sparkplug B",
+      "channelId": "ch_1788837033600",
+      "port": 1883,
+      "before": "online",
+      "stoppedPid": 406804,
+      "offline": "offline",
+      "recovered": "online",
+      "liveBefore": 17,
+      "liveAfter": 17,
+      "pass": true,
+      "error": null,
+      "offlineMs": 3129,
+      "recoveryMs": 6925
+    }
+  ],
+  "pass": true
+}

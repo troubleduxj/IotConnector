@@ -1,0 +1,56 @@
+﻿{
+    "generatedAt":  "2026-09-24T14:27:44.0451049Z",
+    "go":  {
+               "url":  "http://127.0.0.1:18080",
+               "results":  [
+                               {
+                                   "protocol":  "MELSEC",
+                                   "tagId":  "31",
+                                   "value":  1234,
+                                   "ok":  true,
+                                   "error":  ""
+                               },
+                               {
+                                   "protocol":  "EtherNet/IP",
+                                   "tagId":  "35",
+                                   "value":  333,
+                                   "ok":  true,
+                                   "error":  ""
+                               },
+                               {
+                                   "protocol":  "FINS",
+                                   "tagId":  "34",
+                                   "value":  1500,
+                                   "ok":  true,
+                                   "error":  ""
+                               }
+                           ]
+           },
+    "node":  {
+                 "url":  "http://127.0.0.1:18081",
+                 "results":  [
+                                 {
+                                     "protocol":  "MELSEC",
+                                     "tagId":  "31",
+                                     "value":  1234,
+                                     "ok":  true,
+                                     "error":  ""
+                                 },
+                                 {
+                                     "protocol":  "EtherNet/IP",
+                                     "tagId":  "35",
+                                     "value":  333,
+                                     "ok":  true,
+                                     "error":  ""
+                                 },
+                                 {
+                                     "protocol":  "FINS",
+                                     "tagId":  "34",
+                                     "value":  1500,
+                                     "ok":  true,
+                                     "error":  ""
+                                 }
+                             ]
+             },
+    "pass":  true
+}

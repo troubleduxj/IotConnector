@@ -1,0 +1,22 @@
+﻿{
+    "generatedAt":  "2026-09-22T10:33:13.0176885Z",
+    "gateway":  "http://127.0.0.1:18080",
+    "scenarios":  [
+                      {
+                          "protocol":  "Mitsubishi MELSEC",
+                          "channelId":  "melsec-01",
+                          "port":  11022,
+                          "before":  "unknown",
+                          "liveBefore":  17,
+                          "stoppedPid":  419432,
+                          "offline":  "offline",
+                          "recovered":  "unknown",
+                          "offlineMs":  24828,
+                          "recoveryMs":  16360,
+                          "liveAfter":  17,
+                          "pass":  false,
+                          "error":  "state or live sample assertion failed"
+                      }
+                  ],
+    "pass":  false
+}

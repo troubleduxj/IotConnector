@@ -1,0 +1,377 @@
+{
+  "startedAt": "2026-09-25T01:55:12.832Z",
+  "finishedAt": "2026-09-25T01:56:12.839Z",
+  "durationMs": 60000,
+  "intervalMs": 5000,
+  "targets": [
+    {
+      "url": "http://127.0.0.1:18080",
+      "observations": 12,
+      "failures": 0,
+      "badQualityObservations": 0,
+      "storageOfflineObservations": 0,
+      "minLiveCount": 0,
+      "maxQueued": 0
+    },
+    {
+      "url": "http://127.0.0.1:18081",
+      "observations": 12,
+      "failures": 0,
+      "badQualityObservations": 0,
+      "storageOfflineObservations": 0,
+      "minLiveCount": 21,
+      "maxQueued": 19
+    }
+  ],
+  "samples": [
+    {
+      "observedAt": "2026-09-25T01:55:12.837Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 19,
+          "written": 4172
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:18.118Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 4262
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:23.291Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 4,
+          "written": 4371
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:28.443Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 3,
+          "written": 4460
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:33.555Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 5,
+          "written": 4546
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:38.665Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 3,
+          "written": 4638
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:43.810Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 8,
+          "written": 4724
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:48.922Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 16,
+          "written": 4813
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:54.056Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 17,
+          "written": 4903
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:55:59.238Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 2,
+          "written": 4992
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:56:04.368Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 4,
+          "written": 5098
+        }
+      ]
+    },
+    {
+      "observedAt": "2026-09-25T01:56:09.505Z",
+      "targets": [
+        {
+          "url": "http://127.0.0.1:18080",
+          "ok": true,
+          "channels": 10,
+          "online": 0,
+          "offline": 10,
+          "liveCount": 0,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 0,
+          "written": 70000
+        },
+        {
+          "url": "http://127.0.0.1:18081",
+          "ok": true,
+          "channels": 10,
+          "online": 7,
+          "offline": 3,
+          "liveCount": 21,
+          "badQuality": 0,
+          "storageState": "online",
+          "queued": 4,
+          "written": 5187
+        }
+      ]
+    }
+  ],
+  "pass": false
+}

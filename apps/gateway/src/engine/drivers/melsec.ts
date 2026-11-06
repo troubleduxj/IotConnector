@@ -47,7 +47,8 @@ function mcHeader(dataLen: number): Buffer {
   h[0] = 0x50; h[1] = 0x00; // 副头
   h[2] = 0x00; // 网络号
   h[3] = 0xff; // PC 号
-  h[4] = 0x03; h[5] = 0xff; // 请求目标模块 I/O
+  // MC 3E stores module I/O 0x03FF in little-endian order (FF 03).
+  h[4] = 0xff; h[5] = 0x03; // 请求目标模块 I/O
   h[6] = 0x00; // 请求目标站号
   h.writeUInt16LE(dataLen, 7);
   return h;
@@ -130,13 +131,19 @@ export class MelsecDriver implements Driver {
   }
 
   async write(tag: Tag, rawValue: number | string | boolean): Promise<void> {
-    const addr = parseMcAddress(tag.address);
-    if (tag.dataType === 'Bool') {
-      const on = Boolean(rawValue);
-      await this.transceive(this.buildWriteBits(addr, [on]));
-      return;
+    while (this.busy) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    this.busy = true;
+    try {
+      const addr = parseMcAddress(tag.address);
+      if (tag.dataType === 'Bool') {
+        const on = Boolean(rawValue);
+        await this.transceive(this.buildWriteBits(addr, [on]));
+        return;
+      }
+      await this.transceive(this.buildWriteWords(addr, this.encodeWords(tag, Number(rawValue))));
+    } finally {
+      this.busy = false;
     }
-    await this.transceive(this.buildWriteWords(addr, this.encodeWords(tag, Number(rawValue))));
   }
 
   // ===== 帧（委托模块级构造，与连接测试探针共用）=====
@@ -217,7 +224,9 @@ export class MelsecDriver implements Driver {
       this.rx = this.rx.subarray(total);
       // 帧级捕获（重组后的完整帧才能解码）
       pushFrame(this.ctx.channel.id, 'RX', frame, frame[0] === 0xd0 ? describeMcResponse(frame) : 'MC-3E 非响应帧');
-      if (frame[0] !== 0xd0) continue;
+      // ProtoForge returns the standard MC 3E subheader (0x5000) on
+      // responses as well as the common 0xD000 response variant.
+      if (frame[0] !== 0xd0 && frame[0] !== 0x50) continue;
       const endCode = frame.readUInt16LE(9);
       this.pending?.timer && clearTimeout(this.pending.timer);
       const pending = this.pending;
@@ -262,9 +271,26 @@ export class MelsecDriver implements Driver {
       this.ctx.setStatus('online', `OK ${Date.now() - t0}ms`);
     } catch (e) {
       this.ctx.setStatus('offline', `poll failed: ${String((e as Error).message ?? e)}`);
+      // A timeout/error can leave the socket half-open after the PLC or
+      // simulator restarts. Reusing it makes every subsequent poll time out;
+      // tear down the stale transport and let the normal reconnect loop build
+      // a fresh connection.
+      this.resetConnection();
+      this.scheduleReconnect();
     } finally {
       this.busy = false;
     }
+  }
+
+  private resetConnection(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.pending?.reject(new Error('MELSEC connection reset'));
+    if (this.pending?.timer) clearTimeout(this.pending.timer);
+    this.pending = undefined;
+    this.rx = Buffer.alloc(0);
+    this.socket?.destroy();
+    this.socket = undefined;
   }
 
   private async readOnce(frame: Buffer): Promise<Buffer> {
@@ -302,7 +328,7 @@ export async function probeMelsec(
           if (rx.length < total) return;
           const resp = rx.subarray(0, total);
           clearTimeout(t);
-          if (resp[0] !== 0xd0) return reject(new Error('非 MC 响应帧'));
+          if (resp[0] !== 0xd0 && resp[0] !== 0x50) return reject(new Error('非 MC 响应帧'));
           const end = resp.readUInt16LE(9);
           if (end !== 0) return reject(new Error(`MC end code 0x${end.toString(16)}`));
           resolve(resp.subarray(11));

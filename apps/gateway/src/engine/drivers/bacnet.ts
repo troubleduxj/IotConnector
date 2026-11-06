@@ -69,13 +69,13 @@ export class BacnetDriver implements Driver {
     let off = 4;
     const npduLen = this.npduLength(msg, off);
     off += npduLen;
-    if (msg[off] !== 0x30) return; // 仅处理 confirmed-response
+    if (msg[off] !== 0x30 && msg[off] !== 0x20) return; // confirmed-response / simple-ack
     const invokeId = msg[off + 1];
     const cb = this.pending.get(invokeId);
     if (!cb) return;
     this.pending.delete(invokeId);
     cb(null);
-    void this.dispatchResponse(msg.subarray(off), invokeId);
+    if (msg[off] === 0x30) void this.dispatchResponse(msg.subarray(off), invokeId);
   }
 
   private dispatchResponse(apdu: Buffer, invokeId: number): void {
@@ -83,7 +83,7 @@ export class BacnetDriver implements Driver {
     const service = apdu[3];
     const body = apdu.subarray(4);
     try {
-      if (service === 5) { // ReadPropertyMultiple-Ack
+      if (service === 14) { // ReadPropertyMultiple-Ack (service choice 0x0e)
         const result = baServices.readPropertyMultiple.decodeAcknowledge(body, 0, body.length);
         if (!result) return;
         for (const res of result.values) {
@@ -91,7 +91,7 @@ export class BacnetDriver implements Driver {
           if (!b) continue;
           const values = res.values ?? [];
           const first = values[0]?.value?.[0];
-          if (first && first.value && first.value.type !== 'BacnetError') {
+          if (first && first.value !== undefined && first.type !== 'BacnetError') {
             let v = this.coerce(first.type, first.value);
             if (b.tag.dataType === 'Bool') v = v === 1 || v === true || v === '1' || v === 'true';
             this.ctx.publish(b.tag.id, v);
@@ -113,6 +113,10 @@ export class BacnetDriver implements Driver {
   private npduLength(msg: Buffer, start: number): number {
     // NPDU: 控制字节；含 DNET/DADR（长度 2+2+n）或 SNET 时需展开
     let off = start;
+    // NPDU always begins with protocol version 0x01, followed by control.
+    // Older local fixtures omitted the version, so retain compatibility with
+    // a direct control byte as well.
+    if (msg[off] === 0x01) off++;
     const ctrl = msg[off++];
     if (ctrl & 0x20) { // 含目的地址：DNET(2) + DLEN(1) + DADR
       off += 3;
@@ -153,13 +157,14 @@ export class BacnetDriver implements Driver {
   }
 
   private encodeRpmRequest(props: Array<{ objectId: { type: number; instance: number }; properties: Array<{ id: number }> }>, invokeId: number): Buffer {
-    // 头标准布局：type(0x05: confirmed+seg-accepted) | invokeId | 0x00 | service(14=ReadPropertyMultiple)
+    // Confirmed-Request: PDU type | max-segments/max-APDU | invokeId | service.
+    // 0x02 means segmented response accepted; this request itself is not segmented.
     const bodyBuf = { buffer: Buffer.alloc(2048), offset: 0 };
     baServices.readPropertyMultiple.encode(bodyBuf, props);
     const body = bodyBuf.buffer.subarray(0, bodyBuf.offset);
-    const apdu = Buffer.concat([Buffer.from([0x05, invokeId, 0x00, 14]), body]);
-    const total = apdu.length + 1;
-    const out = Buffer.concat([Buffer.from([0x81, 0x0a, (total >> 8) & 0xff, total & 0xff, 0x01]), apdu]);
+    const apdu = Buffer.concat([Buffer.from([0x02, 0x00, invokeId, 14]), body]);
+    const total = apdu.length + 2;
+    const out = Buffer.concat([Buffer.from([0x81, 0x0a, (total >> 8) & 0xff, total & 0xff, 0x01, 0x00]), apdu]);
     return out;
   }
 
@@ -172,6 +177,41 @@ export class BacnetDriver implements Driver {
     this.timer = undefined;
     this.sock?.close();
     this.sock = undefined;
+  }
+
+  async write(tag: Tag, rawValue: number | string | boolean): Promise<void> {
+    const binding = this.bindings.find((item) => item.tag.id === tag.id);
+    if (!binding || !this.sock) throw new Error(`BACnet tag not bound: ${tag.id}`);
+    const invokeId = this.nextInvokeId();
+    const type = tag.dataType === 'Bool'
+      ? baEnum.ApplicationTags.BOOLEAN
+      : tag.dataType === 'String'
+        ? baEnum.ApplicationTags.CHARACTER_STRING
+        : baEnum.ApplicationTags.REAL;
+    const bodyBuf = { buffer: Buffer.alloc(256), offset: 0 };
+    baServices.writeProperty.encode(bodyBuf, binding.objectType, binding.instance, P_PRESENT_VALUE,
+      baEnum.ASN1_ARRAY_ALL, baEnum.ASN1_NO_PRIORITY, [{ type, value: rawValue }]);
+    // Standard non-segmented confirmed request with segmented response accepted.
+    const apdu = Buffer.concat([Buffer.from([0x02, 0x00, invokeId, 15]), bodyBuf.buffer.subarray(0, bodyBuf.offset)]);
+    const total = apdu.length + 2;
+    const packet = Buffer.concat([Buffer.from([0x81, 0x0a, (total >> 8) & 0xff, total & 0xff, 0x01, 0x00]), apdu]);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(invokeId);
+        reject(new Error('ERR_TIMEOUT'));
+      }, 3000);
+      this.pending.set(invokeId, (err) => {
+        clearTimeout(timer);
+        if (err) reject(err); else resolve();
+      });
+      this.sock!.send(packet, this.ctx.channel.port, this.ctx.channel.host, (err) => {
+        if (err) {
+          this.pending.delete(invokeId);
+          clearTimeout(timer);
+          reject(err);
+        }
+      });
+    });
   }
 }
 

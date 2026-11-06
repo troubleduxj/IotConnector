@@ -20,24 +20,24 @@ const FINS_AREA_NAMES: Record<number, string> = { 0x82: 'D', 0xb1: 'W', 0xb0: 'C
  * 驱动约定：01 01=读字；01 02=写字（area=0x30 时为读位）；01 03=写位。
  */
 function describeFinsRequest(frame: Buffer): string {
-  if (frame.length < 27) return `FINS/TCP ${frame.length}B`;
-  const mrc = frame[20];
-  const src = frame[21];
-  const sid = frame[19];
-  const area = frame[22];
+  if (frame.length < 33) return `FINS/TCP ${frame.length}B`;
+  const mrc = frame[26];
+  const src = frame[27];
+  const sid = frame[25];
+  const area = frame[28];
   const name = FINS_AREA_NAMES[area] ?? `0x${area.toString(16)}`;
-  const word = frame.readUInt16BE(23);
+  const word = frame.readUInt16BE(29);
   if (mrc === 0x01 && src === 0x01) {
-    return `FINS 读字 ${name}${word}×${frame.readUInt16BE(25)} SID=${sid}`;
+    return `FINS 读字 ${name}${word}×${frame.readUInt16BE(31)} SID=${sid}`;
   }
   if (mrc === 0x01 && src === 0x02 && area === 0x30) {
-    return `FINS 读位 ${name}${word}.${String(frame[25]).padStart(2, '0')} SID=${sid}`;
+    return `FINS 读位 ${name}${word}.${String(frame[31]).padStart(2, '0')} SID=${sid}`;
   }
   if (mrc === 0x01 && src === 0x02) {
-    return `FINS 写字 ${name}${word}×${frame.readUInt16BE(25)} SID=${sid}`;
+    return `FINS 写字 ${name}${word}×${frame.readUInt16BE(31)} SID=${sid}`;
   }
   if (mrc === 0x01 && src === 0x03) {
-    return `FINS 写位 ${name}${word}.${String(frame[25]).padStart(2, '0')} SID=${sid}`;
+    return `FINS 写位 ${name}${word}.${String(frame[31]).padStart(2, '0')} SID=${sid}`;
   }
   return `FINS MRC/SRC=0x${mrc.toString(16)}/0x${src.toString(16)} SID=${sid}`;
 }
@@ -58,13 +58,15 @@ export function parseFinsAddress(address: string): FinsAddress {
 function finsWrap(fins: Buffer): Buffer {
   const head = Buffer.alloc(8);
   head.write('FINS', 0, 'ascii');
-  head.writeUInt32BE(2 + fins.length, 4);
-  return Buffer.concat([head, Buffer.from([0x02, 0x00]), fins]);
+  head.writeUInt32BE(8 + fins.length, 4);
+  const tcp = Buffer.alloc(8);
+  tcp.writeUInt32BE(0x00000002, 0);
+  return Buffer.concat([head, tcp, fins]);
 }
 
 function finsDstHeader(): Buffer {
   // ICF(请求 0x80) RSV GCT DA DNA DA1 DA2 SNA SA1 SA2 SID
-  return Buffer.from([0x80, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00]); // SID 由发送方填 @19
+  return Buffer.from([0x80, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00]); // SID 由发送方填 @25
 }
 
 function finsAddrBytes(addr: FinsAddress): Buffer {
@@ -140,12 +142,18 @@ export class FinsDriver implements Driver {
   }
 
   async write(tag: Tag, rawValue: number | string | boolean): Promise<void> {
-    const addr = parseFinsAddress(tag.address);
-    if (addr.isBit) {
-      await this.transceive(this.buildWriteBit(addr, Boolean(rawValue)));
-      return;
+    while (this.busy) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    this.busy = true;
+    try {
+      const addr = parseFinsAddress(tag.address);
+      if (addr.isBit) {
+        await this.transceive(this.buildWriteBit(addr, Boolean(rawValue)));
+        return;
+      }
+      await this.transceive(this.buildWriteWords(addr, this.encodeWords(tag, Number(rawValue))));
+    } finally {
+      this.busy = false;
     }
-    await this.transceive(this.buildWriteWords(addr, this.encodeWords(tag, Number(rawValue))));
   }
 
   // ===== 帧（委托模块级构造，与连接测试探针共用）=====
@@ -204,7 +212,7 @@ export class FinsDriver implements Driver {
       : [b.readUInt16BE(0)];
   }
 
-  // ===== 收发（响应：TCP 头(8) + ICF..SID(10) + MRC/SRC(2) + endcode(2) + data(自 24)）=====
+  // ===== 收发（标准 FINS/TCP：TCP 头(8) + Command/Error(8) + FINS 帧）=====
 
   private transceive(frame: Buffer): Promise<Buffer> {
     return new Promise((resolve, reject) => {
@@ -212,7 +220,7 @@ export class FinsDriver implements Driver {
       this.pending?.reject(new Error('overridden'));
       clearTimeout(this.pending?.timer);
       this.sid = (this.sid + 1) & 0xff;
-      frame[19] = this.sid & 0xff; // SID @19（TCP 10B 头之后第 9 字节）
+      frame[25] = this.sid & 0xff; // SID @25（TCP 8B 头 + Command/Error 8B 后）
       pushFrame(this.ctx.channel.id, 'TX', frame, describeFinsRequest(frame)); // SID 填充后再捕获，保证 hex/注解与线上一致
       const timer = setTimeout(() => {
         this.pending = undefined;
@@ -235,9 +243,16 @@ export class FinsDriver implements Driver {
       if (this.rx.length < total) return;
       const frame = Buffer.from(this.rx.subarray(0, total));
       this.rx = this.rx.subarray(total);
-      // 帧级捕获（重组后的完整帧才能解码）：TCP err@9、SID@19、endcode@22、数据@24
-      const tcpErr = frame[9];
-      const end = frame.length >= 24 ? frame.readUInt16BE(22) : -1;
+      // Standard response: Command@8, ErrorCode@12, FINS SID@25,
+      // end code@28 and data@30. Reject truncated responses before reading
+      // fields so a malformed/short peer frame cannot crash the gateway.
+      if (frame.length < 30) {
+        this.pending?.reject(new Error(`FINS response too short: ${frame.length}B`));
+        this.pending = undefined;
+        continue;
+      }
+      const tcpErr = frame.readUInt32BE(12);
+      const end = frame.readUInt16BE(28);
       pushFrame(
         this.ctx.channel.id,
         'RX',
@@ -245,21 +260,20 @@ export class FinsDriver implements Driver {
         tcpErr !== 0
           ? `FINS/TCP 错误 0x${tcpErr.toString(16)}`
           : end === 0
-            ? `FINS 响应 SID=${frame[19]} OK · ${Math.max(0, frame.length - 24)}B 数据`
-            : `FINS 响应 SID=${frame[19]} end=0x${(end & 0xffff).toString(16).padStart(4, '0')}`,
+            ? `FINS 响应 SID=${frame[25]} OK · ${Math.max(0, frame.length - 30)}B 数据`
+            : `FINS 响应 SID=${frame[25]} end=0x${(end & 0xffff).toString(16).padStart(4, '0')}`,
       );
-      if (frame[9] !== 0x00) {
-        this.pending?.reject(new Error(`FINS/TCP err 0x${frame[9].toString(16)}`));
+      if (tcpErr !== 0) {
+        this.pending?.reject(new Error(`FINS/TCP err 0x${tcpErr.toString(16)}`));
         this.pending = undefined;
         continue;
       }
-      // fins 帧：0 ICF 1 RSV 2 GCT 3 DNA 4 DA1 5 DA2 6 SNA 7 SA1 8 SA2 9 SID 10 MRC 11 SRC 12..13 endcode → 数据自 14
-      const endCode = frame.readUInt16BE(22); // endcode 在 fins 头 10B + MRC/SRC 2B 之后
+      const endCode = frame.readUInt16BE(28);
       clearTimeout(this.pending?.timer);
       const pending = this.pending;
       this.pending = undefined;
       if (endCode !== 0) pending?.reject(new Error(`FINS end code 0x${endCode.toString(16)}`));
-      else pending?.resolve(frame.subarray(24)); // 数据自 24 起（endcode 在 22..23）
+      else pending?.resolve(frame.subarray(30));
     }
   }
 
@@ -295,9 +309,24 @@ export class FinsDriver implements Driver {
       this.ctx.setStatus('online', `OK ${Date.now() - t0}ms`);
     } catch (e) {
       this.ctx.setStatus('offline', `poll failed: ${String((e as Error).message ?? e)}`);
+      // Recreate the TCP transport after a PLC/simulator restart. Keeping a
+      // half-closed socket causes all later polls to remain offline forever.
+      this.resetConnection();
+      this.scheduleReconnect();
     } finally {
       this.busy = false;
     }
+  }
+
+  private resetConnection(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.pending?.reject(new Error('FINS connection reset'));
+    if (this.pending?.timer) clearTimeout(this.pending.timer);
+    this.pending = undefined;
+    this.rx = Buffer.alloc(0);
+    this.socket?.destroy();
+    this.socket = undefined;
   }
 
 }
@@ -322,7 +351,7 @@ export async function probeFins(
     });
     let frame = addr.isBit ? finsReadBitFrame(addr) : finsReadWordsFrame(addr, 1);
     frame = Buffer.from(frame); // 副本，避免改到模块级共享帧的 SID 字节
-    frame[19] = 0x01; // SID
+    frame[25] = 0x01; // SID
     const data = await new Promise<Buffer>((resolve, reject) => {
       let rx = Buffer.alloc(0);
       const t = setTimeout(() => reject(new Error('FINS 响应超时')), 4000);
@@ -334,10 +363,12 @@ export async function probeFins(
           if (rx.length < total) return;
           const resp = rx.subarray(0, total);
           clearTimeout(t);
-          if (resp[9] !== 0x00) return reject(new Error(`FINS/TCP err 0x${resp[9].toString(16)}`));
-          const end = resp.length >= 24 ? resp.readUInt16BE(22) : -1;
+          if (resp.length < 30) return reject(new Error(`FINS response too short: ${resp.length}B`));
+          const tcpErr = resp.readUInt32BE(12);
+          if (tcpErr !== 0) return reject(new Error(`FINS/TCP err 0x${tcpErr.toString(16)}`));
+          const end = resp.readUInt16BE(28);
           if (end !== 0) return reject(new Error(`FINS end code 0x${(end & 0xffff).toString(16)}`));
-          resolve(resp.subarray(24));
+          resolve(resp.subarray(30));
           return;
         }
       });

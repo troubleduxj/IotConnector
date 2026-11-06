@@ -94,7 +94,10 @@ export class OpcUaDriver implements Driver {
         connectionStrategy: { initialDelay: 1000, maxRetry: 3 },
       });
       this.client.on('connection_lost', () => {
-        if (!this.stopped) this.ctx.setStatus('offline', 'OPC UA connection lost, reconnecting…');
+        if (!this.stopped) {
+          this.ctx.setStatus('offline', 'OPC UA connection lost, reconnecting…');
+          void this.teardown().finally(() => this.scheduleReconnect());
+        }
       });
 
       await this.client.connect(endpointUrl);

@@ -40,9 +40,9 @@ function cipValueBytes(dataType: string, value: number | string | boolean): Buff
 /** SendRRData（Unconnected Send 包装）：背板 1 / 槽 0 路由 */
 function enipUnconnected(session: number, embedded: Buffer): Buffer {
   const route = Buffer.from([0x01, 0x00, 0x20, 0x02, 0x24, 0x01]); // 背板 1，槽 0（Message Router 0xF5/1）
+  // The Unconnected Data item carries the CIP service directly. Wrapping
+  // it in a second 0x4C service makes ProtoForge reject the request.
   const rr = Buffer.concat([
-    Buffer.from([0x4c]), // Unconnected Send
-    (() => { const b = Buffer.alloc(2); b.writeUInt16LE(embedded.length, 0); return b; })(),
     embedded,
     route,
     (embedded.length + route.length) % 2 ? Buffer.from([0x00]) : Buffer.alloc(0),
@@ -52,7 +52,7 @@ function enipUnconnected(session: number, embedded: Buffer): Buffer {
   body.writeUInt16LE(0, 4); // timeout
   const items = Buffer.from([0x02, 0x00]);
   const addrItem = Buffer.from([0xa1, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]);
-  const dataItem = Buffer.concat([Buffer.from([0xb1, 0x00]), (() => { const b = Buffer.alloc(2); b.writeUInt16LE(rr.length, 0); return b; })(), rr]);
+  const dataItem = Buffer.concat([Buffer.from([0xb2, 0x00]), (() => { const b = Buffer.alloc(2); b.writeUInt16LE(rr.length, 0); return b; })(), rr]);
   const out = Buffer.concat([body, items, addrItem, dataItem]);
   return encap(0x006f, session, out);
 }
@@ -79,7 +79,7 @@ function describeEnipCip(payload: Buffer | undefined): string {
   const pathSize = embedded[1] ?? 0;
   const ioi = embedded.subarray(2, 2 + pathSize * 2);
   const tag = ioi[0] === 0x91 && ioi.length >= 2 ? ioi.toString('ascii', 2, 2 + ioi[1]) : '';
-  if (service === 0x4e) return `读 ${tag}`;
+  if (service === 0x4c) return `读 ${tag}`;
   if (service === 0x4d) return `写 ${tag}`;
   return `service=0x${service.toString(16)} ${tag}`;
 }
@@ -95,7 +95,7 @@ function describeEnipRequest(frame: Buffer): string {
   for (let i = 0; i < itemCount && p + 4 <= frame.length; i += 1) {
     const type = frame.readUInt16LE(p);
     const len = frame.readUInt16LE(p + 2);
-    if (type === 0xb1) payload = frame.subarray(p + 4, p + 4 + len);
+    if (type === 0xb1 || type === 0xb2) payload = frame.subarray(p + 4, p + 4 + len);
     p += 4 + len;
   }
   const cip = describeEnipCip(payload);
@@ -108,6 +108,24 @@ function describeEnipResponse(frame: Buffer): string {
   const name = ENIP_CMDS[cmd] ?? `0x${cmd.toString(16)}`;
   const status = frame.readUInt32LE(8);
   return `ENIP 响应 ${name} status=0x${status.toString(16).padStart(8, '0')} (${frame.length}B)`;
+}
+
+function cipResponseStatus(frame: Buffer): number {
+  const base = 24;
+  if (frame.length < base + 14) throw new Error('EtherNet/IP 响应结构异常');
+  const itemCount = frame.readUInt16LE(base + 6);
+  if (itemCount !== 2) throw new Error('EtherNet/IP 响应 item 数异常');
+  let p = base + 8;
+  const addressLength = frame.readUInt16LE(p + 2);
+  p += 4 + addressLength;
+  if (p + 4 > frame.length) throw new Error('EtherNet/IP 响应缺少数据项');
+  const dataType = frame.readUInt16LE(p);
+  const dataLength = frame.readUInt16LE(p + 2);
+  p += 4;
+  if (dataType !== 0xb1 && dataType !== 0xb2 || p + dataLength > frame.length || dataLength < 3) {
+    throw new Error('EtherNet/IP CIP 数据项异常');
+  }
+  return frame[p + 2];
 }
 
 /**
@@ -173,7 +191,9 @@ export class EnipDriver implements Driver {
       Buffer.from([CIP_TYPE[tag.dataType] & 0xff, 0x00]),
       cipValueBytes(tag.dataType, rawValue),
     ]);
-    await this.transceive(this.buildUnconnected(embedded));
+    const response = await this.transceive(this.buildUnconnected(embedded));
+    const status = cipResponseStatus(response);
+    if (status !== 0) throw new Error(`CIP response status 0x${status.toString(16).padStart(2, '0')}`);
   }
 
   // ===== Unconnected Send 包装（委托模块级构造，与连接测试探针共用）=====
@@ -242,10 +262,10 @@ export class EnipDriver implements Driver {
     const t0 = Date.now();
     try {
       for (const tag of this.ctx.tags) {
-        // Read Tag Service (0x4E) + IOI
-        // Read Tag Service (0x4E)：pathSize（IOI 字数）+ IOI
+        // Read Tag Service (0x4C) + IOI
+        // Read Tag Service (0x4C)：pathSize（IOI 字数）+ IOI
         const ioi = ioiSymbolic(tag.address);
-        const embedded = Buffer.concat([Buffer.from([0x4e, ioi.length / 2]), ioi]);
+        const embedded = Buffer.concat([Buffer.from([0x4c, ioi.length / 2]), ioi]);
         const resp = await this.transceive(this.buildUnconnected(embedded));
         // 解析 SendRRData：24 头 + [iface 4][timeout 2][itemCount 2][addrItem 8][dataItem(type 2 + len 2 + rr)]
         const p0 = 24;
@@ -258,22 +278,21 @@ export class EnipDriver implements Driver {
         // data item
         const dataType = resp.readUInt16LE(p); p += 2;
         const dataLen = resp.readUInt16LE(p); p += 2;
-        if (itemCount !== 2 || dataType !== 0xb1) throw new Error('响应结构异常');
-        // rr：Unconnected Send 响应（0xCC）= [0xCC][genStatus][embLen u16][embedded]；
-        // 直连响应则为 [0xCE][status][type u16][value…]
+        if (itemCount !== 2 || (dataType !== 0xb1 && dataType !== 0xb2)) throw new Error('响应结构异常');
+        // Standard Unconnected Data response: service (0xCC), reserved,
+        // status, additional-status-size, then the typed value bytes.
         let rr = p;
         const wrapService = resp[rr];
-        if (wrapService === 0xcc) rr += 4; // 跳过 0xCC + genStatus + embLen
-        const service = resp[rr];
-        const cipStatus = resp[rr + 1];
-        const valType = resp.readUInt16LE(rr + 2);
-        if (cipStatus !== 0 || (wrapService !== 0xcc && service !== 0xce)) {
-          throw new Error(`CIP 读失败 service=0x${service?.toString(16)} status=0x${cipStatus?.toString(16)}`);
+        const cipStatus = resp[rr + 2];
+        if ((wrapService !== 0xcc && wrapService !== 0xce) || cipStatus !== 0) {
+          throw new Error(`CIP 读失败 service=0x${wrapService?.toString(16)} status=0x${cipStatus?.toString(16)}`);
         }
         const valOff = rr + 4;
-        const raw = resp.subarray(valOff, valOff + (valType === 0xca ? 4 : valType === 0xc1 ? 1 : 2));
+        const raw = resp.subarray(valOff, valOff + (tag.dataType === 'Float' || tag.dataType === 'Int32' ? 4 : tag.dataType === 'Bool' ? 1 : 2));
         if (tag.dataType === 'Bool') this.ctx.publish(tag.id, raw[0] === 0x01);
         else if (tag.dataType === 'Float') this.ctx.publish(tag.id, Number(raw.readFloatLE(0).toFixed(4)));
+        else if (tag.dataType === 'UInt16') this.ctx.publish(tag.id, raw.readUInt16LE(0));
+        else if (tag.dataType === 'Int32') this.ctx.publish(tag.id, raw.readInt32LE(0));
         else this.ctx.publish(tag.id, raw.readInt16LE(0));
       }
       this.ctx.setStatus('online', `OK ${Date.now() - t0}ms`);
@@ -332,9 +351,9 @@ export async function probeEnip(
     regBody.writeUInt16LE(1, 0); // version
     const reg = await roundtrip(encap(0x0065, 0, regBody));
     const session = reg.readUInt32LE(4);
-    // 2) Read Tag Service (0x4E)
+    // 2) Read Tag Service (0x4C)
     const ioi = ioiSymbolic(tagName);
-    const embedded = Buffer.concat([Buffer.from([0x4e, ioi.length / 2]), ioi]);
+    const embedded = Buffer.concat([Buffer.from([0x4c, ioi.length / 2]), ioi]);
     const resp = await roundtrip(enipUnconnected(session, embedded));
     const p0 = 24;
     const itemCount = resp.readUInt16LE(p0 + 6);
@@ -342,19 +361,15 @@ export async function probeEnip(
     const addrLen = resp.readUInt16LE(p + 2); p += 4 + addrLen;
     const dataType = resp.readUInt16LE(p); p += 2;
     const dataLen = resp.readUInt16LE(p); p += 2;
-    if (itemCount !== 2 || dataType !== 0xb1) throw new Error('响应结构异常');
+    if (itemCount !== 2 || (dataType !== 0xb1 && dataType !== 0xb2)) throw new Error('响应结构异常');
     let rr = p;
     const wrapService = resp[rr];
-    if (wrapService === 0xcc) rr += 4;
-    const service = resp[rr];
-    const cipStatus = resp[rr + 1];
-    const valType = dataLen >= 4 ? resp.readUInt16LE(rr + 2) : 0;
-    if (cipStatus !== 0 || (wrapService !== 0xcc && service !== 0xce)) {
-      throw new Error(`CIP 读失败 service=0x${service?.toString(16)} status=0x${cipStatus?.toString(16)}`);
+    const cipStatus = resp[rr + 2];
+    if ((wrapService !== 0xcc && wrapService !== 0xce) || cipStatus !== 0) {
+      throw new Error(`CIP 读失败 service=0x${wrapService?.toString(16)} status=0x${cipStatus?.toString(16)}`);
     }
-    const valOff = rr + 4;
-    const raw = resp.subarray(valOff, valOff + (valType === 0xca ? 4 : valType === 0xc1 ? 1 : 2));
-    const value = valType === 0xc1 ? raw[0] === 0x01 : valType === 0xca ? Number(raw.readFloatLE(0).toFixed(4)) : raw.readInt16LE(0);
+    const raw = resp.subarray(rr + 4, rr + 8);
+    const value = raw.readInt16LE(0);
     return { rttMs: Date.now() - t0, value };
   } finally {
     socket.destroy();

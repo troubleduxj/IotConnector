@@ -25,8 +25,7 @@ function rrDataBody(payload) {
 
 /** Unconnected Send 响应包装：[0xCC][genStatus][embLen][embedded][pad] */
 function unconnectedResp(embedded) {
-  const pad = embedded.length % 2 ? Buffer.from([0x00]) : Buffer.alloc(0);
-  return Buffer.concat([Buffer.from([0xcc, 0x00]), u16(embedded.length), embedded, pad]);
+  return Buffer.concat([Buffer.from([0xcc, 0x00, 0x00, 0x00]), embedded]);
 }
 
 /** 从 IOI 提取符号名：[0x91][len][name][pad?] */
@@ -36,7 +35,7 @@ function ioiName(ioi) {
   return ioi.toString('ascii', 2, 2 + len);
 }
 
-net.createServer((sock) => {
+const server = net.createServer((sock) => {
   console.log('[enip-sim] conn');
   let session = 0;
   let rx = Buffer.alloc(0);
@@ -71,15 +70,17 @@ net.createServer((sock) => {
     for (let i = 0; i < itemCount; i += 1) {
       const type = frame.readUInt16LE(p); p += 2;
       const len = frame.readUInt16LE(p); p += 2;
-      if (type === 0xb1) payload = frame.subarray(p, p + len);
+      if (type === 0xb1 || type === 0xb2) payload = frame.subarray(p, p + len);
       p += len;
     }
     if (!payload) { console.log('[enip-sim] no data item'); return; }
 
-    // Unconnected Send 请求：[0x4C][msgLen u16][embedded][route][pad]；兼容裸 0x4E/0x4D
+    // Go/标准 UCMM 请求在 B2 数据项中直接携带 CIP Read/Write；兼容旧式
+    // Unconnected Send 外层时只在服务码 0x52 下拆包，避免把直接 0x4C
+    // Read Tag 的 path size 当成外层长度。
     let embedded = payload;
     let service = payload[0];
-    if (service === 0x4c) {
+    if (service === 0x52) {
       const msgLen = payload.readUInt16LE(1);
       embedded = payload.subarray(3, 3 + msgLen);
       service = embedded[0];
@@ -90,7 +91,7 @@ net.createServer((sock) => {
     if (!name) { console.log('[enip-sim] unsupported IOI'); return; }
 
     let embResp;
-    if (service === 0x4e) {
+    if (service === 0x4c || service === 0x4e) {
       const tag = TAGS[name];
       const type = tag ? tag.type : 0xc3;
       const valueBytes = Buffer.alloc(tag ? tag.size : 2);
@@ -98,7 +99,7 @@ net.createServer((sock) => {
         if (tag.type === 0xca) valueBytes.writeFloatLE(tag.value, 0);
         else valueBytes.writeInt16LE(tag.value, 0);
       }
-      embResp = Buffer.concat([Buffer.from([0xce, 0x00]), u16(type), valueBytes]);
+      embResp = Buffer.concat([Buffer.from([type & 0xff]), u16(valueBytes.length), valueBytes]);
       console.log(`[enip-sim] READ ${name} -> ${tag ? tag.value : '??'}`);
     } else if (service === 0x4d) {
       // Write：IOI 后跟 [type u16][value bytes]
@@ -108,7 +109,7 @@ net.createServer((sock) => {
       if (TAGS[name]) {
         TAGS[name].value = type === 0xca ? vb.readFloatLE(0) : vb.readInt16LE(0);
       }
-      embResp = Buffer.from([0xcd, 0x00]);
+      embResp = Buffer.alloc(0);
       console.log(`[enip-sim] WRITE ${name} type=0x${type.toString(16)} -> ${TAGS[name] ? TAGS[name].value : '??'}`);
     } else {
       embResp = Buffer.from([service | 0x80, 0x08]); // 不支持的服务
@@ -119,4 +120,6 @@ net.createServer((sock) => {
     const resp = Buffer.concat([u16(0x006f), u16(body.length), u32(session), u32(0), Buffer.alloc(12), body]);
     sock.write(resp);
   }
-}).listen(14448, '127.0.0.1', () => console.log('[enip-sim] listening on 14448'));
+});
+const port = Number(process.env.ENIP_SIM_PORT || 14448);
+server.listen(port, '127.0.0.1', () => console.log(`[enip-sim] listening on ${port}`));

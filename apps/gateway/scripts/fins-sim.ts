@@ -2,7 +2,8 @@ import net from 'node:net';
 
 /**
  * 最小 Omron FINS/TCP 服务器模拟器。
- * 帧封装：'FINS' + len(BE32, = cmd+err+FINS帧) + cmd(0x02) + err(0x00) + FINS帧
+ * 帧封装：'FINS' + len(BE32, = cmd+reserved+error+FINS帧) +
+ * command(4B=0x00000002) + error(4B=0) + FINS帧
  * FINS 帧头 10B：ICF RSV GCT DNA DA1 DA2 SNA SA1 SA2 SID；随后 MRC SRC …
  * 支持：内存区字读/写（DM=0x82 / CIO=0xB0）、CIO 位读/写。
  * 软元件（与 fins 驱动种子对齐）：D100/D101=Float 温度（BE 合成）、D110=UInt16 焊接计数。
@@ -43,8 +44,8 @@ const server = net.createServer((socket) => {
       const frame = Buffer.from(rx.subarray(0, total));
       rx = rx.subarray(total);
 
-      // FINS 帧（自偏移 10）：ICF..SID(10) + MRC(10) SRC(11) ...
-      const fins = frame.subarray(10);
+      // FINS 帧（自偏移 16）：ICF..SID(10) + MRC(10) SRC(11) ...
+      const fins = frame.subarray(16);
       const mrc = fins[10];
       const src = fins[11];
       const sid = fins[9];
@@ -71,8 +72,10 @@ const server = net.createServer((socket) => {
         const resp = Buffer.concat([respHead, respMeta, Buffer.from([0x00, 0x00]), data]);
         const tcp = Buffer.alloc(8);
         tcp.write('FINS', 0, 'ascii');
-        tcp.writeUInt32BE(2 + resp.length, 4);
-        socket.write(Buffer.concat([tcp, Buffer.from([0x02, 0x00]), resp]));
+        tcp.writeUInt32BE(8 + resp.length, 4);
+        const prefix = Buffer.alloc(8);
+        prefix.writeUInt32BE(0x00000002, 0);
+        socket.write(Buffer.concat([tcp, prefix, resp]));
         console.log(`[fins-sim] word read D${word} x${count}`);
       } else if (src === 0x02 && mrc === 0x01) {
         // 字写：area(12) addr(13..14) count(15..16) data(17..)
@@ -89,8 +92,10 @@ const server = net.createServer((socket) => {
         const resp = Buffer.concat([respHead, respMeta, Buffer.from([0x00, 0x00])]);
         const tcp = Buffer.alloc(8);
         tcp.write('FINS', 0, 'ascii');
-        tcp.writeUInt32BE(2 + resp.length, 4);
-        socket.write(Buffer.concat([tcp, Buffer.from([0x02, 0x00]), resp]));
+        tcp.writeUInt32BE(8 + resp.length, 4);
+        const prefix = Buffer.alloc(8);
+        prefix.writeUInt32BE(0x00000002, 0);
+        socket.write(Buffer.concat([tcp, prefix, resp]));
         console.log(`[fins-sim] word write D${word} x${count}`);
       } else {
         console.log('[fins-sim] unsupported MRC/SRC', mrc.toString(16), src.toString(16));

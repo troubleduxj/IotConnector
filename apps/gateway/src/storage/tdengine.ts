@@ -52,6 +52,8 @@ export class TDengineWriter {
   private pingPath: '/-/ping' | '/rest/ping' = '/-/ping';
 
   private static readonly MAX_QUEUE = 100_000;
+  /** Bound each recovery statement so TDengine does not reject a large outbox. */
+  private static readonly MAX_INSERT_POINTS = 500;
   private static readonly AUTH = (cfg: TDengineConfig) => ({
     Authorization: `Basic ${Buffer.from(`${cfg.user}:${cfg.password}`).toString('base64')}`,
   });
@@ -174,6 +176,11 @@ export class TDengineWriter {
       this.dropped += 1;
       return;
     }
+    if (!Number.isFinite(numeric)) {
+      this.dropped += 1;
+      this.error = 'non-finite sample dropped';
+      return;
+    }
     this.queue.push({
       child: childTableName(tag.name),
       tagName: escTag(tag.name),
@@ -197,8 +204,7 @@ export class TDengineWriter {
       if (!this.inited) return;
     }
     this.flushing = true;
-    const batch = this.queue;
-    this.queue = [];
+    const batch = this.queue.splice(0, TDengineWriter.MAX_INSERT_POINTS);
     // 每个子表一条 USING 子句，多行值合并，减少 SQL 体积
     const byChild = new Map<string, PendingPoint[]>();
     for (const p of batch) {

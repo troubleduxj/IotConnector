@@ -22,15 +22,17 @@ agent.getAuthorizer().addCommunity('public');
 const mib = agent.getMib();
 
 /** 动态标量 provider：每次 GET 现算（轮询可观察变化） */
-function dynamicScalar(name: string, oid: string, scalarType: ObjectType, compute: () => number | string): void {
+function dynamicScalar(name: string, oid: string, scalarType: ObjectType, compute: () => number | string, writable = false): void {
   mib.registerProvider({
     name,
     type: MibProviderType.Scalar,
     oid,
     scalarType,
-    maxAccess: MaxAccess['read-only'],
+    maxAccess: writable ? MaxAccess['read-write'] : MaxAccess['read-only'],
     handler: (mibRequest) => {
-      mibRequest.instanceNode.value = compute();
+      if (mibRequest.operation !== snmp.PduType.SetRequest) {
+        mibRequest.instanceNode.value = compute();
+      }
       mibRequest.done();
     },
   });
@@ -42,8 +44,8 @@ let tick = 0;
 dynamicScalar('upsInputVoltage', '1.3.6.1.4.1.99999.1.1', ObjectType.Integer, () => {
   tick += 1;
   return 220 + Math.round(Math.sin(tick / 10) * 6);
-});
-dynamicScalar('upsBatteryLevel', '1.3.6.1.4.1.99999.1.2', ObjectType.Gauge, () => 85 + (tick % 15));
+}, true);
+dynamicScalar('upsBatteryLevel', '1.3.6.1.4.1.99999.1.2', ObjectType.Gauge, () => 85 + (tick % 15), true);
 dynamicScalar('upsLocationNote', '1.3.6.1.4.1.99999.1.3', ObjectType.OctetString, () => `Rack-A ${new Date().toLocaleTimeString()}`);
 
 // 静态 sysDescr（1.3.6.1.2.1.1.1.0），便于默认探针验证

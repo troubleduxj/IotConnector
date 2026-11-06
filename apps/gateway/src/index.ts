@@ -556,6 +556,34 @@ async function main(): Promise<void> {
     return channel;
   });
 
+  // 设备级灰度兼容接口：Node 兼容期固定由 Node 驱动承载，支持读取、回滚标记和 Auto 清除覆盖。
+  // Go 选择在 Node 网关上明确拒绝，避免界面显示已切 Go 但实际仍由 Node 采集。
+  app.get('/api/channels/:id/driver', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'operator');
+    if (!actor) return;
+    const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
+    if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
+    return { channelId: channel.id, protocol: channel.protocol, driver: 'node' };
+  });
+
+  app.put('/api/channels/:id/driver', async (req, reply) => {
+    const actor = requireAuth(req, reply, 'admin');
+    if (!actor) return;
+    const channel = channels.find((c) => c.id === (req.params as { id: string }).id);
+    if (!channel) return reply.code(404).send({ ok: false, error: 'channel not found' });
+    const driver = String((req.body as { driver?: unknown } | undefined)?.driver ?? '').trim().toLowerCase();
+    if (!['auto', 'go', 'node'].includes(driver)) return reply.code(400).send({ ok: false, error: 'driver must be auto, go or node' });
+    if (driver === 'go') return reply.code(400).send({ ok: false, error: 'Go driver is unavailable on the Node gateway' });
+    channel.params = { ...(channel.params ?? {}) };
+    if (driver === 'node') channel.params.driver = 'node';
+    else delete channel.params.driver;
+    persist();
+    void engine.reloadChannel(channel.id);
+    broadcastConfigChanged();
+    auditLog(actor, 'channel.driver.update', `${channel.name}: ${driver}`);
+    return { channelId: channel.id, protocol: channel.protocol, driver };
+  });
+
   // 通道配置导出（FR-M2-05）：JSON 下载，含通道全部参数与点位表
   app.get('/api/channels/:id/export', async (req, reply) => {
     const actor = requireAuth(req, reply, 'engineer');

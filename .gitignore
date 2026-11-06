@@ -20,3 +20,21 @@ playwright-report/
 test-results/
 .pnpm-store/
 apps/gateway/service-install.log
+
+# Go gateway runtime state
+apps/gateway-go/**/auth.json
+apps/gateway-go/**/sessions.json
+apps/gateway-go/**/audit.jsonl
+apps/gateway-go/**/history.jsonl
+apps/gateway-go/**/outbox.json
+apps/gateway-go/**/alarm-outbox.json
+apps/gateway-go/**/northbound.json
+apps/gateway/data/northbound.json
+
+# Build outputs and local scratch
+*.exe
+.tmp/
+apps/*/.tmp/
+.playwright-cli/
+logs/
+docs/artifacts/tmp-*.json

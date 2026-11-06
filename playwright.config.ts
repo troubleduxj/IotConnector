@@ -11,10 +11,10 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   use: {
-    baseURL: 'http://localhost:3001',
+    baseURL: process.env.E2E_BASE_URL || 'http://localhost:3001',
     headless: true,
     channel: 'msedge', // 复用系统 Edge（免下载 Chromium，CDN 受限环境可用）
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'smoke', testMatch: /smoke\.spec\.ts/ }],
+  projects: [{ name: 'smoke', testMatch: /.*\.spec\.ts/ }],
 });

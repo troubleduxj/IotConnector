@@ -17,7 +17,17 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/gateway-go/go.mod
+          cache-dependency-path: apps/gateway-go/go.sum
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
       - run: pnpm test
       - run: pnpm --filter @iotconnector/console build
+      - run: go test ./...
+        working-directory: apps/gateway-go
+      - run: go vet ./...
+        working-directory: apps/gateway-go
+      - run: go build ./cmd/factorybridge
+        working-directory: apps/gateway-go

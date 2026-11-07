@@ -22,11 +22,11 @@
 
 | ID | 问题 | 位置 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|---|
-| B1 | WebSocket `write` 只检查"已订阅"，不检查角色，viewer 可写 PLC | `internal/api/websocket.go:168-183` | `wsClient` 记录角色，写入要求 operator；补测试 | P0 | S |
-| B2 | WS `CheckOrigin` 恒为 true；CORS 只拦预检，简单跨域 POST 仍会执行；JSON 不校验 Content-Type | `websocket.go:85`、`server.go:418-423` | Origin 同源 + 白名单；POST/PUT 强制 `application/json` | P0 | S |
+| B1 | ✅ 已修复（阶段 1，eae395d）。WebSocket `write` 只检查"已订阅"，不检查角色，viewer 可写 PLC | `internal/api/websocket.go:168-183` | `wsClient` 记录角色，写入要求 operator；补测试 | P0 | S |
+| B2 | ✅ 已修复（阶段 1，eae395d、acb3ca1）。WS `CheckOrigin` 恒为 true；CORS 只拦预检，简单跨域 POST 仍会执行；JSON 不校验 Content-Type | `websocket.go:85`、`server.go:418-423` | Origin 同源 + 白名单；POST/PUT 强制 `application/json` | P0 | S |
 | B3 | 未配置 Token/密码时"开放模式"按 admin 放行全部请求 | `server.go:941`、`websocket.go:213` | Q3 已决定：去掉"没配就放行"的隐式开放，改为显式开发模式，规则见 H 组 H5 | P0 | S |
-| B4 | 敏感信息可读：`/api/config` 返回完整原始配置，`/api/northbound`、`/api/notifications` 返回 MQTT/SMTP/钉钉密钥；`/api/system/info` 无鉴权且含 TDengine URL | `server.go:514-520,1078`、`northbound.go:16`、`notifications.go:20` | 密码字段只写不读（省略即保留原值）；system/info 去掉内部地址 | P0 | M |
-| B5 | 登录未调用限速；失败计数 map 不清理；无请求体大小限制；`http.Server` 无读写超时 | `server.go:317-354,1014-1024`、`main.go:140-145` | 登录按 IP+用户名限速；`MaxBytesReader`；设置 Read/WriteTimeout | P0 | S |
+| B4 | ✅ 已修复（阶段 1，a495b8f）。敏感信息可读：`/api/config` 返回完整原始配置，`/api/northbound`、`/api/notifications` 返回 MQTT/SMTP/钉钉密钥；`/api/system/info` 无鉴权且含 TDengine URL | `server.go:514-520,1078`、`northbound.go:16`、`notifications.go:20` | 密码字段只写不读（省略即保留原值）；system/info 去掉内部地址 | P0 | M |
+| B5 | ✅ 已修复（阶段 1，acb3ca1）。登录未调用限速；失败计数 map 不清理；无请求体大小限制；`http.Server` 无读写超时 | `server.go:317-354,1014-1024`、`main.go:140-145` | 登录按 IP+用户名限速；`MaxBytesReader`；设置 Read/WriteTimeout | P0 | S |
 | B6 | 审计操作者取自客户端 `X-User` 头，可伪造 | `server.go:935,1041` | 从会话取用户名 | P1 | S |
 | B7 | 鉴权按路由各自调用，缺统一"默认拒绝"中间件 | `server.go:252` 起 62 条路由 | 统一中间件 + 公开路由白名单；RBAC 矩阵测试 | P1 | M |
 | B8 | 脚本子进程继承全部环境变量（含密钥），无内存上限；inline 模式写入次数不限 | `scripts.go:213-221,315` | 子进程只传白名单环境变量；设内存上限；inline 模式仅限开发 | P1 | S |
@@ -36,8 +36,8 @@
 
 | ID | 问题 | 位置 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|---|
-| C1 | `esc()` 先把 `'` 转成 `\'` 再把 `\` 换成 `_`，留下裸引号；位号名或告警文本含 `'` 时整批写入失败并在队首无限重试，堵死全部存储 | `internal/storage/tdengine.go:463` | 修正转义（单引号双写）或改参数化写入；补测试 | P0 | S |
-| C2 | `config.Raw` map 被采样/告警协程无锁读、API 加锁写，会触发 Go 致命错误使进程退出；`onSample` 无锁遍历 `config.Tags` | `store.go:70-72`、`scripts.go:125`、`notifications.go:75`、`server.go:151,170,835` | 配置改为不可变快照（atomic.Pointer），修改时写时复制；CI 跑 `-race` | P0 | M |
+| C1 | ✅ 已修复（阶段 1，827ad1e）。`esc()` 先把 `'` 转成 `\'` 再把 `\` 换成 `_`，留下裸引号；位号名或告警文本含 `'` 时整批写入失败并在队首无限重试，堵死全部存储 | `internal/storage/tdengine.go:463` | 修正转义（单引号双写）或改参数化写入；补测试 | P0 | S |
+| C2 | ✅ 已修复（阶段 1，91bba6e）。`config.Raw` map 被采样/告警协程无锁读、API 加锁写，会触发 Go 致命错误使进程退出；`onSample` 无锁遍历 `config.Tags` | `store.go:70-72`、`scripts.go:125`、`notifications.go:75`、`server.go:151,170,835` | 配置改为不可变快照（atomic.Pointer），修改时写时复制；CI 跑 `-race` | P0 | M |
 | C3 | 每个样本同步写盘：history 每点 fsync 且不轮转；outbox 每次入队重写整个队列（最多 10 万点）；shadow、northbound 状态同样 | `monitoring.go:72-78`、`tdengine.go:232,410-433`、`shadow.go:69`、`publisher.go:226` | 批量刷盘（按时间/条数）；history 轮转；outbox 改追加分段 | P1 | M |
 | C4 | outbox 分段先删旧再写新，中间崩溃丢数据；northbound/shadow/password 写入非原子或无 fsync | `tdengine.go:417-420`、`publisher.go:337`、`shadow.go:162`、`password.go:140` | 统一使用"临时文件 + fsync + rename"工具函数 | P1 | S |
 | C5 | 改配置先改内存再保存，失败不回滚；每次改通道/位号重启全部驱动且持锁；北向发布器和 CMD 处理只认启动时配置 | `server.go:834-845`、`engine.go:114`、`main.go:90,93` | 保存成功后再切换快照；按通道增量重载；北向订阅配置变更 | P1 | M |

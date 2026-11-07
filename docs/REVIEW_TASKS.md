@@ -38,14 +38,14 @@
 |---|---|---|---|---|---|
 | C1 | ✅ 已修复（阶段 1，827ad1e）。`esc()` 先把 `'` 转成 `\'` 再把 `\` 换成 `_`，留下裸引号；位号名或告警文本含 `'` 时整批写入失败并在队首无限重试，堵死全部存储 | `internal/storage/tdengine.go:463` | 修正转义（单引号双写）或改参数化写入；补测试 | P0 | S |
 | C2 | ✅ 已修复（阶段 1，91bba6e）。`config.Raw` map 被采样/告警协程无锁读、API 加锁写，会触发 Go 致命错误使进程退出；`onSample` 无锁遍历 `config.Tags` | `store.go:70-72`、`scripts.go:125`、`notifications.go:75`、`server.go:151,170,835` | 配置改为不可变快照（atomic.Pointer），修改时写时复制；CI 跑 `-race` | P0 | M |
-| C3 | 每个样本同步写盘：history 每点 fsync 且不轮转；outbox 每次入队重写整个队列（最多 10 万点）；shadow、northbound 状态同样 | `monitoring.go:72-78`、`tdengine.go:232,410-433`、`shadow.go:69`、`publisher.go:226` | 批量刷盘（按时间/条数）；history 轮转；outbox 改追加分段 | P1 | M |
-| C4 | outbox 分段先删旧再写新，中间崩溃丢数据；northbound/shadow/password 写入非原子或无 fsync | `tdengine.go:417-420`、`publisher.go:337`、`shadow.go:162`、`password.go:140` | 统一使用"临时文件 + fsync + rename"工具函数 | P1 | S |
+| C3 | ✅ 已完成（阶段 3，16a5fb1）。每个样本同步写盘：history 每点 fsync 且不轮转；outbox 每次入队重写整个队列（最多 10 万点）；shadow、northbound 状态同样 | `monitoring.go:72-78`、`tdengine.go:232,410-433`、`shadow.go:69`、`publisher.go:226` | 批量刷盘（按时间/条数）；history 轮转；outbox 改追加分段 | P1 | M |
+| C4 | ✅ 已完成（阶段 3，16a5fb1）。outbox 分段先删旧再写新，中间崩溃丢数据；northbound/shadow/password 写入非原子或无 fsync | `tdengine.go:417-420`、`publisher.go:337`、`shadow.go:162`、`password.go:140` | 统一使用"临时文件 + fsync + rename"工具函数 | P1 | S |
 | C5 | 改配置先改内存再保存，失败不回滚；每次改通道/位号重启全部驱动且持锁；北向发布器和 CMD 处理只认启动时配置 | `server.go:834-845`、`engine.go:114`、`main.go:90,93` | 保存成功后再切换快照；按通道增量重载；北向订阅配置变更 | P1 | M |
 | C6 | Patch 接口可改写 `id`/`channelId`，跳过端口和通道校验 | `server.go:568-569,772-773` | 禁止修改主键字段；更新后重新跑校验 | P1 | S |
 | C7 | WS 每个样本单独发一条消息；客户端缓冲（32）满时静默丢弃 | `server.go:176`、`websocket.go:75-78` | 按 50–100 ms 合并批次；记录丢弃计数 | P1 | S |
 | C8 | 单个 Modbus 位号出错导致整个通道 offline | `acquisition/modbus.go:99-101` | 位号级质量码，通道状态只反映连接 | P1 | S |
 | C9 | 脚本 `AutoDisabled` 重新启用后不复位 | `scripts.go:185,357` | 启用时清零崩溃计数 | P2 | S |
-| C10 | 关停时不停止北向发布器和脚本定时器，不做最终刷盘 | `main.go:155-165` | 有序关停 + 最终 flush | P2 | S |
+| C10 | ✅ 已完成（阶段 3，16a5fb1）。关停时不停止北向发布器和脚本定时器，不做最终刷盘 | `main.go:155-165` | 有序关停 + 最终 flush | P2 | S |
 | C11 | `/api/scheduler`、`/api/channels/{id}/test` 返回占位数据 | `server.go:825-828,892-898` | 实现或在 UI 标注"未实现" | P2 | M |
 
 ## D. Node 网关（已决定：冻结后下线）
@@ -103,10 +103,10 @@
 | ID | 内容 | 依赖 | 优先级 | 工作量 |
 |---|---|---|---|---|
 | G1 | ✅ 已完成（阶段 2，a629c88）。引入 `modernc.org/sqlite`，新建 `internal/db`：单一 `gateway.db`、WAL 模式、`busy_timeout`、带版本号的 schema 迁移；数据目录独立于 Node（合并 A4） | — | P1 | M |
-| G2 | outbox 迁入 SQLite：按序追加、批量出队删除、上限和最大时长裁剪、丢弃计数；启动时导入旧 `outbox.json` 和分段文件 | G1 | P1 | M |
-| G3 | history 缓冲、告警事件、审计迁入 SQLite，按时间索引、按保留期清理；导入旧 `history.jsonl`、`alarms.jsonl*`、`audit.jsonl` 时跳过损坏行 | G1 | P1 | M |
-| G4 | 会话、shadow、北向序号迁入 SQLite；写入改为批量刷盘（按时间或条数），不再每个样本写一次 | G1 | P1 | S |
-| G5 | 迁移完成后把旧 JSON 文件改名为 `*.migrated` 保留，不直接删除；补导入测试和崩溃恢复测试 | G2–G4 | P1 | S |
+| G2 | ✅ 已完成（阶段 3，11cd43c）。outbox 迁入 SQLite：按序追加、批量出队删除、上限和最大时长裁剪、丢弃计数；启动时导入旧 `outbox.json` 和分段文件 | G1 | P1 | M |
+| G3 | ✅ 已完成（阶段 3，4ddc6ea）。history 缓冲、告警事件、审计迁入 SQLite，按时间索引、按保留期清理；导入旧 `history.jsonl`、`alarms.jsonl*`、`audit.jsonl` 时跳过损坏行 | G1 | P1 | M |
+| G4 | ✅ 已完成（阶段 3，16a5fb1）。会话、shadow、北向序号迁入 SQLite；写入改为批量刷盘（按时间或条数），不再每个样本写一次 | G1 | P1 | S |
+| G5 | ✅ 已完成（阶段 3，2e23456）。迁移完成后把旧 JSON 文件改名为 `*.migrated` 保留，不直接删除；补导入测试和崩溃恢复测试 | G2–G4 | P1 | S |
 | G6 | 第二步：`Raw` 字段全部类型化，通道、位号、告警规则、北向、通知配置迁入 SQLite；JSON 只保留为导入导出和备份格式 | C2、G1 | P2 | L |
 
 G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依赖 G 组，可以先做。
@@ -188,3 +188,17 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
   - 配置类写操作（通道、位号、告警、配方、脚本、存储任务、北向、通知）要求 engineer。
   - 用户、会话、审计、驱动切换、系统运维要求 admin。
   - 写值、告警确认、脚本运行、配方下发要求 operator。
+
+## 阶段 3 记录（2026-11-07）
+
+- 状态数据（outbox、历史缓冲、告警事件、审计、影子、北向队列）全部迁入 `gateway.db`，写入经 `db.Batch` 每秒合并为一个事务。
+- 实测：
+  - 硬杀进程后库完整（`integrity_check` 为 ok），重启后队列恢复。
+  - 正常关停时，信号前内存队列 498 条，退出后库中 498 条。
+- 用主用数据目录副本跑 `migrate`：
+  - 审计导入 1391 条，其中 1317 条为 Node 格式。
+  - 影子导入 55 条；北向队列 622 条中 614 条为空帧，已丢弃，导入 8 条。
+  - `history.jsonl` 的 126.9 万点全部超出 7 天保留期，未导入（这些数据最晚到 2026-09-25）。
+- 仍未关闭：
+  - C5 的“按通道增量重载”和“北向订阅配置变更”。
+  - G6：配置迁入 SQLite。

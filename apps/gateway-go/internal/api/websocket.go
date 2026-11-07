@@ -31,6 +31,7 @@ type wsClient struct {
 	mu         sync.RWMutex
 	subscribed bool
 	actor      string
+	role       Role
 }
 
 type wsHub struct {
@@ -79,12 +80,6 @@ func (h *wsHub) broadcast(message any, subscribedOnly bool) {
 	}
 }
 
-var wsUpgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
-	CheckOrigin:     func(*http.Request) bool { return true },
-}
-
 func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	role, ok, mustChange, actor := s.authenticateWebSocket(r)
 	if !ok {
@@ -95,11 +90,17 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "insufficient role", http.StatusForbidden)
 		return
 	}
-	connection, err := wsUpgrader.Upgrade(w, r, nil)
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		// 只接受同源或白名单来源，防止跨站页面借用户浏览器的会话建立连接并写 PLC。
+		CheckOrigin: s.originAllowed,
+	}
+	connection, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	client := &wsClient{conn: connection, send: make(chan []byte, 32), actor: actor}
+	client := &wsClient{conn: connection, send: make(chan []byte, 32), actor: actor, role: role}
 	s.ws.add(client)
 	defer s.ws.remove(client)
 	go s.writeWebSocket(client)
@@ -171,6 +172,11 @@ func (s *Server) handleWebSocketMessage(client *wsClient, message wsClientMessag
 		client.mu.RUnlock()
 		if !subscribed {
 			s.sendWebSocket(client, map[string]any{"type": "write-result", "tagId": message.TagID, "ok": false, "error": "subscription required"})
+			return
+		}
+		// 与 REST 写入（POST /api/tags/{id}/write）同权限：至少 operator。
+		if !roleAllows(client.role, RoleOperator) {
+			s.sendWebSocket(client, map[string]any{"type": "write-result", "tagId": message.TagID, "ok": false, "error": "insufficient role"})
 			return
 		}
 		value, err := decodeWriteValue(message.Value)

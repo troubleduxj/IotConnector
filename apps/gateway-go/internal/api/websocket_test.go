@@ -108,6 +108,32 @@ func TestWebSocketRequiresAuthAndBroadcastsCompatibleMessages(t *testing.T) {
 	if queryHello["type"] != "hello" {
 		t.Fatalf("unexpected query-token hello: %s", mustJSON(queryHello))
 	}
+
+	// 回归 B1：viewer 已订阅也不能经 WebSocket 写 PLC。
+	if err := queryConnection.WriteJSON(map[string]any{"type": "subscribe"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = queryConnection.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var viewerSnapshot map[string]any
+	if err := queryConnection.ReadJSON(&viewerSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := queryConnection.WriteJSON(map[string]any{"type": "write", "tagId": "tag-1", "value": 9}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var message map[string]any
+		if err := queryConnection.ReadJSON(&message); err != nil {
+			t.Fatal(err)
+		}
+		if message["type"] != "write-result" {
+			continue // 跳过实时批次等广播
+		}
+		if message["ok"] != false || message["error"] != "insufficient role" {
+			t.Fatalf("viewer websocket write was not rejected: %s", mustJSON(message))
+		}
+		break
+	}
 }
 
 func mustJSON(value any) string {

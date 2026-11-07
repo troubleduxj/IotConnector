@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -122,6 +123,7 @@ func cmdVersion(args []string, stdout, stderr io.Writer) int {
 // runOptions 是 run 的参数。优先级：命令行 > 环境变量 > 默认值。
 type runOptions struct {
 	dataDir   string
+	webDir    string
 	host      string
 	port      int
 	logLevel  slog.Level
@@ -136,6 +138,7 @@ func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
 	dataDir := fs.String("data-dir", envOr("GATEWAY_GO_DATA_DIR", defaultDataDir()), "数据目录（config.json、auth.json 等）；环境变量 GATEWAY_GO_DATA_DIR")
 	port := fs.Int("port", envInt("GATEWAY_GO_PORT", 18080), "HTTP 端口；环境变量 GATEWAY_GO_PORT")
 	logLevel := fs.String("log-level", envOr("GATEWAY_GO_LOG_LEVEL", "info"), "日志级别 debug|info|warn|error")
+	webDir := fs.String("web-dir", envOr("GATEWAY_GO_WEB_DIR", defaultWebDir()), "控制台静态文件目录（含 index.html）；留空则只提供 API")
 	host := fs.String("host", envOr("GATEWAY_GO_HOST", "127.0.0.1"), "监听地址；开发模式强制 127.0.0.1")
 	dev := fs.Bool("dev", envBool("GATEWAY_GO_DEV", false), "开发模式：建开发账号、放行 localhost 来源、仅限回环地址")
 	devNoAuth := fs.Bool("dev-no-auth", false, "开发模式下跳过登录，所有请求按 admin 处理（隐含 --dev）")
@@ -164,7 +167,7 @@ func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "无效日志级别 %q\n", *logLevel)
 		return exitUsage
 	}
-	return runGateway(runOptions{dataDir: *dataDir, host: *host, port: *port, logLevel: level,
+	return runGateway(runOptions{dataDir: *dataDir, webDir: *webDir, host: *host, port: *port, logLevel: level,
 		dev: *dev, devNoAuth: *devNoAuth, devPass: os.Getenv("FB_DEV_PASSWORD")})
 }
 
@@ -195,4 +198,19 @@ func isLoopback(host string) bool {
 // Windows 服务由 H3 的 service 子命令注入 FB_SERVICE=1（WinSW/SCM 不提供可靠标记）。
 func runningAsService() bool {
 	return os.Getenv("INVOCATION_ID") != "" || os.Getenv("FB_SERVICE") == "1"
+}
+
+// defaultWebDir 依次查找：可执行文件旁的 web/（发布包布局）、仓库内的控制台构建产物（开发布局）。
+func defaultWebDir() string {
+	candidates := []string{}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "web"))
+	}
+	candidates = append(candidates, filepath.Join("apps", "console", "dist"), filepath.Join("..", "console", "dist"))
+	for _, dir := range candidates {
+		if _, err := os.Stat(filepath.Join(dir, "index.html")); err == nil {
+			return dir
+		}
+	}
+	return ""
 }

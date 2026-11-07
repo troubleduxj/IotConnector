@@ -38,6 +38,8 @@ type Server struct {
 	credentials         map[string]Role
 	users               *auth.UserStore
 	devMode             bool
+	web                 http.Handler
+	closeWeb            func() error
 	devNoAuth           bool
 	audit               *audit.Logger
 	cors                map[string]struct{}
@@ -67,6 +69,8 @@ type SecurityOptions struct {
 	AdminToken    string
 	// Users 为空时只能用静态令牌访问（测试与无人值守场景）；生产由 run 命令打开 SQLite 后传入。
 	Users *auth.UserStore
+	// WebDir 是控制台构建产物目录；存在 index.html 时网关同端口托管页面（F1）。
+	WebDir string
 	// DevMode 放行 http://localhost:* 与 http://127.0.0.1:* 来源（Vite 开发服务器），
 	// 并在 /api/system/info 与 /api/auth/me 中标明。绑定地址由 run 命令强制为回环。
 	DevMode bool
@@ -151,6 +155,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	}
 	initial := cfg.Clone()
 	server.cfgPtr.Store(&initial)
+	server.web, server.closeWeb = newWebHandler(options.WebDir)
 	server.alarms.state = state
 	server.alarms.history = state.loadAlarmHistory(context.Background(), alarmHistoryLimit)
 	server.ws = newWSHub()
@@ -328,7 +333,7 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, "DELETE /api/auth/sessions/{sessionID}", adminOnly, s.revokeSession)
 	s.route(mux, "GET /api/audit", adminOnly, s.auditLog)
 	s.route(mux, "GET /ws", public, s.websocketHandler)
-	return s.withCORS(mux)
+	return withWeb(s.withCORS(mux), s.web)
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -1141,3 +1146,14 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+
+// Close 释放服务器持有的资源（静态文件目录句柄）。
+func (s *Server) Close() error {
+	if s.closeWeb != nil {
+		return s.closeWeb()
+	}
+	return nil
+}
+
+// WebEnabled 报告是否在托管控制台页面。
+func (s *Server) WebEnabled() bool { return s.web != nil }

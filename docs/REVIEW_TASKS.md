@@ -202,3 +202,8 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 - 仍未关闭：
   - C5 的“按通道增量重载”和“北向订阅配置变更”。
   - G6：配置迁入 SQLite。
+
+## 阶段 4 决定（2026-11-07）
+
+- 模拟器：改用 ProtoForge（`D:\Projects\sim-foundry-main`），本项目不再维护 Node 模拟器。ProtoForge 没有 IEC104，IEC104 模拟器暂留 `apps/gateway/scripts`。故障矩阵与 compose 改指 ProtoForge 后，Node 网关即可冻结（D0）。
+- HTTPS：默认仍只监听 127.0.0.1、走 HTTP。`--host` 设为非回环地址时强制 HTTPS：未提供证书则自动生成自签名证书；可配置客户端网段白名单。

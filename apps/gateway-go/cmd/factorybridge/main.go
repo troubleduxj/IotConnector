@@ -97,6 +97,7 @@ func runGateway(opts runOptions) int {
 			Users:         users,
 			DevMode:       opts.dev,
 			DevNoAuth:     opts.devNoAuth,
+			WebDir:        opts.webDir,
 			StateDB:       database,
 			State:         stateBatch,
 			HistoryFile:   filepath.Join(dataDir, "history.jsonl"),
@@ -138,6 +139,10 @@ func runGateway(opts runOptions) int {
 			}
 		}
 		return fmt.Errorf("unknown MQTT command metric: %s", name)
+	}
+	defer serverHandler.Close()
+	if serverHandler.WebEnabled() {
+		logger.Info("serving console", "dir", opts.webDir)
 	}
 	serverHandler.AttachNorthbound(northboundPublisher)
 	northboundPublisher.Start()

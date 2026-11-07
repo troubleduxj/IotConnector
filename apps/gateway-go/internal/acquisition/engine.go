@@ -310,6 +310,7 @@ func statusLatency(detail string) (int64, bool) {
 		return 0, false
 	}
 	for _, field := range strings.Fields(detail) {
+		field = strings.TrimRight(field, ",;")
 		if !strings.HasSuffix(field, "ms") {
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,14 +15,14 @@ import (
 )
 
 func (s *Server) storageTasksSnapshot() []map[string]any {
-	items, ok := s.config.Raw["storageTasks"].([]any)
+	items, ok := s.cfg().Raw["storageTasks"].([]any)
 	if !ok {
 		return []map[string]any{}
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		if task, ok := item.(map[string]any); ok {
-			result = append(result, cloneMap(task))
+			result = append(result, config.DeepCopyMap(task))
 		}
 	}
 	return result
@@ -40,11 +41,7 @@ func (s *Server) saveStorageTasks(tasks []map[string]any) error {
 	for _, task := range tasks {
 		items = append(items, task)
 	}
-	s.config.Raw["storageTasks"] = items
-	if s.configStore == nil {
-		return nil
-	}
-	return s.configStore.Save(s.config)
+	return s.commitRawLocked("storageTasks", items)
 }
 
 func (s *Server) storageTasks(w http.ResponseWriter, r *http.Request) {

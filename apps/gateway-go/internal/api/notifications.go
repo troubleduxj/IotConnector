@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
 	"net"
 	"net/http"
 	"net/smtp"
@@ -37,11 +38,7 @@ func (s *Server) updateNotifications(w http.ResponseWriter, r *http.Request) {
 	s.configMu.Lock()
 	current := s.notificationConfig()
 	mergeMap(current, patch)
-	s.config.Raw["notifications"] = current
-	err := error(nil)
-	if s.configStore != nil {
-		err = s.configStore.Save(s.config)
-	}
+	err := s.commitRawLocked("notifications", current)
 	s.configMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -73,8 +70,8 @@ func (s *Server) testNotification(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) notificationConfig() map[string]any {
-	if value, ok := s.config.Raw["notifications"].(map[string]any); ok {
-		return cloneMap(value)
+	if value, ok := s.cfg().Raw["notifications"].(map[string]any); ok {
+		return config.DeepCopyMap(value)
 	}
 	return map[string]any{"enabled": false, "webhookUrl": "", "dingtalk": map[string]any{"enabled": false, "webhookUrl": "", "secret": ""}, "wecom": map[string]any{"enabled": false, "webhookUrl": ""}, "email": map[string]any{"enabled": false}}
 }

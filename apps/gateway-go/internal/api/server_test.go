@@ -131,7 +131,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"driver":"go"`) {
 		t.Fatalf("unexpected Go switch response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if got := server.config.Channels[0].Params["driver"]; got != "bacnet-go" {
+	if got := server.cfg().Channels[0].Params["driver"]; got != "bacnet-go" {
 		t.Fatalf("stored driver=%v, want bacnet-go", got)
 	}
 
@@ -139,7 +139,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK || server.config.Channels[0].Params["driver"] != "node" {
+	if recorder.Code != http.StatusOK || server.cfg().Channels[0].Params["driver"] != "node" {
 		t.Fatalf("unexpected Node rollback response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
@@ -150,8 +150,8 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("unexpected auto response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if _, ok := server.config.Channels[0].Params["driver"]; ok {
-		t.Fatalf("auto switch did not remove explicit driver: %#v", server.config.Channels[0].Params)
+	if _, ok := server.cfg().Channels[0].Params["driver"]; ok {
+		t.Fatalf("auto switch did not remove explicit driver: %#v", server.cfg().Channels[0].Params)
 	}
 }
 

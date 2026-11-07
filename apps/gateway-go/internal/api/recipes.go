@@ -36,7 +36,7 @@ type recipeDownload struct {
 }
 
 func (s *Server) recipesSnapshot() []recipe {
-	items, ok := s.config.Raw["recipes"].([]any)
+	items, ok := s.cfg().Raw["recipes"].([]any)
 	if !ok {
 		return []recipe{}
 	}
@@ -60,11 +60,7 @@ func (s *Server) saveRecipes(items []recipe) error {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
-	s.config.Raw["recipes"] = raw
-	if s.configStore != nil {
-		return s.configStore.Save(s.config)
-	}
-	return nil
+	return s.commitRawLocked("recipes", raw)
 }
 
 func actorName(r *http.Request) string {
@@ -205,7 +201,7 @@ func (s *Server) downloadRecipe(w http.ResponseWriter, r *http.Request) {
 	okCount := 0
 	for _, item := range selected.Items {
 		var tagName string
-		for _, tag := range s.config.Tags {
+		for _, tag := range s.cfg().Tags {
 			if tag.ID == item.TagID {
 				tagName = tag.Name
 				break
@@ -268,7 +264,7 @@ func (s *Server) recipeDownloads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.recipeDownloadsSnapshot())
 }
 func (s *Server) recipeDownloadsSnapshot() []recipeDownload {
-	items, ok := s.config.Raw["recipeDownloads"].([]any)
+	items, ok := s.cfg().Raw["recipeDownloads"].([]any)
 	if !ok {
 		return []recipeDownload{}
 	}
@@ -281,11 +277,7 @@ func (s *Server) saveRecipeDownloads(items []recipeDownload) error {
 	b, _ := json.Marshal(items)
 	var raw []any
 	_ = json.Unmarshal(b, &raw)
-	s.config.Raw["recipeDownloads"] = raw
-	if s.configStore != nil {
-		return s.configStore.Save(s.config)
-	}
-	return nil
+	return s.commitRawLocked("recipeDownloads", raw)
 }
 
 func (s *Server) duplicateRecipe(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +345,7 @@ func (s *Server) importRecipe(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, item := range body.Recipe.Items {
 		found := false
-		for _, tag := range s.config.Tags {
+		for _, tag := range s.cfg().Tags {
 			if tag.ID == item.TagID {
 				found = true
 				break

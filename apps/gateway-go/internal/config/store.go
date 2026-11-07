@@ -119,3 +119,65 @@ func migrate(raw map[string]any) error {
 	raw["schemaVersion"] = CurrentSchemaVersion
 	return nil
 }
+
+// Clone 返回深拷贝。运行时把已发布的配置视为只读：写入方先 Clone、修改副本、保存，
+// 再整体替换指针，读取方因此无需加锁，也不会遇到 map 被并发写入（C2）。
+func (c Config) Clone() Config {
+	out := Config{SchemaVersion: c.SchemaVersion}
+	if c.Channels != nil {
+		out.Channels = make([]domain.Channel, len(c.Channels))
+		for i, channel := range c.Channels {
+			channel.Params = DeepCopyMap(channel.Params)
+			out.Channels[i] = channel
+		}
+	}
+	if c.Tags != nil {
+		out.Tags = make([]domain.Tag, len(c.Tags))
+		for i, tag := range c.Tags {
+			if tag.EngMin != nil {
+				v := *tag.EngMin
+				tag.EngMin = &v
+			}
+			if tag.EngMax != nil {
+				v := *tag.EngMax
+				tag.EngMax = &v
+			}
+			out.Tags[i] = tag
+		}
+	}
+	out.Raw = DeepCopyMap(c.Raw)
+	return out
+}
+
+// DeepCopyMap 递归复制 JSON 形态的 map/slice；其他类型按值保留。
+func DeepCopyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = deepCopyValue(value)
+	}
+	return out
+}
+
+func deepCopyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return DeepCopyMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = deepCopyValue(item)
+		}
+		return out
+	case []map[string]any:
+		out := make([]map[string]any, len(typed))
+		for i, item := range typed {
+			out[i] = DeepCopyMap(item)
+		}
+		return out
+	default:
+		return value
+	}
+}

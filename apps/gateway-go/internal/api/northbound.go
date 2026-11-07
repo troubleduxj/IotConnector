@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
 	"net/http"
 )
 
@@ -33,11 +34,7 @@ func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
 	s.configMu.Lock()
 	cfg := s.northboundConfig()
 	mergeMap(cfg, patch)
-	s.config.Raw["northbound"] = cfg
-	err := error(nil)
-	if s.configStore != nil {
-		err = s.configStore.Save(s.config)
-	}
+	err := s.commitRawLocked("northbound", cfg)
 	s.configMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
@@ -57,8 +54,8 @@ func (s *Server) rebirthNorthbound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) northboundConfig() map[string]any {
-	if cfg, ok := s.config.Raw["northbound"].(map[string]any); ok {
-		return cloneMap(cfg)
+	if cfg, ok := s.cfg().Raw["northbound"].(map[string]any); ok {
+		return config.DeepCopyMap(cfg)
 	}
 	return map[string]any{"enabled": false, "url": "mqtt://127.0.0.1:1883", "groupId": "Factory", "edgeNodeId": "FB_Edge_GW01", "dataFlushMs": 1000}
 }

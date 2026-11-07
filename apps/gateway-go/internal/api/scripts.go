@@ -122,7 +122,7 @@ func (e *scriptEngine) onSample(sample acquisition.Sample) {
 }
 
 func (e *scriptEngine) scripts() []gatewayScript {
-	items, ok := e.server.config.Raw["scripts"].([]any)
+	items, ok := e.server.cfg().Raw["scripts"].([]any)
 	if !ok {
 		return []gatewayScript{}
 	}
@@ -140,11 +140,7 @@ func (e *scriptEngine) save(items []gatewayScript) error {
 	if err = json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
-	e.server.config.Raw["scripts"] = raw
-	if e.server.configStore != nil {
-		return e.server.configStore.Save(e.server.config)
-	}
-	return nil
+	return e.server.commitRawLocked("scripts", raw)
 }
 
 func (e *scriptEngine) list() []map[string]any {
@@ -193,7 +189,7 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 	runtime := goja.New()
 	start := time.Now()
 	lookup := func(key string) (any, error) {
-		for _, tag := range e.server.config.Tags {
+		for _, tag := range e.server.cfg().Tags {
 			if tag.ID == key || tag.Name == key {
 				if sample, ok := e.server.engine.SnapshotByID(tag.ID); ok {
 					return wireValue(sample.Value), nil
@@ -211,7 +207,7 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 		return value
 	})
 	runtime.Set("Write", func(key string, value any) {
-		for _, tag := range e.server.config.Tags {
+		for _, tag := range e.server.cfg().Tags {
 			if tag.ID == key || tag.Name == key {
 				writes = append(writes, struct {
 					tagID string
@@ -295,7 +291,7 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]any, error) {
 	values := map[string]any{}
 	tags := map[string]string{}
-	for _, tag := range e.server.config.Tags {
+	for _, tag := range e.server.cfg().Tags {
 		tags[tag.ID], tags[tag.Name] = tag.ID, tag.ID
 		if sample, ok := e.server.engine.SnapshotByID(tag.ID); ok {
 			values[tag.ID], values[tag.Name] = wireValue(sample.Value), wireValue(sample.Value)

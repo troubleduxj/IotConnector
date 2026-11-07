@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
@@ -31,7 +32,7 @@ import (
 
 type Server struct {
 	startedAt           time.Time
-	config              config.Config
+	cfgPtr              atomic.Pointer[config.Config]
 	engine              *acquisition.Engine
 	credentials         map[string]Role
 	sessions            *auth.Manager
@@ -136,7 +137,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 		credentials[options.AdminToken] = RoleAdmin
 	}
 	server := &Server{
-		startedAt: time.Now(), config: cfg, engine: engine, credentials: credentials, audit: options.Audit,
+		startedAt: time.Now(), engine: engine, credentials: credentials, audit: options.Audit,
 		sessions: auth.NewManager(options.SessionTTL, options.SessionFile), passwordStore: passwordStore, loginUsername: options.LoginUsername, loginPassword: options.LoginPassword, loginHash: options.LoginPasswordHash,
 		cors: origins, failures: make(map[string]authFailure),
 		failureLimit: options.FailureLimit, failureWindow: options.FailureWindow,
@@ -146,11 +147,13 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 		storage:      options.Storage,
 		shadowStore:  shadow.New(options.ShadowFile, nil),
 	}
+	initial := cfg.Clone()
+	server.cfgPtr.Store(&initial)
 	server.ws = newWSHub()
 	engine.SetOnSample(func(sample acquisition.Sample) {
 		server.historyStore.add(sample)
 		if server.storage != nil {
-			for _, tag := range server.config.Tags {
+			for _, tag := range server.cfg().Tags {
 				if tag.ID == sample.TagID {
 					server.storage.Enqueue(acquisition.Tag{ID: tag.ID, Name: tag.Name, ChannelID: tag.ChannelID, DataType: tag.DataType}, sample)
 					break
@@ -169,7 +172,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 		}
 		server.shadowStore.SetReported(sample.TagID, wireValue(sample.Value), string(sample.Quality), sample.SampledAt)
 		server.scheduleShadowPublish()
-		for _, tag := range server.config.Tags {
+		for _, tag := range server.cfg().Tags {
 			if tag.ID == sample.TagID {
 				server.alarms.evaluate(tag, sample)
 				break
@@ -196,7 +199,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 func (s *Server) AttachNorthbound(publisher *northbound.Publisher) { s.northboundPublisher = publisher }
 
 func (s *Server) SetShadowDesiredByName(name string, value any, by string) {
-	for _, tag := range s.config.Tags {
+	for _, tag := range s.cfg().Tags {
 		if tag.Name == name {
 			s.shadowStore.SetDesired(tag.ID, value, by)
 			s.scheduleShadowPublish()
@@ -225,7 +228,7 @@ func (s *Server) shadowSnapshot() []map[string]any {
 	entries := s.shadowStore.Snapshot()
 	result := make([]map[string]any, 0, len(entries))
 	for _, entry := range entries {
-		for _, tag := range s.config.Tags {
+		for _, tag := range s.cfg().Tags {
 			if tag.ID != entry.TagID {
 				continue
 			}
@@ -498,8 +501,8 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"uptimeSec": int(time.Since(s.startedAt).Seconds()),
-		"channels":  len(s.config.Channels),
-		"tags":      len(s.config.Tags),
+		"channels":  len(s.cfg().Channels),
+		"tags":      len(s.cfg().Tags),
 		"storage":   storageStatus,
 	})
 }
@@ -562,21 +565,19 @@ func (s *Server) tags(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, RoleViewer) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.config.Tags)
+	writeJSON(w, http.StatusOK, s.cfg().Tags)
 }
 
 func (s *Server) fullConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, RoleViewer) {
 		return
 	}
-	if s.config.Raw != nil {
-		s.configMu.RLock()
-		redacted := redactSecrets(s.config.Raw)
-		s.configMu.RUnlock()
-		writeJSON(w, http.StatusOK, redacted)
+	current := s.cfg()
+	if current.Raw != nil {
+		writeJSON(w, http.StatusOK, redactSecrets(current.Raw))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"channels": s.config.Channels, "tags": s.config.Tags})
+	writeJSON(w, http.StatusOK, map[string]any{"channels": current.Channels, "tags": current.Tags})
 }
 
 func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
@@ -616,6 +617,8 @@ func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel JSON"})
 		return
 	}
+	// GET /api/config 返回的通道参数里口令已被清空（B4），界面原样回传时不能覆盖已存的值。
+	preserveSecrets(patch)
 	s.configMu.Lock()
 	var result domain.Channel
 	found := false
@@ -649,7 +652,7 @@ func (s *Server) getChannelDriver(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("channelID")
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
-	for _, channel := range s.config.Channels {
+	for _, channel := range s.cfg().Channels {
 		if channel.ID == id {
 			driver := "auto"
 			if channel.Params != nil {
@@ -888,15 +891,41 @@ func (s *Server) testChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "channel not found"})
 }
 
-func (s *Server) persistConfigLocked(update func(*config.Config)) error {
-	update(&s.config)
+// cfg 返回当前已发布的配置。返回值只读：不得修改其中的切片或 map，
+// 修改一律经 commitConfigLocked。读取方不需要持有 configMu。
+func (s *Server) cfg() *config.Config { return s.cfgPtr.Load() }
+
+// commitConfigLocked 以写时复制方式修改配置：复制当前版本、在副本上修改、保存，
+// 保存成功后才发布。调用方须持有 configMu，以串行化并发写入。
+// 保存失败时内存中的配置保持原样，不会出现"已改内存、未落盘"的状态。
+func (s *Server) commitConfigLocked(update func(*config.Config)) (*config.Config, error) {
+	next := s.cfg().Clone()
+	if next.Raw == nil {
+		next.Raw = map[string]any{}
+	}
+	update(&next)
 	if s.configStore != nil {
-		if err := s.configStore.Save(s.config); err != nil {
-			return err
+		if err := s.configStore.Save(next); err != nil {
+			return s.cfg(), err
 		}
 	}
+	s.cfgPtr.Store(&next)
+	return &next, nil
+}
+
+// commitRawLocked 替换 Raw 中的一个顶层键并保存。调用方须持有 configMu。
+func (s *Server) commitRawLocked(key string, value any) error {
+	_, err := s.commitConfigLocked(func(c *config.Config) { c.Raw[key] = value })
+	return err
+}
+
+func (s *Server) persistConfigLocked(update func(*config.Config)) error {
+	next, err := s.commitConfigLocked(update)
+	if err != nil {
+		return err
+	}
 	if s.engine != nil {
-		return s.engine.Reload(context.Background(), engineChannels(s.config), engineTags(s.config))
+		return s.engine.Reload(context.Background(), engineChannels(*next), engineTags(*next))
 	}
 	return nil
 }
@@ -928,8 +957,8 @@ func (s *Server) scheduler(w http.ResponseWriter, r *http.Request) {
 			online++
 		}
 	}
-	channels := make([]map[string]any, 0, len(s.config.Channels))
-	for _, channel := range s.config.Channels {
+	channels := make([]map[string]any, 0, len(s.cfg().Channels))
+	for _, channel := range s.cfg().Channels {
 		state := "disabled"
 		for _, status := range statuses {
 			if status.ID == channel.ID {
@@ -938,7 +967,7 @@ func (s *Server) scheduler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		tagCount := 0
-		for _, tag := range s.config.Tags {
+		for _, tag := range s.cfg().Tags {
 			if tag.ChannelID == channel.ID {
 				tagCount++
 			}
@@ -1164,11 +1193,11 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 		"uptimeSec":     int(time.Since(s.startedAt).Seconds()),
 		"goVersion":     runtime.Version(),
 		"platform":      runtime.GOOS + "/" + runtime.GOARCH,
-		"channels":      len(s.config.Channels),
-		"tags":          len(s.config.Tags),
-		"schemaVersion": s.config.SchemaVersion,
+		"channels":      len(s.cfg().Channels),
+		"tags":          len(s.cfg().Tags),
+		"schemaVersion": s.cfg().SchemaVersion,
 		"storage":       map[string]any{"url": storageURL, "db": storageDB, "state": storageStatus.State, "queued": storageStatus.Queued, "written": storageStatus.Written, "dropped": storageStatus.Dropped},
-		"counts":        map[string]any{"channels": len(s.config.Channels), "tags": len(s.config.Tags), "alarms": len(s.alarms.rulesSnapshot()), "storageTasks": len(s.storageTasksSnapshot()), "recipes": 0, "scripts": 0},
+		"counts":        map[string]any{"channels": len(s.cfg().Channels), "tags": len(s.cfg().Tags), "alarms": len(s.alarms.rulesSnapshot()), "storageTasks": len(s.storageTasksSnapshot()), "recipes": 0, "scripts": 0},
 	})
 }
 

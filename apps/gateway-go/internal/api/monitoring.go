@@ -253,7 +253,7 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	if s.storage != nil && s.storage.Enabled() {
 		queryTags := make([]storage.QueryTag, 0, len(ids))
 		for _, id := range ids {
-			for _, tag := range s.config.Tags {
+			for _, tag := range s.cfg().Tags {
 				if tag.ID == id {
 					queryTags = append(queryTags, storage.QueryTag{ID: tag.ID, Name: tag.Name})
 					break
@@ -323,11 +323,7 @@ func (s *Server) saveAlarmRulesLocked() error {
 	for _, rule := range rules {
 		items = append(items, rule)
 	}
-	s.config.Raw["alarms"] = items
-	if s.configStore != nil {
-		return s.configStore.Save(s.config)
-	}
-	return nil
+	return s.commitRawLocked("alarms", items)
 }
 
 func (s *Server) createAlarm(w http.ResponseWriter, r *http.Request) {

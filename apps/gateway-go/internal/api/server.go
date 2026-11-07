@@ -613,18 +613,38 @@ func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel JSON"})
 		return
 	}
+	// 通道 ID 不可修改：忽略请求里的 "id" 字段。
+	delete(patch, "id")
 	// GET /api/config 返回的通道参数里口令已被清空（B4），界面原样回传时不能覆盖已存的值。
 	preserveSecrets(patch)
 	s.configMu.Lock()
 	var result domain.Channel
 	found := false
+	invalid := false
 	err := s.persistConfigLocked(func(cfg *config.Config) {
 		for i := range cfg.Channels {
 			if cfg.Channels[i].ID == id {
-				encoded, _ := json.Marshal(patch)
-				_ = json.Unmarshal(encoded, &cfg.Channels[i])
-				result = cfg.Channels[i]
 				found = true
+				// 在副本上应用补丁，校验通过后才写回 cfg。Params 是 map，需先复制，避免 Unmarshal 合并时改动原值。
+				candidate := cfg.Channels[i]
+				if cfg.Channels[i].Params != nil {
+					candidate.Params = make(map[string]any, len(cfg.Channels[i].Params))
+					for k, v := range cfg.Channels[i].Params {
+						candidate.Params[k] = v
+					}
+				}
+				encoded, _ := json.Marshal(patch)
+				if err := json.Unmarshal(encoded, &candidate); err != nil {
+					invalid = true
+					return
+				}
+				candidate.ID = id
+				if candidate.Name == "" || candidate.Protocol == "" || candidate.Port < 1 || candidate.Port > 65535 {
+					invalid = true
+					return
+				}
+				cfg.Channels[i] = candidate
+				result = candidate
 				break
 			}
 		}
@@ -636,6 +656,10 @@ func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "channel not found"})
+		return
+	}
+	if invalid {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name, protocol and valid port are required"})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -804,16 +828,40 @@ func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid tag JSON"})
 		return
 	}
+	// 标签 ID 不可修改；移动标签到其他通道不支持，忽略 "channelId"。
+	delete(patch, "id")
+	delete(patch, "channelId")
 	s.configMu.Lock()
 	var result domain.Tag
 	found := false
+	invalid := false
 	err := s.persistConfigLocked(func(cfg *config.Config) {
 		for i := range cfg.Tags {
 			if cfg.Tags[i].ID == id {
-				encoded, _ := json.Marshal(patch)
-				_ = json.Unmarshal(encoded, &cfg.Tags[i])
-				result = cfg.Tags[i]
 				found = true
+				// 在副本上应用补丁，校验通过后才写回 cfg。EngMin/EngMax 是指针，需复制指向的值，避免 Unmarshal 改动原标签。
+				candidate := cfg.Tags[i]
+				if cfg.Tags[i].EngMin != nil {
+					v := *cfg.Tags[i].EngMin
+					candidate.EngMin = &v
+				}
+				if cfg.Tags[i].EngMax != nil {
+					v := *cfg.Tags[i].EngMax
+					candidate.EngMax = &v
+				}
+				encoded, _ := json.Marshal(patch)
+				if err := json.Unmarshal(encoded, &candidate); err != nil {
+					invalid = true
+					return
+				}
+				candidate.ID = id
+				candidate.ChannelID = cfg.Tags[i].ChannelID
+				if candidate.Name == "" || candidate.Address == "" {
+					invalid = true
+					return
+				}
+				cfg.Tags[i] = candidate
+				result = candidate
 				break
 			}
 		}
@@ -825,6 +873,10 @@ func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "tag not found"})
+		return
+	}
+	if invalid {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name and address are required"})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

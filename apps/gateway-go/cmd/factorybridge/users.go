@@ -96,6 +96,12 @@ func cmdUser(args []string, stdout, stderr io.Writer) int {
 	if code, done := parseFlags(fs, rest); done {
 		return code
 	}
+	if resolved, err := dataDirFlag(fs, *dataDir, stderr); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitConfig
+	} else {
+		*dataDir = resolved
+	}
 	ctx := context.Background()
 	store, database, err := openUserStore(ctx, *dataDir, stderr)
 	if err != nil {

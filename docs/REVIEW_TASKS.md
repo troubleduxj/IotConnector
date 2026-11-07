@@ -14,8 +14,8 @@
 | A1 | ✅ 已提交（阶段 0，92b746e 等 6 个提交）；本地 bare 备份仓库待你指定路径。Go 网关整个目录未入库，主用代码只存在本机磁盘；`GO_REFACTOR_PLAN.md`、9 个运维脚本及 22 个已修改文件未提交 | `apps/gateway-go/`、`scripts/`、`docs/` | 先做 A3，再分批提交；另建一个本地 bare 仓库（放在另一块盘或 NAS）作为 `origin` 并推送，防止单盘损坏丢代码 | P0 | S |
 | A2 | ✅ 已完成（阶段 0）：主分支改名 `main`；本地门禁 `pnpm ci:local`（`scripts/ci-local.mjs`），`.githooks/pre-push` 推送前跑快速模式；`ci.yml` 保留待有远端时启用。注意：用户级 `~/.npmrc` 的 `script-shell=cmd.exe` 会让非交互环境下的 pnpm 脚本不执行却返回 0，门禁脚本已在命令行清空该项 | `scripts/ci-local.mjs`、`.githooks/` | 新克隆后执行 `pnpm hooks:install` 启用钩子 | P0 | S |
 | A3 | ✅ 已完成（阶段 0，10ac5c9）。`.gitignore` 未覆盖 `factorybridge.exe`（25 MB）、`.tmp`（31 MB）、`.playwright-cli`（69 MB）、`testdata/**/history.jsonl`（22.9 万行），根目录散落模拟器日志 | `.gitignore` | 补忽略规则，清理根目录日志 | P0 | S |
-| A4 | Go 默认数据目录是 Node 的 `apps/gateway/data`，两套网关状态文件混放 | `cmd/factorybridge/main.go:272-282` | Go 使用独立数据目录，首次启动从 Node 目录导入配置 | P1 | S |
-| A5 | `.env.example`、`metadata.json` 是 Gemini/AI Studio 模板残留 | 仓库根 | 改为本项目真实环境变量说明 | P2 | S |
+| A4 | ✅ 已完成（默认 apps/gateway-go/data，首次启动从 Node 目录复制）。Go 默认数据目录是 Node 的 `apps/gateway/data`，两套网关状态文件混放 | `cmd/factorybridge/main.go:272-282` | Go 使用独立数据目录，首次启动从 Node 目录导入配置 | P1 | S |
+| A5 | ✅ 已完成（删除 metadata.json，.env.example 改为网关环境变量参考）。`.env.example`、`metadata.json` 是 Gemini/AI Studio 模板残留 | 仓库根 | 改为本项目真实环境变量说明 | P2 | S |
 | A6 | ✅ 已完成（ca132c3 及本次提交；TDengine 默认口令仍在，见下）。`admin123` 硬编码在种子配置、e2e 和 5 个脚本中；compose 使用 TDengine 默认 `root:taosdata` | `config.ts:199`、`e2e/`、`scripts/`、`docker-compose.yml` | 脚本改读环境变量；种子账号强制首登改密 | P1 | S |
 
 ## B. Go 网关安全（主用运行时）
@@ -307,9 +307,11 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 
 分工：A6、B8、C6、C8 由子任务（Haiku）实现，主会话核查。核查发现并修复：一次提交引用了不存在的测试辅助函数（8d4d7ac 修复）；周期延迟解析不认带逗号的状态详情（b0e1991）。首次 C8 实测用的地址 40500 在模拟器范围内，没有测到坏位号路径，已改用 41500 重测。
 
+A4、A5 随后完成：
+- A4：默认数据目录改为 `apps/gateway-go/data`（发布包为可执行文件旁的 `data/`）。新目录为空时，从 `apps/gateway/data` 复制 `config.json`、`gateway.db`（只读打开，VACUUM INTO 快照）和未导入的旧状态文件；旧目录不改动。显式 `--data-dir` 不导入。在仓库副本上实测：用户与配置随之迁移，旧目录的 gateway.db、WAL 和 config.json 字节不变。
+- A5（子任务 Haiku 实现，主会话核查）：删除 `metadata.json`；`.env.example` 改为网关实际读取的环境变量参考。核查改正了两处：数据目录默认值、outbox 超限时丢弃的是最旧的点。
+
 未完成：
-- A4：Go 默认数据目录仍是 `apps/gateway/data`。
-- A5：模板残留文件。
 - A6 剩余：TDengine 仍默认 `root:taosdata`（compose、启动脚本、main.go 默认值）；主用网关 admin 口令需在现场更换。
 - B8 剩余：脚本子进程内存上限。
 - 主用网关 18080 仍运行 a893f69，未包含本组修复。

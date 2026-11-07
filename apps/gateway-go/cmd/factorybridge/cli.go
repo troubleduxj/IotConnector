@@ -179,6 +179,12 @@ func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "--allow-cidr: %v\n", err)
 		return exitUsage
 	}
+	if resolved, err := dataDirFlag(fs, *dataDir, stderr); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitConfig
+	} else {
+		*dataDir = resolved
+	}
 	opts := runOptions{tlsCert: *tlsCert, tlsKey: *tlsKey, allowCIDR: *allowCIDR, dataDir: *dataDir, webDir: *webDir, host: *host, port: *port, logLevel: level,
 		dev: *dev, devNoAuth: *devNoAuth, devPass: os.Getenv("FB_DEV_PASSWORD")}
 	if runningUnderSCM() {

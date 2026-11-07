@@ -9,6 +9,7 @@ coverage/
 
 # gateway runtime data
 apps/gateway/data/
+apps/gateway-go/data/
 apps/gateway/raw-mqtt-probe.cjs
 apps/gateway/mqtt-probe.cjs
 apps/gateway/echo-probe.cjs

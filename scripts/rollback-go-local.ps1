@@ -22,7 +22,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $backupDir = if ([System.IO.Path]::IsPathRooted($Backup)) { $Backup } else { Join-Path $root $Backup }
 $oldExe = Join-Path $backupDir 'factorybridge.exe.old'
 $target = Join-Path $root 'apps\gateway-go\.tmp\factorybridge.exe'
-$dataDir = Join-Path $root 'apps\gateway\data'
+$dataDir = Join-Path $root 'apps\gateway-go\data'
+# A4 之前的二进制读 apps\gateway\data；回滚到那之前的版本时用 -BinaryOnly，它会继续使用旧目录。
 if (-not (Test-Path $oldExe)) { throw "Backup binary not found: $oldExe" }
 
 $listener = Get-NetTCPConnection -State Listen -LocalPort 18080 -ErrorAction SilentlyContinue

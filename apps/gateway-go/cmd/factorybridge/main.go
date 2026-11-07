@@ -347,16 +347,3 @@ func envBool(name string, fallback bool) bool {
 		return fallback
 	}
 }
-
-func defaultDataDir() string {
-	candidates := []string{
-		filepath.Join("apps", "gateway", "data"),
-		filepath.Join("..", "gateway", "data"),
-	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
-		}
-	}
-	return candidates[0]
-}

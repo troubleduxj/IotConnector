@@ -33,6 +33,12 @@ func cmdMigrate(args []string, stdout, stderr io.Writer) int {
 	if code, done := parseFlags(fs, args); done {
 		return code
 	}
+	if resolved, err := dataDirFlag(fs, *dataDir, stdout); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitConfig
+	} else {
+		*dataDir = resolved
+	}
 	pending := pendingLegacyFiles(*dataDir)
 	if len(pending) == 0 {
 		fmt.Fprintln(stdout, "没有待导入的旧状态文件。")

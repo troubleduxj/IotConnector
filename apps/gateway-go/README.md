@@ -10,9 +10,9 @@
 go run ./apps/gateway-go/cmd/factorybridge
 ```
 
-默认监听 `http://127.0.0.1:18080`，读取 `apps/gateway/data/config.json`。
+默认监听 `http://127.0.0.1:18080`，数据目录为 `apps/gateway-go/data`（在 `apps/gateway-go` 目录执行时为 `./data`；发布包为可执行文件旁的 `data/`）。
 
-也可以在 `apps/gateway-go` 目录执行，启动入口会自动识别相邻的 `apps/gateway/data` 目录。
+该目录首次启动且为空时，会从旧的 Node 数据目录 `apps/gateway/data` 复制 `config.json`、`gateway.db`（一致快照）和尚未导入的旧状态文件，旧目录不改动。用 `--data-dir` 或 `GATEWAY_GO_DATA_DIR` 显式指定目录时不导入。
 
 ### 命令
 

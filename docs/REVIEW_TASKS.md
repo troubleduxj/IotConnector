@@ -55,9 +55,9 @@
 
 | ID | 下线动作 | 优先级 | 工作量 |
 |---|---|---|---|
-| D0-1 | 打冻结标签（如 `node-final`），之后 `apps/gateway` 只读 | P1 | S |
-| D0-2 | `scripts/start-node-rollback.ps1`、`switch-console-gateway.ps1` 标记废弃；回滚改为"回退到上一个 Go 版本" | P1 | S |
-| D0-3 | 根 `package.json` 的 `dev`/`dev:gateway`、compose 的 `gateway` 服务改指 Go；模拟器脚本迁出 `apps/gateway`（e2e 和故障矩阵依赖它们） | P1 | M |
+| D0-1 | ✅ 已完成（阶段 4，d815b8f）。打冻结标签（如 `node-final`），之后 `apps/gateway` 只读 | P1 | S |
+| D0-2 | ✅ 已完成（阶段 4，d815b8f）。`scripts/start-node-rollback.ps1`、`switch-console-gateway.ps1` 标记废弃；回滚改为"回退到上一个 Go 版本" | P1 | S |
+| D0-3 | ✅ 已完成（阶段 4，d815b8f）。根 `package.json` 的 `dev`/`dev:gateway`、compose 的 `gateway` 服务改指 Go；模拟器脚本迁出 `apps/gateway`（e2e 和故障矩阵依赖它们） | P1 | M |
 | D0-4 | `packages/shared` 的类型改为由 Go API 契约生成，或改为前端私有 | P2 | M |
 | D0-5 | 确认 Go 补齐 Node 独有功能（用户管理、会话管理、审计查询、通道导入导出、备份恢复、恢复出厂）后，删除 `apps/gateway` 及其 vitest 测试 | P2 | L |
 
@@ -89,9 +89,9 @@
 
 | ID | 内容 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|
-| F1 | Go 网关不托管控制台，生产需另起 `npx serve`，compose 中控制台跑的是 Vite 开发服务器 | Go 网关可选托管 `web/` 静态目录（`os.Root`、CSP、缓存策略），也可独立部署到 Nginx/IIS | P1 | S |
-| F2 | 监听地址写死 `127.0.0.1`，只有 HTTP | 监听地址可配置；HTTPS（企业证书 / 自签名回退）；客户端网段白名单 | P1 | M |
-| F3 | 没有发布包 | 由 H6 覆盖：Windows/Linux 两套发布包 | P1 | S |
+| F1 | ✅ 已完成（阶段 4，101b59f）。Go 网关不托管控制台，生产需另起 `npx serve`，compose 中控制台跑的是 Vite 开发服务器 | Go 网关可选托管 `web/` 静态目录（`os.Root`、CSP、缓存策略），也可独立部署到 Nginx/IIS | P1 | S |
+| F2 | ✅ 已完成（阶段 4，68f3e94）。监听地址写死 `127.0.0.1`，只有 HTTP | 监听地址可配置；HTTPS（企业证书 / 自签名回退）；客户端网段白名单 | P1 | M |
+| F3 | ✅ 已完成（阶段 4，26603e5）。没有发布包 | 由 H6 覆盖：Windows/Linux 两套发布包 | P1 | S |
 | F4 | ✅ 已完成（阶段 2，8ac541c）。有默认账号 | 由 H4、H5 覆盖：生产模式无默认账号，用 `user create` 或初始化码创建首个管理员 | P1 | M |
 | F5 | API 无版本、错误格式不统一 | `/api/v1` + 统一错误体 `{error,message,requestId}`；保留 `/api` 兼容期 | P2 | M |
 | F6 | API 与告警/脚本调度耦合在 `api.Server` 中 | 抽出运行时接口（参考 koike `Runtime`），关闭管理 API 时采集、告警、北向照常运行 | P2 | L |
@@ -137,10 +137,10 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 |---|---|---|---|---|
 | H1 | ✅ 已完成（阶段 2，00668a8）。命令框架：拆分 `cmd/factorybridge/main.go`，子命令分文件；统一 `--config`、`--data-dir`、`--log-level`；退出码规范（0 成功、1 一般错误、2 参数错误、3 配置错误） | — | P1 | M |
 | H2 | 配置改为 `config.yaml`（采集配置仍走 API 和 SQLite，见 G6）；优先级：命令行 > 环境变量（`FB_` 前缀）> 配置文件 > 默认值；现有 26 个 `GATEWAY_GO_*` 等变量保留一个版本的兼容期并打印弃用提示 | H1 | P1 | M |
-| H3 | 路径与平台：默认目录 Windows 为程序所在目录，Linux 为 `/etc/factorybridge`、`/var/lib/factorybridge`、`/var/log/factorybridge`；`service` 子命令 Windows 走 SCM（`golang.org/x/sys/windows/svc`，替代 WinSW），Linux 生成 systemd 单元（专用用户、`ProtectSystem=strict`、`ReadWritePaths`）；平台差异用 build tag 隔离 | H1 | P1 | M |
+| H3 | ✅ 已完成（阶段 4，fb06c51）。路径与平台：默认目录 Windows 为程序所在目录，Linux 为 `/etc/factorybridge`、`/var/lib/factorybridge`、`/var/log/factorybridge`；`service` 子命令 Windows 走 SCM（`golang.org/x/sys/windows/svc`，替代 WinSW），Linux 生成 systemd 单元（专用用户、`ProtectSystem=strict`、`ReadWritePaths`）；平台差异用 build tag 隔离 | H1 | P1 | M |
 | H4 | ✅ 已完成（阶段 2，8ac541c）。认证体系：多用户 + 角色（viewer / operator / engineer / admin，与控制台已有的 `engineer` 对齐）；口令用 argon2id 或 bcrypt，加口令策略；访问令牌短期有效 + 刷新令牌轮换；API Key 最高只能是 operator；密钥文件放 `secrets/`，Windows 用 DPAPI 加密，Linux 用 0600 权限；统一鉴权中间件（合并 B7） | B1–B5、G1 | P0 | L |
 | H5 | ✅ 已完成（阶段 2，8ac541c）。运行模式：见下方规则 | H4 | P0 | M |
-| H6 | 发布：`build` 脚本交叉编译 `windows/amd64`、`linux/amd64`、`linux/arm64`（`CGO_ENABLED=0`，依赖 G1 选纯 Go 的 SQLite）；产出 zip/tar.gz，内含二进制、`web/`、`config.example.yaml`、文档、sha256；`version` 注入提交号 | H1、F1 | P1 | S |
+| H6 | ✅ 已完成（阶段 4，26603e5）。发布：`build` 脚本交叉编译 `windows/amd64`、`linux/amd64`、`linux/arm64`（`CGO_ENABLED=0`，依赖 G1 选纯 Go 的 SQLite）；产出 zip/tar.gz，内含二进制、`web/`、`config.example.yaml`、文档、sha256；`version` 注入提交号 | H1、F1 | P1 | S |
 | H7 | 文档：部署手册、快速部署步骤、安全验收说明（参考 koike `docs/`），Windows 和 Linux 各一节 | H1–H6 | P2 | M |
 | H8 | CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |
 
@@ -207,3 +207,19 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 
 - 模拟器：改用 ProtoForge（`D:\Projects\sim-foundry-main`），本项目不再维护 Node 模拟器。ProtoForge 没有 IEC104，IEC104 模拟器暂留 `apps/gateway/scripts`。故障矩阵与 compose 改指 ProtoForge 后，Node 网关即可冻结（D0）。
 - HTTPS：默认仍只监听 127.0.0.1、走 HTTP。`--host` 设为非回环地址时强制 HTTPS：未提供证书则自动生成自签名证书；可配置客户端网段白名单。
+
+## 阶段 4 记录（2026-11-07）
+
+- F1：网关同端口托管控制台，`--web-dir` 缺省找可执行文件旁的 `web/`。
+- F2：非回环地址强制 HTTPS，自签名证书写在数据目录下；新增 `--allow-cidr` 白名单。
+  - 实测绑定 172.17.96.1：HTTP 访问 400，TLS 1.1 握手失败，指定 CA 后返回 200。
+- H3：`service` 子命令，Windows 走 SCM，Linux 走 systemd。本机无管理员权限，install/start 未在真实 SCM 上验证。
+- H6：`pnpm release` 产出三个平台的包，8.0–8.8 MiB，SHA256SUMS 校验通过。Windows 包解压后可直接运行并托管控制台。
+- D0：
+  - Node 网关打 tag `node-final` 并冻结。
+  - 故障矩阵改用 ProtoForge：6 个协议中 5 个通过；FINS 因 ProtoForge 停止后不释放端口而失败。
+  - Compose 改为 Go 网关加 ProtoForge，只做了语法校验。
+- 未完成：
+  - D0-4（`packages/shared` 归属）。
+  - D0-5（删除 Node 目录，前提是补齐功能并迁出 IEC104 模拟器）。
+  - 故障矩阵中 OPC UA、BACnet、MQTT、IEC104 四个协议未覆盖。

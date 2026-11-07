@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,5 +92,20 @@ func TestNoWebDirServesAPIOnly(t *testing.T) {
 	h := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{WebDir: filepath.Join(t.TempDir(), "missing")}).Handler()
 	if r := call(h, "GET", "/", "", ""); r.Code != 404 {
 		t.Fatalf("without web dir / should 404, got %d", r.Code)
+	}
+}
+
+func TestClientAllowlist(t *testing.T) {
+	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
+		AllowedClients: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("127.0.0.0/8")},
+	})
+	handler := server.Handler()
+	for addr, want := range map[string]int{"10.2.3.4:5000": 200, "127.0.0.1:1": 200, "[::ffff:10.0.0.9]:1": 200, "192.168.1.5:5000": 403, "garbage": 403} {
+		request := newJSONRequest("GET", "/api/health", "")
+		request.RemoteAddr = addr
+		request.Header.Set("X-Forwarded-For", "10.0.0.1") // 不得据此放行
+		if got := serve(handler, request).Code; got != want {
+			t.Errorf("%s: status=%d want %d", addr, got, want)
+		}
 	}
 }

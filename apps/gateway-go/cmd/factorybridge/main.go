@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -59,6 +60,24 @@ func runGateway(opts runOptions) int {
 	go func() { stateBatch.Run(batchCtx, time.Second); close(batchDone) }()
 	defer func() { stopBatch(); <-batchDone }()
 
+	allowedClients, _ := parseCIDRs(opts.allowCIDR) // 已在 cmdRun 中校验
+	var tlsConf *tls.Config
+	scheme := "http"
+	if !isLoopback(opts.host) || opts.tlsCert != "" {
+		cert, source, selfSigned, err := loadOrCreateCert(opts.tlsCert, opts.tlsKey, dataDir, opts.host)
+		if err != nil {
+			logger.Error("load TLS certificate", "error", err)
+			return exitConfig
+		}
+		tlsConf, scheme = tlsConfig(cert), "https"
+		if selfSigned {
+			logger.Warn("using a self-signed certificate; browsers will warn. Use --tls-cert/--tls-key with a CA-issued certificate in production", "cert", source)
+		}
+	}
+	if !isLoopback(opts.host) && len(allowedClients) == 0 {
+		logger.Warn("listening on a non-loopback address without --allow-cidr; any host that can reach this port can try to log in", "host", opts.host)
+	}
+
 	tdengineURL := os.Getenv("TDENGINE_URL")
 	queueFile := ""
 	if tdengineURL != "" {
@@ -90,22 +109,23 @@ func runGateway(opts runOptions) int {
 		cfg,
 		engine,
 		api.SecurityOptions{
-			Token:         envOr("GATEWAY_GO_API_TOKEN", ""),
-			ViewerToken:   envOr("GATEWAY_GO_VIEWER_TOKEN", ""),
-			OperatorToken: envOr("GATEWAY_GO_OPERATOR_TOKEN", ""),
-			AdminToken:    envOr("GATEWAY_GO_ADMIN_TOKEN", ""),
-			Users:         users,
-			DevMode:       opts.dev,
-			DevNoAuth:     opts.devNoAuth,
-			WebDir:        opts.webDir,
-			StateDB:       database,
-			State:         stateBatch,
-			HistoryFile:   filepath.Join(dataDir, "history.jsonl"),
-			Audit:         auditLogger,
-			ConfigStore:   &store,
-			Storage:       storageWriter,
-			ShadowFile:    filepath.Join(dataDir, "shadow.json"),
-			CORSOrigins:   splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
+			Token:          envOr("GATEWAY_GO_API_TOKEN", ""),
+			ViewerToken:    envOr("GATEWAY_GO_VIEWER_TOKEN", ""),
+			OperatorToken:  envOr("GATEWAY_GO_OPERATOR_TOKEN", ""),
+			AdminToken:     envOr("GATEWAY_GO_ADMIN_TOKEN", ""),
+			Users:          users,
+			DevMode:        opts.dev,
+			DevNoAuth:      opts.devNoAuth,
+			WebDir:         opts.webDir,
+			AllowedClients: allowedClients,
+			StateDB:        database,
+			State:          stateBatch,
+			HistoryFile:    filepath.Join(dataDir, "history.jsonl"),
+			Audit:          auditLogger,
+			ConfigStore:    &store,
+			Storage:        storageWriter,
+			ShadowFile:     filepath.Join(dataDir, "shadow.json"),
+			CORSOrigins:    splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
 		},
 	)
 	northboundPublisher := northbound.NewDB(northbound.Config{Enabled: boolRaw(cfg.Raw["northbound"], "enabled"), URL: stringRaw(cfg.Raw["northbound"], "url", "mqtt://127.0.0.1:1883"), Username: stringRaw(cfg.Raw["northbound"], "username", ""), Password: stringRaw(cfg.Raw["northbound"], "password", ""), GroupID: stringRaw(cfg.Raw["northbound"], "groupId", "Factory"), EdgeNodeID: stringRaw(cfg.Raw["northbound"], "edgeNodeId", "FB_Edge_GW01"), DataFlushMs: intRaw(cfg.Raw["northbound"], "dataFlushMs", 1000)}, database, stateBatch, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
@@ -187,11 +207,18 @@ func runGateway(opts runOptions) int {
 		ReadTimeout:    30 * time.Second,
 		IdleTimeout:    60 * time.Second,
 		MaxHeaderBytes: 64 << 10,
+		TLSConfig:      tlsConf,
 	}
 
 	go func() {
-		logger.Info("factorybridge gateway listening", "version", version.Version, "addr", "http://"+server.Addr, "channels", len(cfg.Channels), "tags", len(cfg.Tags))
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Info("factorybridge gateway listening", "version", version.Version, "addr", scheme+"://"+server.Addr, "channels", len(cfg.Channels), "tags", len(cfg.Tags))
+		var err error
+		if tlsConf != nil {
+			err = server.ListenAndServeTLS("", "") // 证书已在 TLSConfig 中
+		} else {
+			err = server.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("http server stopped", "error", err)
 			os.Exit(1)
 		}

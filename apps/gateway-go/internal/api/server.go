@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"reflect"
 	"runtime"
@@ -39,6 +40,7 @@ type Server struct {
 	users               *auth.UserStore
 	devMode             bool
 	web                 http.Handler
+	allowedClients      []netip.Prefix
 	closeWeb            func() error
 	devNoAuth           bool
 	audit               *audit.Logger
@@ -69,6 +71,8 @@ type SecurityOptions struct {
 	AdminToken    string
 	// Users 为空时只能用静态令牌访问（测试与无人值守场景）；生产由 run 命令打开 SQLite 后传入。
 	Users *auth.UserStore
+	// AllowedClients 非空时只接受这些网段的连接（含页面、API、WebSocket），其余 403（F2）。
+	AllowedClients []netip.Prefix
 	// WebDir 是控制台构建产物目录；存在 index.html 时网关同端口托管页面（F1）。
 	WebDir string
 	// DevMode 放行 http://localhost:* 与 http://127.0.0.1:* 来源（Vite 开发服务器），
@@ -156,6 +160,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	initial := cfg.Clone()
 	server.cfgPtr.Store(&initial)
 	server.web, server.closeWeb = newWebHandler(options.WebDir)
+	server.allowedClients = options.AllowedClients
 	server.alarms.state = state
 	server.alarms.history = state.loadAlarmHistory(context.Background(), alarmHistoryLimit)
 	server.ws = newWSHub()
@@ -333,7 +338,7 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, "DELETE /api/auth/sessions/{sessionID}", adminOnly, s.revokeSession)
 	s.route(mux, "GET /api/audit", adminOnly, s.auditLog)
 	s.route(mux, "GET /ws", public, s.websocketHandler)
-	return withWeb(s.withCORS(mux), s.web)
+	return s.withClientAllowlist(withWeb(s.withCORS(mux), s.web))
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -1157,3 +1162,28 @@ func (s *Server) Close() error {
 
 // WebEnabled 报告是否在托管控制台页面。
 func (s *Server) WebEnabled() bool { return s.web != nil }
+
+// withClientAllowlist 按 TCP 对端地址判断，不信任 X-Forwarded-For（网关前没有可信代理时该头可伪造）。
+func (s *Server) withClientAllowlist(next http.Handler) http.Handler {
+	if len(s.allowedClients) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		addr, err := netip.ParseAddr(s.clientKey(r))
+		allowed := false
+		if err == nil {
+			addr = addr.Unmap()
+			for _, prefix := range s.allowedClients {
+				if prefix.Contains(addr) {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "client address not allowed"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

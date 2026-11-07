@@ -751,6 +751,10 @@ export interface CapturedFrame {
   note?: string;
 }
 
+export async function clearChannelFrames(channelId: string): Promise<void> {
+  await apiFetch(`/api/channels/${channelId}/frames?clear=1&limit=1`);
+}
+
 export async function fetchChannelFrames(channelId: string): Promise<{ ok: boolean; frames: CapturedFrame[] }> {
   return (await apiFetch(`/api/channels/${channelId}/frames?limit=200`)).json() as Promise<{ ok: boolean; frames: CapturedFrame[] }>;
 }

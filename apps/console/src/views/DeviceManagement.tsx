@@ -9,7 +9,7 @@ import {
   getChannelDriver, updateChannel, updateChannelDriver, updateTag, type ChannelDriver, type ChannelTestResult, type GatewayChannel, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
-import { fetchChannelFrames, type CapturedFrame, type ConsoleRole } from '../api';
+import { clearChannelFrames, fetchChannelFrames, type CapturedFrame, type ConsoleRole } from '../api';
 import TagValue from '../components/TagValue';
 import { toast } from '../components/Toast';
 import { confirmDialog } from '../components/confirm';
@@ -786,7 +786,8 @@ export default function DeviceManagement({ userRole = 'operator', standalone = f
                       </button>
                       <button
                         onClick={() => {
-                          void fetch(`/api/channels/${selected.id}/frames?clear=1`);
+                          // 原为裸 fetch：不带令牌也不走 VITE_GATEWAY_URL，清空请求被 401 拒绝
+                          void clearChannelFrames(selected.id);
                           setFrames([]);
                         }}
                         disabled={readOnly}

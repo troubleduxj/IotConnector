@@ -1,3 +1,4 @@
+﻿# 已废弃（2026-11-07）：Node 网关已冻结，回滚改为回退到上一个 Go 版本，见 scripts/rollback-go-local.ps1。
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot

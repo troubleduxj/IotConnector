@@ -1,15 +1,23 @@
-# 开发/演示栈：TDengine + 三协议模拟器 + 网关 + 控制台
-# 用法：docker compose up -d
-# 控制台: http://localhost:3001  网关: http://localhost:8080  Explorer: http://localhost:16060
+# 开发/演示栈：Go 网关（同端口托管控制台）+ TDengine + ProtoForge 协议模拟器 + IEC104 模拟器
+#
+# 准备：
+#   pnpm release linux/amd64
+#   set FB_PKG=dist/release/<版本>/factorybridge-<版本>-linux-amd64   （PowerShell: $env:FB_PKG=...）
+#   docker compose up -d --build
+#   docker compose exec gateway /opt/factorybridge/factorybridge user create --name admin --role admin --data-dir /data
+#
+# 访问：控制台/网关 https://127.0.0.1:18080（自签名证书）  ProtoForge http://127.0.0.1:8000  TDengine Explorer http://127.0.0.1:16060
+#
+# 模拟器：ProtoForge 覆盖 Modbus/S7/MC/FINS/AB/OPC UA/SNMP/BACnet/MQTT，在其页面或 API 按网关通道端口启动协议；
+# ProtoForge 没有 IEC104，保留项目自带的 iec104-sim。Node 网关已冻结，不再出现在本栈中。
 
 services:
   tdengine:
     image: tdengine/tdengine:3.3.6.13
     restart: unless-stopped
     ports:
-      - "16030:6030"
-      - "16041:6041"
-      - "16060:6060"
+      - "127.0.0.1:16041:6041"
+      - "127.0.0.1:16060:6060"
     volumes:
       - tdengine-data:/var/lib/taos
     healthcheck:
@@ -18,77 +26,14 @@ services:
       timeout: 5s
       retries: 10
 
-  s7-sim:
-    image: node:22-alpine
-    working_dir: /workspace/apps/gateway
+  protoforge:
+    image: suoten/protoforge:latest
+    restart: unless-stopped
+    environment:
+      PROTOFORGE_ADMIN_PASSWORD: ${PROTOFORGE_ADMIN_PASSWORD:?set PROTOFORGE_ADMIN_PASSWORD}
     volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-    network_mode: "service:gateway" # 与网关共享网络栈：通道 host=127.0.0.1 直接可达
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm s7-sim"
-
-  modbus-sim:
-    image: node:22-alpine
-    working_dir: /workspace/apps/gateway
-    volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-    network_mode: "service:gateway"
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm modbus-sim"
-
-  opcua-sim:
-    image: node:22-alpine
-    working_dir: /workspace/apps/gateway
-    volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-    network_mode: "service:gateway"
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm opcua-sim"
-
-  melsec-sim:
-    image: node:22-alpine
-    working_dir: /workspace/apps/gateway
-    volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-    network_mode: "service:gateway"
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm melsec-sim"
-
-  fins-sim:
-    image: node:22-alpine
-    working_dir: /workspace/apps/gateway
-    volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-    network_mode: "service:gateway"
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm fins-sim"
-
-  enip-sim:
-    image: node:22-alpine
-    working_dir: /workspace/apps/gateway
-    volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-    network_mode: "service:gateway"
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm enip-sim"
+      - protoforge-data:/app/data
+    network_mode: "service:gateway" # 与网关共享网络栈：通道配置里的 127.0.0.1:<端口> 直接可达
 
   iec104-sim:
     image: node:22-alpine
@@ -98,41 +43,30 @@ services:
       - node_modules_root:/workspace/node_modules
       - node_modules_gw:/workspace/apps/gateway/node_modules
     network_mode: "service:gateway"
-    depends_on:
-      - gateway
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && IEC104_SIM_PORT=2404 pnpm iec104-sim"
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --filter @iotconnector/gateway... && IEC104_SIM_PORT=12404 pnpm iec104-sim"
 
   gateway:
-    image: node:22-alpine
-    working_dir: /workspace
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PKG: ${FB_PKG:?set FB_PKG to the linux release package directory}
+    restart: unless-stopped
+    environment:
+      GATEWAY_GO_DRIVER_MODE: go
+      TDENGINE_URL: http://tdengine:6041
     volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-      - node_modules_con:/workspace/apps/console/node_modules
-      - gateway-data:/workspace/apps/gateway/data
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && TDENGINE_URL=http://tdengine:6041 pnpm --filter @iotconnector/gateway start"
+      - gateway-data:/data
     ports:
-      - "8080:8080"
+      - "127.0.0.1:18080:18080" # 网关
+      - "127.0.0.1:8000:8000"   # ProtoForge（共享网关网络栈）
     depends_on:
       tdengine:
         condition: service_healthy
 
-  console:
-    image: node:22-alpine
-    working_dir: /workspace/apps/console
-    volumes:
-      - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
-      - node_modules_con:/workspace/apps/console/node_modules
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --port=3001 --host=0.0.0.0 --strictPort"
-    ports:
-      - "3001:3001"
-
 volumes:
   tdengine-data:
   gateway-data:
+  protoforge-data:
   node_modules_root:
   node_modules_gw:
-  node_modules_con:

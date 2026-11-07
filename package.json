@@ -4,17 +4,17 @@
   "version": "0.1.0",
   "description": "Factory Bridge - IIoT Edge Gateway Platform (console + gateway runtime)",
   "scripts": {
-    "dev": "concurrently -n gateway,console -c blue,green \"pnpm --filter @iotconnector/gateway dev\" \"pnpm --filter @iotconnector/console dev\"",
+    "dev": "pnpm --filter @iotconnector/console dev",
     "dev:console": "pnpm --filter @iotconnector/console dev",
-    "dev:gateway": "pnpm --filter @iotconnector/gateway dev",
-    "dev:modbus-sim": "pnpm --filter @iotconnector/gateway modbus-sim",
+    "dev:gateway": "cd apps/gateway-go && go run ./cmd/factorybridge run --dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "e2e": "playwright test",
     "ci:local": "node scripts/ci-local.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "dev:node-gateway": "pnpm --filter @iotconnector/gateway dev"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

@@ -1,3 +1,4 @@
+﻿# 已废弃（2026-11-07）：Node 网关已冻结，本脚本同时重启 Go/Node 两个网关，不再适用。用 scripts/start-go-local.ps1。
 $ErrorActionPreference = 'Stop'
 $GoOnly = $args -contains '-GoOnly'
 $root = 'D:\ai_project\IotConnector'

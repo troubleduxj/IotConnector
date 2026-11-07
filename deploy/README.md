@@ -1,75 +1,69 @@
-# Factory Bridge 部署指南（服务化运行）
+# Factory Bridge 部署指南
 
-> 演示/试点环境推荐 Docker Compose 一键栈（`docker-compose.yml`：网关 + 控制台 nginx + TDengine + 五个协议模拟器）；
-> 需要网关以**系统服务**方式常驻（开机自启、崩溃自动拉起）时，按本文操作。
+> 自 2026-11-07（阶段 4）起，主用运行时为 Go 网关单一可执行文件 `factorybridge`。
+> Node 网关（`apps/gateway`）已冻结，仅作历史参考；本目录下 `systemd/factory-bridge-gateway.service`
+> 与 `windows/`（WinSW）是 Node 网关的服务文件，同样冻结，不再更新。
 
-## 前置条件
-
-1. Node.js ≥ 20（建议 22 LTS）
-2. `pnpm install --frozen-lockfile`（monorepo 根目录执行；`tsx` 为运行时加载器，随 devDependencies 安装）
-3. （可选，历史查询/存储任务需要）TDengine：`docker run -d --name tdengine --restart unless-stopped -p 16041:6041 tdengine/tdengine:3.3.6.13`
-
-> **重要**：网关全部持久化文件（`data/config.json`、`audit.jsonl`、`sessions.json`、`shadow.json`、
-> `northbound.json`、`outbox.jsonl`）按 `process.cwd()/data` 解析，服务的工作目录必须指向 `apps/gateway`。
-
-## Linux（systemd）
+## 获取发布包
 
 ```bash
-# 1. 按实际安装路径与运行账号修改 deploy/systemd/factory-bridge-gateway.service
-sudo cp -r <repo> /opt/factory-bridge
-sudo useradd -r -s /usr/sbin/nologin fbridge
-sudo chown -R fbridge:fbridge /opt/factory-bridge/apps/gateway/data
-
-# 2. 安装并启动
-sudo cp /opt/factory-bridge/deploy/systemd/factory-bridge-gateway.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now factory-bridge-gateway
-
-# 3. 验证
-systemctl status factory-bridge-gateway
-journalctl -u factory-bridge-gateway -f
-curl -s http://127.0.0.1:8080/api/health
+pnpm release                      # 构建 windows/amd64、linux/amd64、linux/arm64
+pnpm release linux/amd64          # 只构建指定平台
 ```
 
-单元文件要点：`Restart=always`（5 秒退避）、`KillSignal=SIGINT`（触发优雅停机：
-影子强制落盘 → 北向 NDEATH → 引擎停止）、`ReadWritePaths` 限定仅 `data/` 可写。
+产物在 `dist/release/<版本>/`，每个平台一个压缩包（可执行文件 + `web/` 控制台 + `README.md` + `INSTALL.txt`），
+`SHA256SUMS` 覆盖压缩包和可执行文件。部署前用 `sha256sum -c SHA256SUMS` 校验。
 
-## Windows（WinSW 服务包装）
-
-1. 下载 [WinSW-x64.exe](https://github.com/winsw/winsw/releases)，重命名为
-   `factory-bridge-gateway.exe` 放入 `deploy/windows/`；
-2. 编辑 `factory-bridge-gateway-service.xml` 中的 `<workingdirectory>` 为实际 `apps\gateway` 路径；
-3. 管理员 CMD：`deploy\windows\install-service.cmd`（卸载：`uninstall-service.cmd`）。
-
-服务名 `factory-bridge-gateway`，自动启动（延迟启动避免抢占开机 I/O），
-滚动日志位于 `deploy\windows\logs\`。
-
-## 控制台（生产构建）
+## 首次部署
 
 ```bash
-pnpm --filter @iotconnector/console build   # 产出 apps/console/dist（hash 路由静态站）
-# 任一静态服务器托管即可，例：
-npx serve apps/console/dist -l 3000
+factorybridge user create --name admin --role admin --data-dir <数据目录>   # 系统没有默认账号
+factorybridge run --data-dir <数据目录>                                     # 前台试运行，Ctrl+C 停止
 ```
 
-控制台仅依赖同源 REST/WS；如与网关不同域，需在网关侧放开 CORS（默认允许本地开发源）。
+- 默认只监听 `127.0.0.1:18080`，走 HTTP。
+- 对外提供服务：`--host 0.0.0.0 --allow-cidr <管理网段>`。非回环地址强制 HTTPS；未指定
+  `--tls-cert/--tls-key` 时在 `<数据目录>/tls/` 生成自签名证书（仅适合测试，生产请用企业 CA 签发的证书）。
+- `web/` 与可执行文件放在同一目录时，网关同端口托管控制台；也可用 `--web-dir` 指定，或把 `web/` 放到
+  Nginx/IIS 下并在 `GATEWAY_GO_CORS_ORIGINS` 中加入该站点。
 
-## 健康检查与运维接口
+## 注册为系统服务
 
-| 接口 | 用途 |
-|---|---|
-| `GET /api/health` | 存活探针（systemd/WinSW/K8s probe） |
-| `GET /api/system/info` | 版本、运行时长、配置规模、存储状态 |
-| `GET /api/system/db-test` | TDengine 连通性实测（返回 RTT） |
-| `GET /api/system/diag` | 审计尾部导出（现场排障） |
-| `GET /api/shadow` | 设备影子快照（reported vs desired） |
+```bash
+# Windows：管理员命令行
+factorybridge service install --data-dir D:\FactoryBridge\data -- --host 0.0.0.0 --allow-cidr 10.0.0.0/8
+factorybridge service start
+factorybridge service status            # 普通用户也可查询
 
-## 故障排查速查
+# Linux：root
+factorybridge service install --data-dir /var/lib/factorybridge -- --host 0.0.0.0 --allow-cidr 10.0.0.0/8
+factorybridge service start
+journalctl -u factorybridge -f
+```
 
-| 现象 | 处置 |
-|---|---|
-| 网关起不来，日志 `EADDRINUSE` | 8080 被占用：改 `GATEWAY_PORT` 或释放端口 |
-| 存储状态 `offline`，`Table does not exist` | TDengine 未启动/URL 错：`curl http://127.0.0.1:16041/-/ping`；TDengine 不可达网关会自动降级继续采集，恢复后自动重连 |
-| MQTT 北向未发布 | `GET /api/northbound` 看 `status.connected/lastError`；断线期间数据入 Reliable Outbox 自动补传 |
-| 登录提示锁定 | 登录失败 5 次/10 分钟锁定，等待解锁或由管理员重启网关（内存锁定计数） |
-| 通道反复 error | 设备管理页「连接测试」查看分步握手明细（支持 S7 多位号批量探针、OPC UA 订阅采样） |
+- Windows：虚拟账号 `NT SERVICE\<名称>`、延迟自动启动、异常退出后 10s/30s/60s 自动重启。
+- Linux：生成 `/etc/systemd/system/<名称>.service`，专用系统账号，`ProtectSystem=strict`，仅数据目录可写。
+- `--` 之后是传给 `run` 的参数，安装时固化；改参数需 `service uninstall` 后重新 `install`。
+- 同机多实例：每个实例用不同的 `--name` 和 `--data-dir`。
+
+## 升级
+
+1. `factorybridge service stop`
+2. 备份数据目录（`gateway.db`、`config.json`、`tls/`）
+3. 替换可执行文件与 `web/`
+4. `factorybridge service start`
+
+从 Node 网关或早期 Go 版本升级时，旧 JSON/JSONL 状态文件在首次启动时自动导入 `gateway.db`，原文件改名为
+`*.migrated`。也可先离线执行 `factorybridge migrate --data-dir <数据目录> --dry-run` 查看待导入内容。
+
+## Docker Compose 演示栈
+
+`docker-compose.yml`：Go 网关 + TDengine + ProtoForge 协议模拟器 + IEC104 模拟器。用法见文件头注释。
+
+## 模拟器
+
+联调与故障矩阵使用 ProtoForge（`D:\Projects\sim-foundry-main`，或镜像 `suoten/protoforge`），覆盖
+Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、OPC UA、SNMP、BACnet、MQTT。ProtoForge 没有 IEC 60870-5-104，
+该协议仍用 `apps/gateway/scripts/iec104-sim.ts`。
+
+故障矩阵：`node scripts/fault-matrix.mjs`，所需环境变量见脚本头注释。

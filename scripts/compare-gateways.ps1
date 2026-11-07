@@ -1,3 +1,4 @@
+﻿# 已废弃（2026-11-07）：Go/Node 双后端对比门禁已完成使命，Node 网关已冻结。
 [CmdletBinding()]
 param(
     [string]$GoUrl = "http://127.0.0.1:18080",

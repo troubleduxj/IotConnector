@@ -1,3 +1,4 @@
+﻿# 已废弃（2026-11-07）：Node 网关已冻结，控制台只连接 Go 网关；Go 网关可直接托管控制台（run --web-dir）。
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('go', 'node')]

@@ -1,3 +1,4 @@
+﻿# 已废弃（2026-11-07）：依赖 Node 模拟器且口令写死。用 node scripts/fault-matrix.mjs（ProtoForge）。
 [CmdletBinding()]
 param(
     [string]$GatewayUrl = "http://127.0.0.1:18080",

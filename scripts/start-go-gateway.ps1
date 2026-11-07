@@ -1,3 +1,4 @@
+﻿# 已废弃（2026-11-07）：参数与实际运行不一致（强制 DRIVER_MODE=go、TDengine 16041），且不设置 CORS。用 scripts/start-go-local.ps1。
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot

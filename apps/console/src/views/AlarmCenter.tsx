@@ -550,7 +550,7 @@ function NotifyConfigTab({
     title: string,
     body: React.JSX.Element,
   ): React.JSX.Element => {
-    const enabled = key === 'webhook' ? Boolean(cfg.webhookUrl) : cfg[key].enabled;
+    const enabled = key === 'webhook' ? Boolean(cfg.webhookUrl || cfg.webhookUrlSet) : cfg[key].enabled;
     const test = testResult?.channel === key ? testResult : null;
     return (
       <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -607,7 +607,7 @@ function NotifyConfigTab({
         {channelCard('webhook', t('alarms.channel.webhook'), (
           <div>
             <label className={label}>{t('alarms.field.webhookUrl')}</label>
-            <input value={cfg.webhookUrl} onChange={(e) => onChange({ ...cfg, webhookUrl: e.target.value })} placeholder="https://…" className={field} />
+            <input value={cfg.webhookUrl} onChange={(e) => onChange({ ...cfg, webhookUrl: e.target.value })} placeholder={cfg.webhookUrlSet ? t('alarms.field.secretKept') : 'https://…'} className={field} />
             <p className="text-[10px] text-slate-400 mt-1">{t('alarms.field.postJson')}{`{ event, tagName, kind, value, threshold, message }`}</p>
           </div>
         ))}
@@ -619,7 +619,7 @@ function NotifyConfigTab({
               <input
                 value={cfg.dingtalk.webhookUrl}
                 onChange={(e) => onChange({ ...cfg, dingtalk: { ...cfg.dingtalk, webhookUrl: e.target.value } })}
-                placeholder="https://oapi.dingtalk.com/robot/send?access_token=…"
+                placeholder={cfg.dingtalk.webhookUrlSet ? t('alarms.field.secretKept') : 'https://oapi.dingtalk.com/robot/send?access_token=…'}
                 className={field}
               />
             </div>
@@ -628,7 +628,8 @@ function NotifyConfigTab({
               <input
                 value={cfg.dingtalk.secret}
                 onChange={(e) => onChange({ ...cfg, dingtalk: { ...cfg.dingtalk, secret: e.target.value } })}
-                placeholder="SEC…"
+                type="password"
+                placeholder={cfg.dingtalk.secretSet ? t('alarms.field.secretKept') : 'SEC…'}
                 className={field}
               />
             </div>
@@ -641,7 +642,7 @@ function NotifyConfigTab({
             <input
               value={cfg.wecom.webhookUrl}
               onChange={(e) => onChange({ ...cfg, wecom: { ...cfg.wecom, webhookUrl: e.target.value } })}
-              placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…"
+              placeholder={cfg.wecom.webhookUrlSet ? t('alarms.field.secretKept') : 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…'}
               className={field}
             />
           </div>
@@ -672,7 +673,7 @@ function NotifyConfigTab({
             </div>
             <div>
               <label className={label}>{t('alarms.field.password')}</label>
-              <input type="password" value={cfg.email.password} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, password: e.target.value } })} className={field} />
+              <input type="password" value={cfg.email.password} onChange={(e) => onChange({ ...cfg, email: { ...cfg.email, password: e.target.value } })} placeholder={cfg.email.passwordSet ? t('alarms.field.secretKept') : ''} className={field} />
             </div>
             <div className="col-span-2">
               <label className={label}>{t('alarms.field.recipients')}</label>

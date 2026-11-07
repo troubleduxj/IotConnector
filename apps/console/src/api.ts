@@ -747,7 +747,9 @@ export interface NorthboundConfig {
   enabled: boolean;
   url: string;
   username?: string;
+  /** GET 恒为空；passwordSet 表示网关已存有口令，提交空值表示保持不变 */
   password?: string;
+  passwordSet?: boolean;
   groupId: string;
   edgeNodeId: string;
   dataFlushMs: number;

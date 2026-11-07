@@ -17,7 +17,7 @@ func (s *Server) northbound(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, RoleViewer) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"config": s.northboundConfig(), "status": s.northboundStatus()})
+	writeJSON(w, http.StatusOK, map[string]any{"config": redactSecrets(s.northboundConfig()), "status": s.northboundStatus()})
 }
 
 func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +29,7 @@ func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid northbound JSON"})
 		return
 	}
+	preserveSecrets(patch)
 	s.configMu.Lock()
 	cfg := s.northboundConfig()
 	mergeMap(cfg, patch)
@@ -42,7 +43,7 @@ func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"config": cfg, "status": s.northboundStatus()})
+	writeJSON(w, http.StatusOK, map[string]any{"config": redactSecrets(cfg), "status": s.northboundStatus()})
 }
 
 func (s *Server) rebirthNorthbound(w http.ResponseWriter, r *http.Request) {

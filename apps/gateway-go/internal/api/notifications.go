@@ -21,7 +21,7 @@ func (s *Server) notifications(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r, RoleViewer) {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.notificationConfig())
+	writeJSON(w, http.StatusOK, redactSecrets(s.notificationConfig()))
 }
 
 func (s *Server) updateNotifications(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +33,7 @@ func (s *Server) updateNotifications(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid notification JSON"})
 		return
 	}
+	preserveSecrets(patch)
 	s.configMu.Lock()
 	current := s.notificationConfig()
 	mergeMap(current, patch)
@@ -46,7 +47,7 @@ func (s *Server) updateNotifications(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, current)
+	writeJSON(w, http.StatusOK, redactSecrets(current))
 }
 
 func (s *Server) testNotification(w http.ResponseWriter, r *http.Request) {

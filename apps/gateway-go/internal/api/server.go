@@ -570,7 +570,10 @@ func (s *Server) fullConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.config.Raw != nil {
-		writeJSON(w, http.StatusOK, s.config.Raw)
+		s.configMu.RLock()
+		redacted := redactSecrets(s.config.Raw)
+		s.configMu.RUnlock()
+		writeJSON(w, http.StatusOK, redacted)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"channels": s.config.Channels, "tags": s.config.Tags})
@@ -1143,12 +1146,16 @@ func decodeWriteValue(raw json.RawMessage) (acquisition.Value, error) {
 	}
 }
 
-func (s *Server) systemInfo(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
+	if !s.authorize(w, r, RoleViewer) {
+		return
+	}
 	storageStatus := storage.Status{Engine: "tdengine", State: "disabled"}
 	storageURL, storageDB := "", ""
 	if s.storage != nil {
 		storageStatus = s.storage.Status()
 		storageURL, storageDB = s.storage.ConfigSummary()
+		storageURL = redactURLCredentials(storageURL)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":          "FactoryBridge Go Gateway",

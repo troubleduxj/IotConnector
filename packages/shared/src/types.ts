@@ -130,6 +130,8 @@ export interface NotificationConfig {
   enabled: boolean;
   /** 通用 Webhook：POST JSON { event, tagName, kind, value, threshold, ts, message } */
   webhookUrl: string;
+  /** 只读：网关已存有该值。GET 不回传密钥原文，提交空值表示保持不变 */
+  webhookUrlSet?: boolean;
   dingtalk: DingTalkConfig;
   wecom: WecomConfig;
   email: EmailConfig;
@@ -152,13 +154,16 @@ export const DEFAULT_NOTIFY_TEMPLATE = {
 export interface DingTalkConfig {
   enabled: boolean;
   webhookUrl: string;
+  webhookUrlSet?: boolean;
   /** 加签密钥（安全设置选"加签"时必填） */
   secret: string;
+  secretSet?: boolean;
 }
 
 export interface WecomConfig {
   enabled: boolean;
   webhookUrl: string;
+  webhookUrlSet?: boolean;
 }
 
 export interface EmailConfig {
@@ -167,6 +172,7 @@ export interface EmailConfig {
   port: number;
   username: string;
   password: string;
+  passwordSet?: boolean;
   /** 收件人（逗号分隔多个） */
   to: string;
   /** 465 端口通常为 true（隐式 TLS），587 为 false（STARTTLS） */

@@ -7,7 +7,7 @@ import type {
   StorageStatus,
   TagValueUpdate,
 } from '@iotconnector/shared';
-import { gatewayUrl, getToken } from '../api';
+import { fetchWsTicket, gatewayUrl, getToken } from '../api';
 
 /**
  * 网关实时数据 store：WebSocket 连接 + 位号最新值缓存。
@@ -64,11 +64,22 @@ export const useRuntime = create<RuntimeState>((set) => ({
 }));
 
 function openSocket(): void {
+  void openSocketWithTicket();
+}
+
+// B9：会话令牌不再放进 WebSocket URL（会进代理与访问日志）。先用 Authorization 头换一张
+// 30 秒有效、只能用一次的票据，再用 ?ticket= 建连。网关不支持该接口时回退到 ?token=。
+async function openSocketWithTicket(): Promise<void> {
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   const wsURL = new URL(gatewayUrl('/ws'), location.origin);
   wsURL.protocol = wsProto;
-  const token = getToken();
-  if (token) wsURL.searchParams.set('token', token);
+  const ticket = await fetchWsTicket();
+  if (ticket) {
+    wsURL.searchParams.set('ticket', ticket);
+  } else {
+    const token = getToken();
+    if (token) wsURL.searchParams.set('token', token);
+  }
   socket = new WebSocket(wsURL.toString());
 
   socket.onopen = () => {

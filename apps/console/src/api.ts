@@ -29,6 +29,19 @@ export function gatewayUrl(path: string): string {
   return GATEWAY_URL ? `${GATEWAY_URL}${path}` : path;
 }
 
+/** 换取 WebSocket 一次性票据；网关不支持（404/501）或未登录时返回 null。 */
+export async function fetchWsTicket(): Promise<string | null> {
+  if (!getToken()) return null;
+  try {
+    const res = await apiFetch('/api/auth/ws-ticket', { method: 'POST' });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { ticket?: string };
+    return body.ticket ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** 401 时由 apiFetch 派发，App 捕获后切回登录页 */
 export const AUTH_EXPIRED_EVENT = 'fb-auth-expired';
 

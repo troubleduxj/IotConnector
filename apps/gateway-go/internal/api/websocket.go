@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -215,15 +216,25 @@ func (s *Server) BroadcastStorageStatus() {
 	s.ws.broadcast(map[string]any{"type": "storage-status", "status": status}, true)
 }
 
-// authenticateWebSocket 校验握手。浏览器的 WebSocket API 不能设置 Authorization 头，
-// 所以同时接受 ?token= 查询参数（B9 计划改为短期票据）。
+// authenticateWebSocket 校验握手。依次接受：Authorization 头（脚本客户端）、
+// ?ticket= 一次性票据（控制台，见 wsticket.go）、?token= 会话令牌（已弃用，兼容旧客户端）。
 func (s *Server) authenticateWebSocket(r *http.Request) (Role, bool, bool, string) {
 	if s.devNoAuth {
 		return devPrincipal.Role, true, false, devPrincipal.Username
 	}
+	if ticket := strings.TrimSpace(r.URL.Query().Get("ticket")); ticket != "" {
+		p, ok := s.wsTickets.redeem(ticket)
+		if !ok {
+			return "", false, false, ""
+		}
+		return p.Role, true, p.MustChangePassword, p.Username
+	}
 	token := bearerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))
+		if token != "" {
+			s.warnQueryTokenOnce()
+		}
 	}
 	p, ok := s.authenticateToken(r.Context(), token)
 	if !ok {
@@ -251,4 +262,12 @@ func wireValue(value acquisition.Value) any {
 		return *value.Bool
 	}
 	return nil
+}
+
+var queryTokenWarned sync.Once
+
+func (s *Server) warnQueryTokenOnce() {
+	queryTokenWarned.Do(func() {
+		log.Printf("websocket: client authenticated with ?token= (deprecated; tokens in URLs end up in proxy logs). Use POST /api/auth/ws-ticket and ?ticket= instead")
+	})
 }

@@ -41,6 +41,7 @@ type Server struct {
 	users               *auth.UserStore
 	devMode             bool
 	web                 http.Handler
+	wsTickets           *wsTicketStore
 	allowedClients      []netip.Prefix
 	closeWeb            func() error
 	devNoAuth           bool
@@ -165,6 +166,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	server.alarms.state = state
 	server.alarms.history = state.loadAlarmHistory(context.Background(), alarmHistoryLimit)
 	server.ws = newWSHub()
+	server.wsTickets = newWSTicketStore()
 	engine.SetOnSample(func(sample acquisition.Sample) {
 		server.historyStore.add(sample)
 		if server.storage != nil {
@@ -328,6 +330,7 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, "POST /api/auth/login", public, s.login)
 	s.route(mux, "GET /api/auth/me", signedIn, s.me)
 	s.route(mux, "POST /api/auth/logout", signedIn, s.logout)
+	s.route(mux, "POST /api/auth/ws-ticket", viewerOnly, s.issueWSTicket)
 	s.route(mux, "POST /api/auth/password", signedIn, s.changePassword)
 	s.route(mux, "POST /api/auth/change-password", signedIn, s.changePassword)
 	s.route(mux, "GET /api/users", adminOnly, s.listUsers)

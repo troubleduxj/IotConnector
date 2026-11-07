@@ -2,12 +2,15 @@ package audit
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 )
 
 type Event struct {
@@ -18,25 +21,50 @@ type Event struct {
 	Detail map[string]any `json:"detail,omitempty"`
 }
 
+// Logger 写审计事件。配置了 SQLite 时写 audit_events 表（G3），否则写 JSONL 文件（测试与旧调用方）。
+//
+// 审计事件写入不走 db.Batch：审计要求事件在返回前已落盘，量也远小于采样。
 type Logger struct {
 	mu   sync.Mutex
 	path string
+	db   *db.DB
 }
+
+// Retention 是审计事件保留期，Prune 删除更早的事件。
+const Retention = 365 * 24 * time.Hour
 
 func New(path string) *Logger { return &Logger{path: path} }
 
+// NewDB 返回写入 SQLite 的 Logger；legacyPath 是旧 audit.jsonl，库为空时导入一次并改名为 .migrated。
+func NewDB(database *db.DB, legacyPath string) *Logger {
+	l := &Logger{db: database}
+	l.importLegacy(legacyPath)
+	return l
+}
+
 func (l *Logger) Record(event Event) error {
-	if l == nil || l.path == "" {
+	if l == nil {
 		return nil
 	}
 	if event.At.IsZero() {
 		event.At = time.Now().UTC()
 	}
+	if l.db != nil {
+		detail, err := json.Marshal(event.Detail)
+		if err != nil {
+			return fmt.Errorf("encode audit detail: %w", err)
+		}
+		_, err = l.db.Exec(`INSERT INTO audit_events(at, actor, action, target, detail) VALUES (?, ?, ?, ?, ?)`,
+			event.At.UnixMilli(), event.Actor, event.Action, event.Target, string(detail))
+		return err
+	}
+	if l.path == "" {
+		return nil
+	}
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("encode audit event: %w", err)
 	}
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(l.path), 0o750); err != nil {
@@ -53,10 +81,32 @@ func (l *Logger) Record(event Event) error {
 	return nil
 }
 
-// Recent 返回最新的 limit 条事件（新的在前）。审计文件在 G3 迁入 SQLite 前为 JSONL，
-// 这里整文件读取；损坏行跳过。
+// Recent 返回最新的 limit 条事件（新的在前）。
 func (l *Logger) Recent(limit int) ([]Event, error) {
-	if l == nil || l.path == "" {
+	if l == nil {
+		return []Event{}, nil
+	}
+	if l.db != nil {
+		rows, err := l.db.Query(`SELECT at, actor, action, target, detail FROM audit_events ORDER BY id DESC LIMIT ?`, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		events := make([]Event, 0, limit)
+		for rows.Next() {
+			var at int64
+			var detail string
+			var event Event
+			if err := rows.Scan(&at, &event.Actor, &event.Action, &event.Target, &detail); err != nil {
+				return nil, err
+			}
+			event.At = time.UnixMilli(at).UTC()
+			_ = json.Unmarshal([]byte(detail), &event.Detail)
+			events = append(events, event)
+		}
+		return events, rows.Err()
+	}
+	if l.path == "" {
 		return []Event{}, nil
 	}
 	l.mu.Lock()
@@ -68,6 +118,10 @@ func (l *Logger) Recent(limit int) ([]Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read audit log: %w", err)
 	}
+	return parseRecent(data, limit), nil
+}
+
+func parseRecent(data []byte, limit int) []Event {
 	lines := bytes.Split(data, []byte{'\n'})
 	events := make([]Event, 0, limit)
 	for i := len(lines) - 1; i >= 0 && len(events) < limit; i-- {
@@ -79,5 +133,53 @@ func (l *Logger) Recent(limit int) ([]Event, error) {
 			events = append(events, event)
 		}
 	}
-	return events, nil
+	return events
+}
+
+// Prune 删除超出保留期的审计事件。
+func (l *Logger) Prune(ctx context.Context) error {
+	if l == nil || l.db == nil {
+		return nil
+	}
+	_, err := l.db.ExecContext(ctx, `DELETE FROM audit_events WHERE at < ?`, time.Now().Add(-Retention).UnixMilli())
+	return err
+}
+
+func (l *Logger) importLegacy(path string) {
+	if path == "" || l.db == nil {
+		return
+	}
+	var existing int
+	if l.db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&existing) != nil || existing > 0 {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	tx, err := l.db.Begin()
+	if err != nil {
+		return
+	}
+	stmt, err := tx.Prepare(`INSERT INTO audit_events(at, actor, action, target, detail) VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return
+	}
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		var event Event
+		if len(bytes.TrimSpace(line)) == 0 || json.Unmarshal(line, &event) != nil {
+			continue // 跳过损坏行
+		}
+		detail, _ := json.Marshal(event.Detail)
+		if _, err := stmt.Exec(event.At.UnixMilli(), event.Actor, event.Action, event.Target, string(detail)); err != nil {
+			_ = stmt.Close()
+			_ = tx.Rollback()
+			return
+		}
+	}
+	_ = stmt.Close()
+	if tx.Commit() == nil {
+		_ = os.Rename(path, path+".migrated")
+	}
 }

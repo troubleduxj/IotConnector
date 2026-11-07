@@ -64,7 +64,7 @@ func (s *Server) createStorageTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	task := cloneMap(body)
-	task["id"] = fmt.Sprintf("stk_%d", time.Now().UnixMilli())
+	task["id"] = newID("stk_")
 	if _, ok := task["enabled"]; !ok {
 		task["enabled"] = true
 	}

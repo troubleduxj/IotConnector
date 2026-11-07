@@ -23,6 +23,7 @@ import (
 	"github.com/factorybridge/iotconnector/gateway-go/internal/audit"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/auth"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/domain"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/northbound"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/shadow"
@@ -47,6 +48,7 @@ type Server struct {
 	ws                  *wsHub
 	configStore         *config.Store
 	configMu            sync.RWMutex
+	state               *stateStore
 	historyStore        *historyStore
 	alarms              *alarmManager
 	storage             *storage.Writer
@@ -69,7 +71,10 @@ type SecurityOptions struct {
 	// 并在 /api/system/info 与 /api/auth/me 中标明。绑定地址由 run 命令强制为回环。
 	DevMode bool
 	// DevNoAuth 仅开发模式可用：所有请求按 admin 处理。
-	DevNoAuth     bool
+	DevNoAuth bool
+	// StateDB/State 为空时历史与告警只保留在内存（测试）。HistoryFile 是旧 history.jsonl，首次启动导入。
+	StateDB       *db.DB
+	State         *db.Batch
 	HistoryFile   string
 	Audit         *audit.Logger
 	ConfigStore   *config.Store
@@ -128,19 +133,26 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	if options.AdminToken != "" {
 		credentials[options.AdminToken] = RoleAdmin
 	}
+	var state *stateStore
+	if options.StateDB != nil && options.State != nil {
+		state = &stateStore{db: options.StateDB, batch: options.State}
+	}
 	server := &Server{
 		startedAt: time.Now(), engine: engine, credentials: credentials, audit: options.Audit,
 		users: options.Users, devMode: options.DevMode || options.DevNoAuth, devNoAuth: options.DevNoAuth,
 		cors: origins, failures: make(map[string]authFailure),
 		failureLimit: options.FailureLimit, failureWindow: options.FailureWindow,
 		configStore:  options.ConfigStore,
-		historyStore: newHistoryStore(options.HistoryFile),
+		state:        state,
+		historyStore: newHistoryStore(state, options.HistoryFile),
 		alarms:       newAlarmManager(cfg.Raw["alarms"]),
 		storage:      options.Storage,
-		shadowStore:  shadow.New(options.ShadowFile, nil),
+		shadowStore:  newShadowStore(options),
 	}
 	initial := cfg.Clone()
 	server.cfgPtr.Store(&initial)
+	server.alarms.state = state
+	server.alarms.history = state.loadAlarmHistory(context.Background(), alarmHistoryLimit)
 	server.ws = newWSHub()
 	engine.SetOnSample(func(sample acquisition.Sample) {
 		server.historyStore.add(sample)

@@ -1,12 +1,10 @@
 package api
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,32 +28,13 @@ type persistedHistoryPoint struct {
 type historyStore struct {
 	mu     sync.RWMutex
 	values map[string][]historyPoint
-	path   string
+	state  *stateStore
 }
 
-func newHistoryStore(path string) *historyStore {
-	store := &historyStore{values: make(map[string][]historyPoint), path: path}
-	if path == "" {
-		return store
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return store
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var point persistedHistoryPoint
-		if json.Unmarshal(scanner.Bytes(), &point) != nil || point.TagID == "" {
-			continue
-		}
-		points := append(store.values[point.TagID], point.historyPoint)
-		if len(points) > 20000 {
-			points = points[len(points)-20000:]
-		}
-		store.values[point.TagID] = points
-	}
-	return store
+// newHistoryStore 从 SQLite 恢复最近数据；legacyPath 是旧 history.jsonl，库为空时导入一次。
+// 原实现每个样本打开、追加、fsync、关闭一次文件，且文件从不轮转（C3）。
+func newHistoryStore(state *stateStore, legacyPath string) *historyStore {
+	return &historyStore{values: state.loadHistory(context.Background(), legacyPath), state: state}
 }
 
 func (h *historyStore) add(sample acquisition.Sample) {
@@ -65,20 +44,12 @@ func (h *historyStore) add(sample acquisition.Sample) {
 	h.mu.Lock()
 	point := historyPoint{TS: sample.SampledAt, Value: *sample.Value.Number}
 	points := append(h.values[sample.TagID], point)
-	if len(points) > 20000 {
-		points = points[len(points)-20000:]
+	if len(points) > historyPointsPerTag {
+		points = points[len(points)-historyPointsPerTag:]
 	}
 	h.values[sample.TagID] = points
-	if h.path != "" {
-		if err := os.MkdirAll(filepath.Dir(h.path), 0o750); err == nil {
-			if file, err := os.OpenFile(h.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640); err == nil {
-				_ = json.NewEncoder(file).Encode(persistedHistoryPoint{TagID: sample.TagID, historyPoint: point})
-				_ = file.Sync()
-				_ = file.Close()
-			}
-		}
-	}
 	h.mu.Unlock()
+	h.state.addHistory(sample.TagID, point)
 }
 
 func (h *historyStore) query(tagIDs []string, start, end int64) map[string][]historyPoint {
@@ -120,18 +91,28 @@ type alarmEvent struct {
 	TS        int64          `json:"ts"`
 	Message   string         `json:"message,omitempty"`
 	Ack       map[string]any `json:"ack,omitempty"`
+	ActiveID  string         `json:"activeId,omitempty"`
 }
 
 type alarmManager struct {
 	mu              sync.RWMutex
 	rules           []alarmRule
 	active          map[string]alarmEvent
-	history         []alarmEvent
+	history         []alarmEvent // 最近 alarmHistoryLimit 条，新的在前；完整历史在 SQLite
+	state           *stateStore
 	last            map[string]float64
 	onEvent         func(alarmEvent)
 	stormLimit      int
 	stormHits       []time.Time
 	stormSuppressed int
+}
+
+func (a *alarmManager) recordLocked(event alarmEvent) {
+	a.history = append([]alarmEvent{event}, a.history...)
+	if len(a.history) > alarmHistoryLimit {
+		a.history = a.history[:alarmHistoryLimit]
+	}
+	a.state.saveAlarmEvent(event)
 }
 
 func newAlarmManager(raw any) *alarmManager {
@@ -200,23 +181,21 @@ func (a *alarmManager) evaluate(tag domain.Tag, sample acquisition.Sample) {
 				continue
 			}
 			a.stormHits = append(a.stormHits, now)
-			event := alarmEvent{ID: fmt.Sprintf("alm_%d", time.Now().UnixNano()), RuleID: rule.ID, TagID: tag.ID, TagName: tag.Name, Channel: tag.ChannelID, State: "Active", Kind: rule.Kind, Threshold: rule.Threshold, Value: value, TS: time.Now().UnixMilli(), Message: rule.Message}
+			event := alarmEvent{ID: newID("alm_"), RuleID: rule.ID, TagID: tag.ID, TagName: tag.Name, Channel: tag.ChannelID, State: "Active", Kind: rule.Kind, Threshold: rule.Threshold, Value: value, TS: time.Now().UnixMilli(), Message: rule.Message}
 			a.active[rule.ID] = event
-			a.history = append([]alarmEvent{event}, a.history...)
-			if len(a.history) > 200 {
-				a.history = a.history[:200]
-			}
+			a.recordLocked(event)
 			if a.onEvent != nil {
 				a.onEvent(event)
 			}
 		} else if clear {
+			// 清除事件用新 ID：持久化按 ID 存储，复用激活事件的 ID 会覆盖激活记录，历史里只剩一条。
+			// ActiveID 指回被清除的激活事件，供界面关联。
 			event := active
+			event.ActiveID = active.ID
+			event.ID = newID("alm_")
 			event.State, event.Value, event.TS = "Cleared", value, time.Now().UnixMilli()
 			delete(a.active, rule.ID)
-			a.history = append([]alarmEvent{event}, a.history...)
-			if len(a.history) > 200 {
-				a.history = a.history[:200]
-			}
+			a.recordLocked(event)
 			if a.onEvent != nil {
 				a.onEvent(event)
 			}
@@ -408,6 +387,23 @@ func (s *Server) deleteAlarm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) alarmHistory(w http.ResponseWriter, r *http.Request) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
+	if page < 0 {
+		page = 0
+	}
+	if pageSize <= 0 || pageSize > 500 {
+		pageSize = 50
+	}
+	if s.alarms.state != nil {
+		events, total, err := s.alarms.state.queryAlarmHistory(r.Context(), page, pageSize)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "events": events, "total": total, "page": page, "pageSize": pageSize})
+		return
+	}
 	s.alarms.mu.RLock()
 	history := append([]alarmEvent(nil), s.alarms.history...)
 	s.alarms.mu.RUnlock()
@@ -428,6 +424,7 @@ func (s *Server) ackAlarm(w http.ResponseWriter, r *http.Request) {
 			s.alarms.history[i].Ack = map[string]any{"user": actor, "ts": time.Now().UnixMilli(), "note": request.Note}
 			copy := s.alarms.history[i]
 			result = &copy
+			s.alarms.state.saveAlarmEvent(copy)
 			break
 		}
 	}

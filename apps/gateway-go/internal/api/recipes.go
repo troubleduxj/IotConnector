@@ -80,7 +80,7 @@ func (s *Server) createRecipe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "name required"})
 		return
 	}
-	item.ID, item.UpdatedAt, item.Version = fmt.Sprintf("rcp_%d", time.Now().UnixMilli()), time.Now().UnixMilli(), 1
+	item.ID, item.UpdatedAt, item.Version = newID("rcp_"), time.Now().UnixMilli(), 1
 	s.configMu.Lock()
 	items := s.recipesSnapshot()
 	items = append(items, item)
@@ -213,7 +213,7 @@ func (s *Server) downloadRecipe(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, entry)
 	}
-	record := recipeDownload{ID: fmt.Sprintf("dl_%d", time.Now().UnixMilli()), RecipeID: selected.ID, RecipeName: selected.Name, Version: selected.Version, At: time.Now().UnixMilli(), By: actorName(r), OK: okCount == len(results), OKCount: okCount, TotalCount: len(results)}
+	record := recipeDownload{ID: newID("dl_"), RecipeID: selected.ID, RecipeName: selected.Name, Version: selected.Version, At: time.Now().UnixMilli(), By: actorName(r), OK: okCount == len(results), OKCount: okCount, TotalCount: len(results)}
 	s.configMu.Lock()
 	records := s.recipeDownloadsSnapshot()
 	records = append([]recipeDownload{record}, records...)
@@ -265,7 +265,7 @@ func (s *Server) saveRecipeDownloads(items []recipeDownload) error {
 func (s *Server) duplicateRecipe(w http.ResponseWriter, r *http.Request) {
 	for _, item := range s.recipesSnapshot() {
 		if item.ID == r.PathValue("recipeID") {
-			item.ID = fmt.Sprintf("rcp_%d", time.Now().UnixMilli())
+			item.ID = newID("rcp_")
 			item.Name += " 副本"
 			item.UpdatedAt = time.Now().UnixMilli()
 			item.Version = 1
@@ -329,7 +329,7 @@ func (s *Server) importRecipe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	item := recipe{ID: fmt.Sprintf("rcp_%d", time.Now().UnixMilli()), Name: body.Recipe.Name, Description: body.Recipe.Description, Items: body.Recipe.Items, UpdatedAt: time.Now().UnixMilli(), Version: 1}
+	item := recipe{ID: newID("rcp_"), Name: body.Recipe.Name, Description: body.Recipe.Description, Items: body.Recipe.Items, UpdatedAt: time.Now().UnixMilli(), Version: 1}
 	s.configMu.Lock()
 	all := s.recipesSnapshot()
 	all = append(all, item)

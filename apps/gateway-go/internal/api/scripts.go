@@ -382,7 +382,7 @@ func (s *Server) createScript(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 413, map[string]any{"ok": false, "error": "script code exceeds 64 KiB"})
 		return
 	}
-	script.ID = fmt.Sprintf("scr_%d", time.Now().UnixMilli())
+	script.ID = newID("scr_")
 	if script.Trigger.Type == "" {
 		script.Trigger.Type = "manual"
 	}

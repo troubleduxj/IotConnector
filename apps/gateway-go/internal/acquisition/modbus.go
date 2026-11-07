@@ -3,6 +3,7 @@ package acquisition
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -94,13 +95,25 @@ func (d *modbusDriver) Stop(ctx context.Context) error {
 }
 
 func (d *modbusDriver) Read(ctx context.Context, tags []Tag) ([]Sample, error) {
+	// Connection-level errors abort the read so the caller's reconnect logic runs.
+	// Anything else (bad address, Modbus exception response, decode error) is a
+	// per-tag failure: the tag gets a Bad-quality sample and the other tags still read.
+	isConnectionErr := func(err error) bool {
+		var netErr net.Error
+		return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+			errors.Is(err, net.ErrClosed) || errors.As(err, &netErr)
+	}
 	result := make([]Sample, 0, len(tags))
 	for _, tag := range tags {
 		value, err := d.readTag(ctx, tag)
-		if err != nil {
-			return nil, err
-		}
 		now := time.Now().UnixMilli()
+		if err != nil {
+			if isConnectionErr(err) {
+				return nil, err
+			}
+			result = append(result, Sample{TagID: tag.ID, Quality: QualityBad, SampledAt: now, ReceivedAt: now})
+			continue
+		}
 		result = append(result, Sample{TagID: tag.ID, Value: value, Quality: QualityGood, SampledAt: now, ReceivedAt: now})
 	}
 	return result, nil
@@ -177,10 +190,20 @@ func (d *modbusDriver) loop(ctx context.Context, done chan struct{}) {
 		if samples, err := d.Read(ctx, d.tags); err != nil {
 			d.setStatus(ChannelStatus{ID: d.channel.ID, State: "offline", Detail: err.Error()})
 		} else {
+			bad := 0
 			for _, sample := range samples {
+				if sample.Quality == QualityBad {
+					bad++
+				}
 				d.publish(sample)
 			}
-			d.setStatus(ChannelStatus{ID: d.channel.ID, State: "online", Detail: fmt.Sprintf("OK %dms", time.Since(started).Milliseconds())})
+			// 单个位号失败不再让整个通道离线（C8），但要在状态里看得到，否则点位读不到却显示一切正常。
+			// 保持 "OK <n>ms" 前缀：引擎靠它统计周期延迟（statusLatency）。
+			detail := fmt.Sprintf("OK %dms", time.Since(started).Milliseconds())
+			if bad > 0 {
+				detail += fmt.Sprintf(", %d/%d tags bad", bad, len(samples))
+			}
+			d.setStatus(ChannelStatus{ID: d.channel.ID, State: "online", Detail: detail})
 		}
 		select {
 		case <-ctx.Done():

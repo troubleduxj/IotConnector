@@ -37,3 +37,10 @@ func TestChannelStatsSurviveReload(t *testing.T) {
 		t.Fatalf("samples after reload = %d", got)
 	}
 }
+
+// C8 后 Modbus 在部分位号失败时会写 "OK 12ms, 1/3 tags bad"，周期延迟统计必须仍能解析。
+func TestStatusLatencyAcceptsBadTagSuffix(t *testing.T) {
+	if ms, ok := statusLatency("OK 12ms, 1/3 tags bad"); !ok || ms != 12 {
+		t.Fatalf("got %d %v", ms, ok)
+	}
+}

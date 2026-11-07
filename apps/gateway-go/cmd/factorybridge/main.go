@@ -19,33 +19,28 @@ import (
 	"github.com/factorybridge/iotconnector/gateway-go/internal/audit"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/northbound"
-	"github.com/factorybridge/iotconnector/gateway-go/internal/scriptworker"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/storage"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/version"
 )
 
-func main() {
-	if os.Getenv("GATEWAY_GO_SCRIPT_WORKER") == "1" {
-		if err := scriptworker.Run(); err != nil {
-			os.Exit(1)
-		}
-		return
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	dataDir := envOr("GATEWAY_GO_DATA_DIR", defaultDataDir())
-	port := envInt("GATEWAY_GO_PORT", 18080)
+// runGateway 是原 main 的主体，行为不变；路径和端口改由命令行参数传入（缺省仍读环境变量）。
+func runGateway(opts runOptions) int {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: opts.logLevel}))
+	dataDir := opts.dataDir
+	port := opts.port
 
 	store := config.NewStore(dataDir)
 	cfg, err := store.Load()
 	if err != nil {
 		logger.Error("load config", "error", err)
-		os.Exit(1)
+		return exitConfig
 	}
 	engine := acquisition.NewEngine(toAcquisitionChannels(cfg), toAcquisitionTags(cfg), acquisition.NewFactory())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := engine.Start(ctx); err != nil {
 		logger.Error("start acquisition engine", "error", err)
-		os.Exit(1)
+		return exitError
 	}
 	tdengineURL := os.Getenv("TDENGINE_URL")
 	queueFile := ""
@@ -149,7 +144,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("go gateway skeleton listening", "addr", "http://"+server.Addr, "channels", len(cfg.Channels), "tags", len(cfg.Tags))
+		logger.Info("factorybridge gateway listening", "version", version.Version, "addr", "http://"+server.Addr, "channels", len(cfg.Channels), "tags", len(cfg.Tags))
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("http server stopped", "error", err)
 			os.Exit(1)
@@ -166,7 +161,8 @@ func main() {
 	if err := engine.Stop(shutdownCtx); err != nil {
 		logger.Error("stop acquisition engine", "error", err)
 	}
-	logger.Info("go gateway skeleton stopped")
+	logger.Info("factorybridge gateway stopped")
+	return exitOK
 }
 
 func stringRaw(root any, key, fallback string) string {

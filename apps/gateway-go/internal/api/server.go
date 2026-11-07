@@ -27,6 +27,7 @@ import (
 	"github.com/factorybridge/iotconnector/gateway-go/internal/northbound"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/shadow"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/storage"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/version"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -1188,7 +1189,8 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":          "FactoryBridge Go Gateway",
-		"version":       "0.1.0-go-skeleton",
+		"version":       version.Version,
+		"build":         version.Info(),
 		"startedAt":     s.startedAt,
 		"uptimeSec":     int(time.Since(s.startedAt).Seconds()),
 		"goVersion":     runtime.Version(),

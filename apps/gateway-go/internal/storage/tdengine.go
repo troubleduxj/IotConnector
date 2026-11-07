@@ -9,9 +9,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,18 +16,23 @@ import (
 	"unicode/utf8"
 
 	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 )
 
 type Config struct {
-	URL            string
-	User           string
-	Password       string
-	Database       string
-	SuperTable     string
+	URL        string
+	User       string
+	Password   string
+	Database   string
+	SuperTable string
+	// State/StateDB 非空时队列持久化到 SQLite（G2）；为空时只在内存中排队（测试或未启用存储）。
+	// QueueFile/AlarmQueueFile 仅用于首次启动时导入旧 JSON 队列，导入后原文件改名为 .migrated。
+	State          *db.Batch
+	StateDB        *db.DB
 	QueueFile      string
 	AlarmQueueFile string
 	MaxQueue       int
-	SegmentSize    int
+	SegmentSize    int // 已弃用：SQLite 不需要分段，保留字段以兼容旧调用方
 }
 
 type Status struct {
@@ -52,6 +54,11 @@ type HistoryPoint struct {
 	Value float64
 }
 
+type queuedAlarm struct {
+	id    int64
+	event AlarmEvent
+}
+
 type AlarmEvent struct {
 	ID        string
 	RuleID    string
@@ -67,6 +74,7 @@ type AlarmEvent struct {
 }
 
 type point struct {
+	id        int64
 	TagID     string  `json:"tagId"`
 	TagName   string  `json:"tagName"`
 	Channel   string  `json:"channel"`
@@ -79,7 +87,9 @@ type Writer struct {
 	mu         sync.Mutex
 	cfg        Config
 	queue      []point
-	alarmQueue []AlarmEvent
+	alarmQueue []queuedAlarm
+	nextPoint  int64
+	nextAlarm  int64
 	status     Status
 	client     *http.Client
 }
@@ -91,9 +101,6 @@ const maxInsertPoints = 500
 func New(cfg Config) *Writer {
 	if cfg.MaxQueue <= 0 {
 		cfg.MaxQueue = 100000
-	}
-	if cfg.SegmentSize <= 0 {
-		cfg.SegmentSize = 10000
 	}
 	w := &Writer{cfg: cfg, client: &http.Client{Timeout: 10 * time.Second}}
 	w.status = Status{Engine: "tdengine", State: "disabled"}
@@ -158,12 +165,16 @@ func (w *Writer) EnqueueAlarmEvent(event AlarmEvent) {
 	}
 	w.mu.Lock()
 	if len(w.alarmQueue) >= w.cfg.MaxQueue {
+		w.cfg.State.Exec(`DELETE FROM outbox_alarms WHERE id = ?`, w.alarmQueue[0].id)
 		w.alarmQueue = w.alarmQueue[1:]
 		w.status.Dropped++
 		w.status.Error = "alarm outbox overflow"
 	}
-	w.alarmQueue = append(w.alarmQueue, event)
-	w.persistAlarmQueueLocked()
+	w.nextAlarm++
+	w.alarmQueue = append(w.alarmQueue, queuedAlarm{id: w.nextAlarm, event: event})
+	if payload, err := json.Marshal(event); err == nil {
+		w.cfg.State.Exec(`INSERT INTO outbox_alarms(id, payload) VALUES (?, ?)`, w.nextAlarm, string(payload))
+	}
 	w.mu.Unlock()
 }
 
@@ -225,12 +236,17 @@ func (w *Writer) Enqueue(tag acquisition.Tag, sample acquisition.Sample) {
 	}
 	w.mu.Lock()
 	if len(w.queue) >= w.cfg.MaxQueue {
+		w.cfg.State.Exec(`DELETE FROM outbox_points WHERE id = ?`, w.queue[0].id)
 		w.queue = w.queue[1:]
 		w.status.Dropped++
 		w.status.Error = "outbox overflow"
 	}
-	w.queue = append(w.queue, point{TagID: tag.ID, TagName: tag.Name, Channel: tag.ChannelID, DataType: tag.DataType, Value: value, Timestamp: sample.SampledAt})
-	w.persistQueueLocked()
+	w.nextPoint++
+	p := point{id: w.nextPoint, TagID: tag.ID, TagName: tag.Name, Channel: tag.ChannelID, DataType: tag.DataType, Value: value, Timestamp: sample.SampledAt}
+	w.queue = append(w.queue, p)
+	// 每个样本追加一行，O(1)；原实现每个样本重写整个队列文件（C3）
+	w.cfg.State.Exec(`INSERT INTO outbox_points(id, tag_id, tag_name, channel, data_type, value, ts) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.id, p.TagID, p.TagName, p.Channel, p.DataType, p.Value, p.Timestamp)
 	w.mu.Unlock()
 }
 
@@ -248,10 +264,10 @@ func (w *Writer) Flush(ctx context.Context) error {
 		batchSize = maxInsertPoints
 	}
 	batch := append([]point(nil), w.queue[:batchSize]...)
-	alarmBatch := append([]AlarmEvent(nil), w.alarmQueue...)
+	alarmBatch := append([]queuedAlarm(nil), w.alarmQueue...)
 	w.mu.Unlock()
-	for _, event := range alarmBatch {
-		if err := w.WriteAlarmEvent(ctx, event); err != nil {
+	for _, item := range alarmBatch {
+		if err := w.WriteAlarmEvent(ctx, item.event); err != nil {
 			w.setError(err)
 			return err
 		}
@@ -271,20 +287,23 @@ func (w *Writer) Flush(ctx context.Context) error {
 		return err
 	}
 	w.mu.Lock()
-	if len(w.alarmQueue) >= len(alarmBatch) {
-		w.alarmQueue = w.alarmQueue[len(alarmBatch):]
-	} else {
-		w.alarmQueue = nil
+	// 发送期间队首可能因溢出被丢弃，按 id 移除已发送的条目，而不是按位置
+	if len(alarmBatch) > 0 {
+		last := alarmBatch[len(alarmBatch)-1].id
+		for len(w.alarmQueue) > 0 && w.alarmQueue[0].id <= last {
+			w.alarmQueue = w.alarmQueue[1:]
+		}
+		w.cfg.State.Exec(`DELETE FROM outbox_alarms WHERE id <= ?`, last)
 	}
-	if len(w.queue) >= len(batch) {
-		w.queue = w.queue[len(batch):]
-	} else {
-		w.queue = nil
+	if len(batch) > 0 {
+		last := batch[len(batch)-1].id
+		for len(w.queue) > 0 && w.queue[0].id <= last {
+			w.queue = w.queue[1:]
+		}
+		w.cfg.State.Exec(`DELETE FROM outbox_points WHERE id <= ?`, last)
 	}
 	w.status.State, w.status.Error = "online", ""
 	w.status.Written += len(batch)
-	w.persistQueueLocked()
-	w.persistAlarmQueueLocked()
 	w.mu.Unlock()
 	return nil
 }
@@ -358,106 +377,6 @@ func (w *Writer) setError(err error) {
 	w.status.State = "offline"
 	w.status.Error = err.Error()
 	w.mu.Unlock()
-}
-
-func (w *Writer) loadQueue() {
-	if w.cfg.QueueFile == "" {
-		return
-	}
-	parts, _ := filepath.Glob(w.cfg.QueueFile + ".part-*")
-	sort.Strings(parts)
-	if len(parts) > 0 {
-		for _, part := range parts {
-			if b, err := os.ReadFile(part); err == nil {
-				var values []point
-				if json.Unmarshal(b, &values) == nil {
-					w.queue = append(w.queue, values...)
-				}
-			}
-		}
-	} else if b, err := os.ReadFile(w.cfg.QueueFile); err == nil {
-		_ = json.Unmarshal(b, &w.queue)
-	}
-	if w.cfg.AlarmQueueFile != "" {
-		if alarmBytes, alarmErr := os.ReadFile(w.cfg.AlarmQueueFile); alarmErr == nil {
-			_ = json.Unmarshal(alarmBytes, &w.alarmQueue)
-		}
-	}
-}
-
-func (w *Writer) persistAlarmQueueLocked() {
-	if w.cfg.AlarmQueueFile == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(w.cfg.AlarmQueueFile), 0o750); err != nil {
-		return
-	}
-	b, err := json.Marshal(w.alarmQueue)
-	if err != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(w.cfg.AlarmQueueFile), ".alarm-outbox-*.json")
-	if err != nil {
-		return
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	_, _ = tmp.Write(b)
-	_ = tmp.Sync()
-	_ = tmp.Close()
-	_ = os.Rename(name, w.cfg.AlarmQueueFile)
-}
-
-func (w *Writer) persistQueueLocked() {
-	if w.cfg.QueueFile == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(w.cfg.QueueFile), 0o750); err != nil {
-		return
-	}
-	oldParts, _ := filepath.Glob(w.cfg.QueueFile + ".part-*")
-	for _, part := range oldParts {
-		_ = os.Remove(part)
-	}
-	if len(w.queue) > w.cfg.SegmentSize {
-		for start, index := 0, 0; start < len(w.queue); start, index = start+w.cfg.SegmentSize, index+1 {
-			end := start + w.cfg.SegmentSize
-			if end > len(w.queue) {
-				end = len(w.queue)
-			}
-			if err := atomicJSONWrite(fmt.Sprintf("%s.part-%06d", w.cfg.QueueFile, index), w.queue[start:end]); err != nil {
-				return
-			}
-		}
-		_ = atomicJSONWrite(w.cfg.QueueFile, []point{})
-		return
-	}
-	_ = atomicJSONWrite(w.cfg.QueueFile, w.queue)
-}
-
-func atomicJSONWrite(path string, value any) error {
-	b, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".outbox-write-*.json")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err = tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
 }
 
 // esc 把值转成可放进 TDengine 单引号字符串字面量的形式。

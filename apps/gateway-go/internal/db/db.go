@@ -98,6 +98,58 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_user ON sessions(user_id);
 CREATE INDEX sessions_expires ON sessions(expires_at);
 `},
+	// 阶段 3（G2–G4）：原先以 JSON/JSONL 文件持久化的状态。id 由各存储显式分配。
+	{2, "state stores", `
+CREATE TABLE outbox_points (
+    id        INTEGER PRIMARY KEY,
+    tag_id    TEXT NOT NULL,
+    tag_name  TEXT NOT NULL,
+    channel   TEXT NOT NULL,
+    data_type TEXT NOT NULL,
+    value     REAL NOT NULL,
+    ts        INTEGER NOT NULL
+);
+CREATE TABLE outbox_alarms (
+    id      INTEGER PRIMARY KEY,
+    payload TEXT NOT NULL
+);
+CREATE TABLE history_points (
+    tag_id TEXT NOT NULL,
+    ts     INTEGER NOT NULL,
+    value  REAL NOT NULL
+);
+CREATE INDEX history_tag_ts ON history_points(tag_id, ts);
+CREATE TABLE alarm_events (
+    id      TEXT PRIMARY KEY,
+    ts      INTEGER NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX alarm_events_ts ON alarm_events(ts);
+CREATE TABLE audit_events (
+    id     INTEGER PRIMARY KEY,
+    at     INTEGER NOT NULL,
+    actor  TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target TEXT NOT NULL,
+    detail TEXT NOT NULL
+);
+CREATE INDEX audit_events_at ON audit_events(at);
+CREATE TABLE shadow_entries (
+    tag_id   TEXT PRIMARY KEY,
+    reported TEXT,
+    desired  TEXT
+);
+CREATE TABLE northbound_queue (
+    id      INTEGER PRIMARY KEY,
+    topic   TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    retain  INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+`},
 }
 
 func (db *DB) migrate(ctx context.Context) error {

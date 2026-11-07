@@ -82,7 +82,7 @@
 |---|---|---|---|---|
 | E1 | 本机无 gcc，`go test -race` 从未运行 | CI（Linux）加 `-race` | P0 | S |
 | E2 | Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
-| E3 | 无 `esc`/SQL、outbox 崩溃恢复、并发改配置测试 | 针对 C1/C2/C4 补测试 | P1 | S |
+| E3 | ✅ 已完成（阶段 1–3 随附：esc_test、outbox 重启/导入测试、concurrency_test）。无 `esc`/SQL、outbox 崩溃恢复、并发改配置测试 | 针对 C1/C2/C4 补测试 | P1 | S |
 | E4 | e2e 仅 87 行，依赖本机已启动服务且绑定 Edge，进不了 CI | e2e 自带启动（Go + 模拟器 + 静态控制台），CI 用 Chromium | P2 | M |
 
 ## F. 部署形态（参考 koike-gateway；Q2 已决定，CLI 与跨平台见 H 组）
@@ -223,3 +223,50 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
   - D0-4（`packages/shared` 归属）。
   - D0-5（删除 Node 目录，前提是补齐功能并迁出 IEC104 模拟器）。
   - 故障矩阵中 OPC UA、BACnet、MQTT、IEC104 四个协议未覆盖。
+
+## 剩余任务梳理（2026-11-07，阶段 4 切换后）
+
+按“是否影响现在正在用的东西”分组。Node 网关已冻结，D1–D8 不修，不列入。
+
+### 第一组：控制台功能缺口（用户点了会报错）
+
+控制台调用了以下 9 个 Node 接口，Go 网关没有实现，对应页面按钮在 Go 上返回 404：
+
+- 通道导入导出：`channels/import`、`channels/{id}/export`
+- 抓包帧：`channels/{id}/frames`
+- 配置备份恢复：`system/config-backup`、`system/config-restore`
+- 恢复出厂：`system/factory-reset`
+- 诊断与 OpenAPI：`system/diag`、`system/openapi.json`
+- 调度：`scheduler/rebalance`
+
+另外 C11：`/api/scheduler` 与连接测试接口返回的是占位数据，调度页吞吐恒为 0。
+
+这一组也是 D0-5（删除 Node 目录）的前提。
+
+### 第二组：运维与安全收尾（工作量小）
+
+- A6：`admin123` 仍写死在 5 个脚本、2 个 e2e 用例中；主用 admin 口令仍为 `admin123`。
+- A4：Go 默认数据目录仍是 `apps/gateway/data`。
+- B8：脚本子进程继承全部环境变量，无内存上限。
+- B9：控制台把会话令牌放在 WS 的 `?token=` 查询参数里，会进代理和访问日志；可改为短期一次性票据。
+- C6、C8、C9、C7：小缺陷，各半天以内。
+- A5：模板残留文件。
+
+### 第三组：验证缺口（做过但没实测）
+
+- E1：`go test -race` 从未运行（本机无 C 编译器）。
+- H3/H8：`service install/start` 未在真实 SCM 和 systemd 上执行（需要管理员权限或 Linux 机器）。
+- Compose 栈未实际启动（Docker 未运行）。
+- 故障矩阵：FINS（ProtoForge 缺陷）、OPC UA、BACnet、MQTT、IEC104 未覆盖。
+- E2：api 包覆盖率 38.7%，acquisition 43.8%，cmd 28.3%。
+- E4：e2e 依赖本机服务，进不了 CI。
+
+### 第四组：结构性改造（大，按需）
+
+- C5：改配置时重启全部驱动；北向配置变更要重启网关才生效。
+- G6：配置迁入 SQLite。
+- H2：`config.yaml` 与 `FB_` 环境变量前缀。
+- F5：`/api/v1` 版本化与统一错误体。
+- F6：拆分 `api.Server`。
+- D0-4：`packages/shared` 归属。
+- H7：部署手册与安全验收文档。

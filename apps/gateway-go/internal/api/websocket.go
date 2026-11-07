@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
@@ -39,6 +40,7 @@ type wsClient struct {
 type wsHub struct {
 	mu      sync.RWMutex
 	clients map[*wsClient]struct{}
+	dropped atomic.Uint64 // 客户端缓冲已满而丢弃的消息数（C7），见 /metrics
 }
 
 func newWSHub() *wsHub { return &wsHub{clients: make(map[*wsClient]struct{})} }
@@ -78,6 +80,7 @@ func (h *wsHub) broadcast(message any, subscribedOnly bool) {
 		select {
 		case client.send <- data:
 		default:
+			h.dropped.Add(1)
 		}
 	}
 }

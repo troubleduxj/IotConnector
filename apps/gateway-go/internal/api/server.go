@@ -42,6 +42,7 @@ type Server struct {
 	devMode             bool
 	web                 http.Handler
 	wsTickets           *wsTicketStore
+	liveBatch           *sampleBatcher
 	allowedClients      []netip.Prefix
 	closeWeb            func() error
 	devNoAuth           bool
@@ -166,6 +167,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	server.alarms.state = state
 	server.alarms.history = state.loadAlarmHistory(context.Background(), alarmHistoryLimit)
 	server.ws = newWSHub()
+	server.liveBatch = newSampleBatcher(server.ws)
 	server.wsTickets = newWSTicketStore()
 	engine.SetOnSample(func(sample acquisition.Sample) {
 		server.historyStore.add(sample)
@@ -195,7 +197,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 				break
 			}
 		}
-		server.ws.broadcast(map[string]any{"type": "tags-batch", "values": wireSamples([]acquisition.Sample{sample})}, true)
+		server.liveBatch.add(sample) // 每 100ms 合并推送一次（C7）
 	})
 	server.alarms.onEvent = func(event alarmEvent) {
 		server.ws.broadcast(map[string]any{"type": "alarm", "event": event}, true)
@@ -566,6 +568,7 @@ func (s *Server) prometheusMetrics(w http.ResponseWriter, _ *http.Request) {
 	f("# HELP factorybridge_storage_queue_items Current storage queue size.\n# TYPE factorybridge_storage_queue_items gauge\nfactorybridge_storage_queue_items %d\n", storageQueued)
 	f("# HELP factorybridge_storage_written_total Storage writes completed.\n# TYPE factorybridge_storage_written_total counter\nfactorybridge_storage_written_total %d\n", storageWritten)
 	f("# HELP factorybridge_storage_dropped_total Storage items dropped.\n# TYPE factorybridge_storage_dropped_total counter\nfactorybridge_storage_dropped_total %d\n", storageDropped)
+	f("# HELP factorybridge_websocket_dropped_total Messages dropped because a WebSocket client's send buffer was full.\n# TYPE factorybridge_websocket_dropped_total counter\nfactorybridge_websocket_dropped_total %d\n", s.ws.dropped.Load())
 }
 
 func (s *Server) channels(w http.ResponseWriter, r *http.Request) {
@@ -1249,6 +1252,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 // Close 释放服务器持有的资源（静态文件目录句柄）。
 func (s *Server) Close() error {
+	s.liveBatch.stop()
 	if s.closeWeb != nil {
 		return s.closeWeb()
 	}

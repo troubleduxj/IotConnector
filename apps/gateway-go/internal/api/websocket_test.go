@@ -76,19 +76,22 @@ func TestWebSocketRequiresAuthAndBroadcastsCompatibleMessages(t *testing.T) {
 	if err := connection.WriteJSON(map[string]any{"type": "write", "tagId": "tag-1", "value": 7}); err != nil {
 		t.Fatal(err)
 	}
-	var update map[string]any
-	if err := connection.ReadJSON(&update); err != nil {
-		t.Fatal(err)
-	}
-	if update["type"] != "tags-batch" {
-		t.Fatalf("unexpected update: %#v", update)
-	}
-	var result map[string]any
-	if err := connection.ReadJSON(&result); err != nil {
-		t.Fatal(err)
-	}
-	if result["type"] != "write-result" || result["ok"] != true {
-		t.Fatalf("unexpected write result: %#v", result)
+	// C7 之后实时样本每 100ms 合并推送，写值回执可能先于样本批次到达，两者都要收到，顺序不限。
+	var gotUpdate, gotResult bool
+	for !(gotUpdate && gotResult) {
+		var message map[string]any
+		if err := connection.ReadJSON(&message); err != nil {
+			t.Fatalf("waiting for update=%v result=%v: %v", gotUpdate, gotResult, err)
+		}
+		switch message["type"] {
+		case "tags-batch":
+			gotUpdate = true
+		case "write-result":
+			if message["ok"] != true {
+				t.Fatalf("unexpected write result: %#v", message)
+			}
+			gotResult = true
+		}
 	}
 
 	// Confirm query-token compatibility for browser clients.

@@ -476,6 +476,13 @@ export async function testChannelConnection(id: string): Promise<ChannelTestResu
 
 // ===== 通知渠道（钉钉/企微/邮件/Webhook）=====
 
+/** 读取通知配置。密钥字段恒为空，以 <key>Set 表示是否已配置。失败时抛错，调用方不得用默认值覆盖保存。 */
+export async function fetchNotifications(): Promise<NotificationConfig> {
+  const res = await apiFetch('/api/notifications');
+  if (!res.ok) throw new Error(`load notifications failed: ${res.status}`);
+  return (await res.json()) as NotificationConfig;
+}
+
 export async function saveNotifications(cfg: NotificationConfig): Promise<NotificationConfig> {
   const res = await apiFetch('/api/notifications/v2', {
     method: 'PUT',

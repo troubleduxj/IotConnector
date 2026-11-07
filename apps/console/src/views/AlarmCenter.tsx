@@ -5,7 +5,7 @@ import {
 import { DEFAULT_NOTIFY_TEMPLATE, NOTIFY_TEMPLATE_VARIABLES, type NotificationConfig } from '@iotconnector/shared';
 import {
   ackAlarm, createAlarm, deleteAlarm, fetchAlarmHistory, fetchAlarms, fetchGatewayTags,
-  gatewayUrl, saveNotifications, testNotificationChannel, updateAlarm,
+  fetchNotifications, saveNotifications, testNotificationChannel, updateAlarm,
   type AlarmEvent, type AlarmHistoryEvent, type AlarmRule, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
@@ -118,14 +118,21 @@ export default function AlarmCenter() {
   }, [alarmSeq]);
 
   // ===== 通知配置加载 =====
+  // 原实现用不带令牌的 fetch，网关返回 401 后静默落到空白默认值；
+  // 此时点保存会把空表单写回，抹掉已存的 webhook、收件人和模板。加载失败时禁止保存。
+  const [notifyLoaded, setNotifyLoaded] = useState(false);
   useEffect(() => {
-      fetch(gatewayUrl('/api/notifications'))
-      .then((r) => r.json())
-      .then((d) => setNotify({ ...DEFAULT_NOTIFY, ...d }))
-      .catch(() => {});
+    fetchNotifications()
+      .then((d) => {
+        setNotify({ ...DEFAULT_NOTIFY, ...d });
+        setNotifyLoaded(true);
+      })
+      .catch(() => toast(t('alarms.notify.loadFailed'), false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const saveNotifyCfg = async (): Promise<void> => {
+    if (!notifyLoaded) return;
     setNotifyBusy(true);
     try {
       const saved = await saveNotifications(notify);
@@ -411,7 +418,7 @@ export default function AlarmCenter() {
           <NotifyConfigTab
             cfg={notify}
             onChange={setNotify}
-            busy={notifyBusy}
+            busy={notifyBusy || !notifyLoaded}
             onSave={() => void saveNotifyCfg()}
             onTest={(ch) => void testNotify(ch)}
             testResult={notifyTest}

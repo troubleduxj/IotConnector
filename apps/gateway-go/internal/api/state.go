@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"sort"
 	"time"
@@ -64,11 +65,16 @@ func (st *stateStore) importLegacyHistory(ctx context.Context, path string) {
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	cutoff := time.Now().Add(-historyRetention).UnixMilli()
-	imported := 0
+	imported, expired, malformed := 0, 0, 0
 	for scanner.Scan() {
 		var point persistedHistoryPoint
-		if json.Unmarshal(scanner.Bytes(), &point) != nil || point.TagID == "" || point.TS < cutoff {
-			continue // 跳过损坏行与超出保留期的点
+		if json.Unmarshal(scanner.Bytes(), &point) != nil || point.TagID == "" {
+			malformed++
+			continue
+		}
+		if point.TS < cutoff {
+			expired++ // 超出保留期：TDengine 才是长期历史的来源，这里只是近期缓冲
+			continue
 		}
 		st.batch.Exec(`INSERT INTO history_points(tag_id, ts, value) VALUES (?, ?, ?)`, point.TagID, point.TS, point.Value)
 		imported++
@@ -83,6 +89,7 @@ func (st *stateStore) importLegacyHistory(ctx context.Context, path string) {
 	if scanner.Err() != nil || st.batch.Flush(ctx) != nil {
 		return // 读取或落盘失败时保留原文件，下次启动重试
 	}
+	log.Printf("history.jsonl imported: %d points, %d skipped as older than %s, %d malformed lines", imported, expired, historyRetention, malformed)
 	_ = os.Rename(path, path+".migrated")
 }
 

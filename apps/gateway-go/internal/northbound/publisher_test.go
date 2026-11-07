@@ -117,3 +117,29 @@ func TestDBQueueSurvivesRestartAndImportsLegacy(t *testing.T) {
 		t.Fatalf("id collision after restart: %v", err)
 	}
 }
+
+func TestDBImportDropsEmptyLegacyPayloads(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "northbound.json")
+	mustWriteFile(t, legacy, `{"BDSeq":4,"Seq":10,"Queue":[{"topic":"a","payload":null},{"topic":"b","payload":"eA=="}],"Dropped":0}`)
+	database, err := db.Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	p := NewDB(Config{}, database, db.NewBatch(database), legacy, nil, nil)
+	status := p.Status()
+	if status.Queued != 1 || status.Dropped != 1 || status.Seq != 10 {
+		t.Fatalf("status=%+v", status)
+	}
+	if _, err := os.Stat(legacy + ".migrated"); err != nil {
+		t.Fatalf("legacy not renamed after import: %v", err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

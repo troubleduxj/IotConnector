@@ -167,9 +167,9 @@ func (l *Logger) importLegacy(path string) {
 		return
 	}
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		var event Event
-		if len(bytes.TrimSpace(line)) == 0 || json.Unmarshal(line, &event) != nil {
-			continue // 跳过损坏行
+		event, ok := parseLegacyLine(line)
+		if !ok {
+			continue // 跳过空行与损坏行
 		}
 		detail, _ := json.Marshal(event.Detail)
 		if _, err := stmt.Exec(event.At.UnixMilli(), event.Actor, event.Action, event.Target, string(detail)); err != nil {
@@ -182,4 +182,57 @@ func (l *Logger) importLegacy(path string) {
 	if tx.Commit() == nil {
 		_ = os.Rename(path, path+".migrated")
 	}
+}
+
+// parseLegacyLine 解析 audit.jsonl 的一行。文件里混有两种格式：
+//   - Go 网关：{"at":"RFC3339","actor":…,"action":…,"target":…,"detail":{…}}
+//   - Node 网关：{"ts":毫秒,"user":…,"role":…,"action":…,"detail":"文本"}
+//
+// 两个网关共用过同一数据目录，实测 1391 行中 1317 行是 Node 格式。
+func parseLegacyLine(line []byte) (Event, bool) {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return Event{}, false
+	}
+	var raw struct {
+		At     time.Time       `json:"at"`
+		Actor  string          `json:"actor"`
+		Target string          `json:"target"`
+		TS     int64           `json:"ts"`
+		User   string          `json:"user"`
+		Role   string          `json:"role"`
+		Action string          `json:"action"`
+		Detail json.RawMessage `json:"detail"`
+	}
+	if json.Unmarshal(line, &raw) != nil || raw.Action == "" {
+		return Event{}, false
+	}
+	fromNode := raw.At.IsZero() && raw.TS > 0
+	event := Event{At: raw.At, Actor: raw.Actor, Action: raw.Action, Target: raw.Target}
+	if fromNode {
+		event.At = time.UnixMilli(raw.TS).UTC()
+		event.Actor = raw.User
+	}
+	if event.At.IsZero() {
+		return Event{}, false
+	}
+	if len(raw.Detail) > 0 {
+		var structured map[string]any
+		var text string
+		switch {
+		case json.Unmarshal(raw.Detail, &structured) == nil:
+			event.Detail = structured
+		case json.Unmarshal(raw.Detail, &text) == nil && text != "":
+			event.Detail = map[string]any{"text": text}
+		}
+	}
+	if fromNode {
+		if event.Detail == nil {
+			event.Detail = map[string]any{}
+		}
+		event.Detail["source"] = "node"
+		if raw.Role != "" {
+			event.Detail["role"] = raw.Role
+		}
+	}
+	return event, true
 }

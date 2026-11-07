@@ -90,11 +90,19 @@ func NewDB(cfg Config, database *db.DB, batch *db.Batch, legacyFile string, chan
 		p.stateFile = legacyFile
 		p.load()
 		p.stateFile = ""
-		for i := range p.queue {
+		// 旧队列里存在 payload 为 null 的条目（实测 622 条中 614 条），发出去是空帧，导入时丢弃
+		kept := p.queue[:0]
+		for _, item := range p.queue {
+			if len(item.Payload) == 0 {
+				p.status.Dropped++
+				continue
+			}
 			p.nextID++
-			p.queue[i].id = p.nextID
-			p.insertLocked(p.queue[i])
+			item.id = p.nextID
+			p.insertLocked(item)
+			kept = append(kept, item)
 		}
+		p.queue = kept
 	}
 	p.saveCountersLocked()
 	if batch.Flush(context.Background()) == nil && legacyFile != "" {

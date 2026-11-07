@@ -36,6 +36,7 @@ func TestDBLoggerImportsLegacyAndQueries(t *testing.T) {
 	_ = os.WriteFile(legacy, []byte(`{"at":"2026-09-01T00:00:00Z","actor":"old","action":"tag.write","target":"t1"}
 not-json
 {"at":"2026-09-02T00:00:00Z","actor":"old","action":"auth.login","target":""}
+{"ts":1788679608098,"user":"operator","role":"operator","action":"login","detail":"operator 登录成功"}
 `), 0o600)
 	database, err := db.Open(context.Background(), dir)
 	if err != nil {
@@ -53,19 +54,29 @@ not-json
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 || events[0].Action != "user.create" || events[0].Detail["role"] != "viewer" || events[2].Action != "tag.write" {
+	if len(events) != 4 || events[0].Action != "user.create" || events[0].Detail["role"] != "viewer" {
 		t.Fatalf("events=%+v", events)
 	}
 	// 再次打开不得重复导入
 	NewDB(database, legacy)
-	if again, _ := logger.Recent(10); len(again) != 3 {
+	if again, _ := logger.Recent(10); len(again) != 4 {
 		t.Fatalf("imported twice: %d", len(again))
 	}
 	if err := logger.Prune(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if after, _ := logger.Recent(10); len(after) != 3 {
+	if after, _ := logger.Recent(10); len(after) != 4 {
 		t.Fatalf("prune removed events inside retention: left %d", len(after))
+	}
+	var nodeEvent *Event
+	for i := range events {
+		if events[i].Action == "login" {
+			nodeEvent = &events[i]
+		}
+	}
+	if nodeEvent == nil || nodeEvent.Actor != "operator" || nodeEvent.Detail["text"] != "operator 登录成功" ||
+		nodeEvent.Detail["source"] != "node" || nodeEvent.At.UnixMilli() != 1788679608098 {
+		t.Fatalf("node-format line not converted: %+v", nodeEvent)
 	}
 	if _, err := database.Exec(`INSERT INTO audit_events(at, actor, action, target, detail) VALUES (?, 'x', 'expired', '', 'null')`,
 		time.Now().Add(-Retention-time.Hour).UnixMilli()); err != nil {
@@ -74,7 +85,7 @@ not-json
 	if err := logger.Prune(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if after, _ := logger.Recent(10); len(after) != 3 {
+	if after, _ := logger.Recent(10); len(after) != 4 {
 		t.Fatalf("prune kept an expired event: %d", len(after))
 	}
 }

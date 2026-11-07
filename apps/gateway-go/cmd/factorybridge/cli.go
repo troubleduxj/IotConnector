@@ -43,6 +43,7 @@ func register(c command) { commands[c.name] = c }
 
 func init() {
 	register(command{name: "run", summary: "前台运行网关", run: cmdRun})
+	register(command{name: "migrate", summary: "把旧 JSON/JSONL 状态文件导入 gateway.db（run 首次启动也会自动执行）", run: cmdMigrate})
 	register(command{name: "user", summary: "管理用户（create/list/passwd/role/unlock/disable/enable/delete）", run: cmdUser})
 	register(command{name: "version", summary: "显示版本、提交号与构建时间", run: cmdVersion})
 	register(command{name: "help", summary: "显示帮助", run: cmdHelp})

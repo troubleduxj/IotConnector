@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -119,5 +121,44 @@ func TestModbusErrorClassification(t *testing.T) {
 	driver := newModbusDriver(channel, tags, func(Sample) {}, func(ChannelStatus) {})
 	if _, err := driver.Read(context.Background(), tags); err == nil {
 		t.Fatal("expected connection error for refused dial, got nil")
+	}
+}
+
+// 部分位号失败时通道仍 online，状态详情注明坏位号数，且周期延迟仍能被引擎统计。
+func TestModbusLoopReportsBadTagCount(t *testing.T) {
+	server := newFakeModbusServer(t)
+	defer server.Close()
+	host, portText, _ := net.SplitHostPort(server.Addr())
+	port, _ := strconv.Atoi(portText)
+	statuses := make(chan ChannelStatus, 64)
+	d := newModbusDriver(Channel{ID: "mq", Host: host, Port: port, PollIntervalMs: 200},
+		[]Tag{{ID: "good", Address: "40001", DataType: "UInt16"}, {ID: "bad", Address: "40050", DataType: "UInt16"}},
+		func(Sample) {}, func(s ChannelStatus) {
+			select {
+			case statuses <- s:
+			default:
+			}
+		})
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop(context.Background())
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case s := <-statuses:
+			if s.State != "online" {
+				continue
+			}
+			if !strings.Contains(s.Detail, "1/2 tags bad") {
+				t.Fatalf("detail = %q", s.Detail)
+			}
+			if _, ok := statusLatency(s.Detail); !ok {
+				t.Fatalf("latency not parseable from %q", s.Detail)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no online status")
+		}
 	}
 }

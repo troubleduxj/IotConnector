@@ -28,6 +28,13 @@ import (
 
 // runGateway 是原 main 的主体，行为不变；路径和端口改由命令行参数传入（缺省仍读环境变量）。
 func runGateway(opts runOptions) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runGatewayContext(ctx, opts)
+}
+
+// runGatewayContext 运行网关直到 ctx 结束。Windows 服务由 SCM 的停止请求取消 ctx。
+func runGatewayContext(ctx context.Context, opts runOptions) int {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: opts.logLevel}))
 	dataDir := opts.dataDir
 	port := opts.port
@@ -39,8 +46,6 @@ func runGateway(opts runOptions) int {
 		return exitConfig
 	}
 	engine := acquisition.NewEngine(toAcquisitionChannels(cfg), toAcquisitionTags(cfg), acquisition.NewFactory())
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	if err := engine.Start(ctx); err != nil {
 		logger.Error("start acquisition engine", "error", err)
 		return exitError

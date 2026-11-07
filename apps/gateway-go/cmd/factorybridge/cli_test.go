@@ -69,3 +69,34 @@ func TestDevModeGuards(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceArgumentValidation(t *testing.T) {
+	cases := []struct {
+		args []string
+		out  string
+	}{
+		{[]string{"service", "install"}, "绝对路径"},
+		{[]string{"service", "install", "--data-dir", "relative/dir"}, "绝对路径"},
+		{[]string{"service", "status", "--name", "bad name!"}, "服务名"},
+		{[]string{"service", "install", "--data-dir", "/abs", "--", "--dev"}, "开发模式"},
+		{[]string{"service", "install", "--data-dir", "/abs", "--", "--dev-no-auth"}, "开发模式"},
+		{[]string{"service", "install", "--data-dir", "/abs", "--", "--data-dir", "/x"}, "--data-dir"},
+		{[]string{"service", "install", "--data-dir", "/abs", "--", "--port", "abc"}, "run 参数无效"},
+		{[]string{"service", "install", "--data-dir", "/abs", "--", "stray"}, "多余参数"},
+		{[]string{"service", "frobnicate", "--name", "ok"}, ""},
+	}
+	for _, tc := range cases {
+		var stdout, stderr bytes.Buffer
+		code := dispatch(tc.args, &stdout, &stderr)
+		if code != exitUsage && code != exitError {
+			t.Errorf("%v: exit=%d", tc.args, code)
+		}
+		if tc.out != "" && !strings.Contains(stderr.String(), tc.out) {
+			t.Errorf("%v: stderr=%q want %q", tc.args, stderr.String(), tc.out)
+		}
+	}
+	got := serviceCommandLine(serviceOptions{dataDir: "/srv/fb", runArgs: []string{"--host", "0.0.0.0"}})
+	if strings.Join(got, " ") != "run --data-dir /srv/fb --host 0.0.0.0" {
+		t.Fatalf("command line %v", got)
+	}
+}

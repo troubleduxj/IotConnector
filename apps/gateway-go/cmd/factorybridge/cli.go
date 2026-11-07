@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -45,6 +46,7 @@ func register(c command) { commands[c.name] = c }
 func init() {
 	register(command{name: "run", summary: "前台运行网关", run: cmdRun})
 	register(command{name: "migrate", summary: "把旧 JSON/JSONL 状态文件导入 gateway.db（run 首次启动也会自动执行）", run: cmdMigrate})
+	register(command{name: "service", summary: "安装/卸载/启停系统服务（Windows 服务或 systemd）", run: cmdService})
 	register(command{name: "user", summary: "管理用户（create/list/passwd/role/unlock/disable/enable/delete）", run: cmdUser})
 	register(command{name: "version", summary: "显示版本、提交号与构建时间", run: cmdVersion})
 	register(command{name: "help", summary: "显示帮助", run: cmdHelp})
@@ -177,8 +179,14 @@ func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "--allow-cidr: %v\n", err)
 		return exitUsage
 	}
-	return runGateway(runOptions{tlsCert: *tlsCert, tlsKey: *tlsKey, allowCIDR: *allowCIDR, dataDir: *dataDir, webDir: *webDir, host: *host, port: *port, logLevel: level,
-		dev: *dev, devNoAuth: *devNoAuth, devPass: os.Getenv("FB_DEV_PASSWORD")})
+	opts := runOptions{tlsCert: *tlsCert, tlsKey: *tlsKey, allowCIDR: *allowCIDR, dataDir: *dataDir, webDir: *webDir, host: *host, port: *port, logLevel: level,
+		dev: *dev, devNoAuth: *devNoAuth, devPass: os.Getenv("FB_DEV_PASSWORD")}
+	if runningUnderSCM() {
+		// 由 Windows 服务管理器启动。单服务进程（SERVICE_WIN32_OWN_PROCESS）中 svc.Run 不按名称分派，
+		// 同机多实例各自是独立进程，所以这里的名称只用于事件日志，不影响用哪个服务名安装。
+		return runAsWindowsService(serviceNameFromArgs(), func(ctx context.Context) int { return runGatewayContext(ctx, opts) })
+	}
+	return runGateway(opts)
 }
 
 // parseFlags 解析参数；返回 done=true 时调用方应直接以 code 退出（-h 或参数错误）。
@@ -207,7 +215,7 @@ func isLoopback(host string) bool {
 // runningAsService 判断是否由服务管理器启动。Linux systemd 设置 INVOCATION_ID；
 // Windows 服务由 H3 的 service 子命令注入 FB_SERVICE=1（WinSW/SCM 不提供可靠标记）。
 func runningAsService() bool {
-	return os.Getenv("INVOCATION_ID") != "" || os.Getenv("FB_SERVICE") == "1"
+	return os.Getenv("INVOCATION_ID") != "" || os.Getenv("FB_SERVICE") == "1" || runningUnderSCM()
 }
 
 // defaultWebDir 依次查找：可执行文件旁的 web/（发布包布局）、仓库内的控制台构建产物（开发布局）。
@@ -224,3 +232,6 @@ func defaultWebDir() string {
 	}
 	return ""
 }
+
+// serviceNameFromArgs 返回 SCM 中的服务名。svc.Run 在单服务进程中不校验名称，这里用默认名即可。
+func serviceNameFromArgs() string { return defaultServiceName }

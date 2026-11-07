@@ -7,10 +7,14 @@
 # gateway.db.rolledback-<时间>，需要时可再切回去。
 #
 # -RestoreData：整个数据目录换回备份时的内容（丢弃切换后的全部变化）。
+# -BinaryOnly：只换回二进制，数据目录不动。备份的旧二进制本身已使用 gateway.db（阶段 2 及以后）时用这个；
+#              此时把 *.migrated 改回去、移开 gateway.db 反而会让旧二进制丢失用户和状态。
 param(
     [Parameter(Mandatory = $true)][string]$Backup,
-    [switch]$RestoreData
+    [switch]$RestoreData,
+    [switch]$BinaryOnly
 )
+if ($RestoreData -and $BinaryOnly) { throw '-RestoreData and -BinaryOnly cannot be combined' }
 
 $ErrorActionPreference = 'Stop'
 
@@ -32,7 +36,9 @@ if ($listener) {
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-if ($RestoreData) {
+if ($BinaryOnly) {
+    Write-Output 'Binary-only rollback; data directory left unchanged'
+} elseif ($RestoreData) {
     $backupData = Join-Path $backupDir 'data'
     if (-not (Test-Path $backupData)) { throw "Backup data directory not found: $backupData" }
     Rename-Item $dataDir "$dataDir.rolledback-$stamp"

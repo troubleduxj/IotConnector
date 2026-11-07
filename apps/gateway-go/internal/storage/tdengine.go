@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
 )
@@ -147,7 +148,7 @@ func (w *Writer) WriteAlarmEvent(ctx context.Context, event AlarmEvent) error {
 	if err := w.query(ctx, create); err != nil {
 		return err
 	}
-	insert := fmt.Sprintf("INSERT INTO %s.alarm_events VALUES (%d,'%s','%s','%s','%s','%s','%s','%s',%f,%f,'%s')", db, event.Timestamp, esc(event.ID), esc(event.RuleID), esc(event.TagID), esc(event.TagName), esc(event.Channel), esc(event.State), esc(event.Kind), event.Threshold, event.Value, esc(event.Message))
+	insert := fmt.Sprintf("INSERT INTO %s.alarm_events VALUES (%d,'%s','%s','%s','%s','%s','%s','%s',%f,%f,'%s')", db, event.Timestamp, escN(event.ID, 64), escN(event.RuleID, 64), escN(event.TagID, 32), escN(event.TagName, 128), escN(event.Channel, 64), escN(event.State, 8), escN(event.Kind, 8), event.Threshold, event.Value, escN(event.Message, 200))
 	return w.query(ctx, insert)
 }
 
@@ -262,7 +263,7 @@ func (w *Writer) Flush(ctx context.Context) error {
 	parts := make([]string, 0, len(batch))
 	for _, p := range batch {
 		child := "tb_" + hashName(p.TagName)
-		parts = append(parts, fmt.Sprintf("%s.%s USING %s.%s TAGS('%s','%s','%s') VALUES (%d,%f)", w.cfg.Database, child, w.cfg.Database, w.cfg.SuperTable, esc(p.Channel), esc(p.TagName), esc(p.DataType), p.Timestamp, p.Value))
+		parts = append(parts, fmt.Sprintf("%s.%s USING %s.%s TAGS('%s','%s','%s') VALUES (%d,%f)", w.cfg.Database, child, w.cfg.Database, w.cfg.SuperTable, escN(p.Channel, 64), escN(p.TagName, 128), escN(p.DataType, 16), p.Timestamp, p.Value))
 	}
 	sql := "INSERT INTO " + strings.Join(parts, " ")
 	if err := w.query(ctx, sql); err != nil {
@@ -459,8 +460,38 @@ func atomicJSONWrite(path string, value any) error {
 	return os.Rename(name, path)
 }
 
+// esc 把值转成可放进 TDengine 单引号字符串字面量的形式。
+// 先转义反斜杠，再转义单引号；原实现顺序相反，会把 \' 中的反斜杠替换掉，留下裸引号。
+// 控制字符替换为空格，避免换行等字符破坏 SQL。
 func esc(value string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(value, "'", "\\'"), "\\", "_")
+	var b strings.Builder
+	b.Grow(len(value))
+	for _, r := range value {
+		switch {
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\'':
+			b.WriteString(`\'`)
+		case r < 0x20 || r == 0x7f:
+			b.WriteByte(' ')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// escN 先按列宽截断再转义。TDengine 对超长 VARCHAR 直接报错，
+// 一条超长记录会让整批写入失败并卡在队首反复重试，所以写入前按字节截断（不切开 UTF-8 字符）。
+func escN(value string, maxBytes int) string {
+	if len(value) > maxBytes {
+		cut := maxBytes
+		for cut > 0 && !utf8.RuneStart(value[cut]) {
+			cut--
+		}
+		value = value[:cut]
+	}
+	return esc(value)
 }
 
 func hashName(value string) string {

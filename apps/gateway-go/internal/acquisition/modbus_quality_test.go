@@ -5,10 +5,10 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // startFakeModbusServer answers FC03 for offset 0 with register value 1234 and
@@ -126,12 +126,11 @@ func TestModbusErrorClassification(t *testing.T) {
 
 // 部分位号失败时通道仍 online，状态详情注明坏位号数，且周期延迟仍能被引擎统计。
 func TestModbusLoopReportsBadTagCount(t *testing.T) {
-	server := newFakeModbusServer(t)
-	defer server.Close()
-	host, portText, _ := net.SplitHostPort(server.Addr())
-	port, _ := strconv.Atoi(portText)
+	ln, _ := startFakeModbusServer(t)
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
 	statuses := make(chan ChannelStatus, 64)
-	d := newModbusDriver(Channel{ID: "mq", Host: host, Port: port, PollIntervalMs: 200},
+	d := newModbusDriver(Channel{ID: "mq", Host: "127.0.0.1", Port: port, PollIntervalMs: 200},
 		[]Tag{{ID: "good", Address: "40001", DataType: "UInt16"}, {ID: "bad", Address: "40050", DataType: "UInt16"}},
 		func(Sample) {}, func(s ChannelStatus) {
 			select {

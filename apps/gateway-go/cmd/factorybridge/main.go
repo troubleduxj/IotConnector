@@ -141,7 +141,11 @@ func main() {
 		Addr:              "127.0.0.1:" + strconv.Itoa(port),
 		Handler:           serverHandler.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		// 慢速客户端不能长期占住连接。WriteTimeout 不设：WebSocket 是长连接，
+		// 劫持后不受其约束，但设了会截断慢速大响应（历史查询导出）。写超时由 WS 的 SetWriteDeadline 负责。
+		ReadTimeout:    30 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 64 << 10,
 	}
 
 	go func() {

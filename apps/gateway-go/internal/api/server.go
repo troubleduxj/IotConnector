@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -319,6 +321,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "password login is not configured"})
 		return
 	}
+	// 按客户端 IP 限速（不按用户名，避免他人用错误口令锁死 admin）。
+	if s.rateLimited(r) {
+		w.Header().Set("Retry-After", strconv.Itoa(int(s.failureWindow.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "too many authentication failures"})
+		return
+	}
 	var request struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -338,9 +346,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		passwordOK = subtle.ConstantTimeCompare([]byte(request.Password), []byte(s.loginPassword)) == 1
 	}
 	if subtle.ConstantTimeCompare([]byte(request.Username), []byte(s.loginUsername)) != 1 || !passwordOK {
+		s.recordAuthFailure(r)
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid credentials"})
 		return
 	}
+	s.clearAuthFailure(r)
 	token, session, err := s.sessions.CreateWithState(request.Username, auth.RoleAdmin, mustChange)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "create session failed"})
@@ -411,8 +421,52 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// originAllowed 判断浏览器来源是否可信：无 Origin（非浏览器客户端）、与本服务同源、
+// 或在 CORS 白名单中。用于拒绝跨站写请求（CSRF）和跨站 WebSocket 握手。
+func (s *Server) originAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	if _, ok := s.cors[origin]; ok {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false // 包括 "null" 来源（沙箱 iframe、file://）
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
+
+func isSafeMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
+}
+
+// hasJSONBody 检查带请求体的写请求是否声明为 JSON。浏览器跨站"简单请求"只能发
+// text/plain、表单等类型，不经预检；强制 application/json 可让这类请求无法到达处理函数。
+func hasJSONBody(r *http.Request) bool {
+	if r.ContentLength == 0 && len(r.TransferEncoding) == 0 {
+		return true // 无请求体，如 logout、连接测试
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/json"
+}
+
 func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		}
+		if !isSafeMethod(r.Method) {
+			if !s.originAllowed(r) {
+				writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "origin not allowed"})
+				return
+			}
+			if !hasJSONBody(r) {
+				writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{"ok": false, "error": "content-type must be application/json"})
+				return
+			}
+		}
 		origin := r.Header.Get("Origin")
 		_, allowed := s.cors[origin]
 		if origin != "" {
@@ -1003,6 +1057,12 @@ func (s *Server) clientKey(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+const maxTrackedFailureClients = 4096
+
+// maxRequestBodyBytes 是普通 API 请求体上限。脚本接口自身另有 256 KiB 限制，
+// 配置导入、配方等最大的合法请求也远小于 1 MiB。
+const maxRequestBodyBytes = 1 << 20
+
 func (s *Server) rateLimited(r *http.Request) bool {
 	key := s.clientKey(r)
 	s.limiterMu.Lock()
@@ -1018,6 +1078,14 @@ func (s *Server) recordAuthFailure(r *http.Request) {
 	failure := s.failures[key]
 	if failure.started.IsZero() || time.Since(failure.started) >= s.failureWindow {
 		failure = authFailure{started: time.Now()}
+	}
+	// 失败计数表按来源 IP 增长，超过上限时清掉已过窗口的条目，防止被随机来源撑大。
+	if len(s.failures) >= maxTrackedFailureClients {
+		for k, v := range s.failures {
+			if time.Since(v.started) >= s.failureWindow {
+				delete(s.failures, k)
+			}
+		}
 	}
 	failure.count++
 	s.failures[key] = failure

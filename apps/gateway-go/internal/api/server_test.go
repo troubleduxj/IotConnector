@@ -72,6 +72,7 @@ func TestWriteTagAcceptsJSONScalar(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
 			server.Handler().ServeHTTP(recorder, req)
 			if recorder.Code != http.StatusOK {
@@ -124,6 +125,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPut, "/api/channels/bac-1/driver", strings.NewReader(`{"driver":"go"}`))
+	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"driver":"go"`) {
@@ -134,6 +136,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPut, "/api/channels/bac-1/driver", strings.NewReader(`{"driver":"node"}`))
+	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || server.config.Channels[0].Params["driver"] != "node" {
@@ -141,6 +144,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPut, "/api/channels/bac-1/driver", strings.NewReader(`{"driver":"auto"}`))
+	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -156,6 +160,7 @@ func TestWriteTagRejectsMissingOrStructuredValue(t *testing.T) {
 	server := NewServer(config.Config{}, engine)
 	for _, body := range []string{`{}`, `{"value":null}`, `{"value":[]}`} {
 		req := httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, req)
 		if recorder.Code != http.StatusBadRequest {
@@ -197,6 +202,7 @@ func TestSecurityProtectsSensitiveEndpointsAndAuditsWrites(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(`{"value":7}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer secret-token")
 	request.Header.Set("X-User", "operator-1")
 	response = httptest.NewRecorder()
@@ -279,6 +285,7 @@ func TestRBACSeparatesViewerAndOperator(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(`{"value":1}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer viewer-token")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -295,6 +302,7 @@ func TestPasswordLoginCreatesAndRevokesSession(t *testing.T) {
 	handler := server.Handler()
 
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"correct-password"}`))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -342,6 +350,7 @@ func TestPasswordLoginAcceptsBcryptHash(t *testing.T) {
 		LoginPasswordHash: string(hash),
 	})
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"hashed-password"}`))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -358,6 +367,7 @@ func TestFirstLoginRequiresPasswordChange(t *testing.T) {
 	})
 	handler := server.Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"initial-password"}`))
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -380,6 +390,7 @@ func TestFirstLoginRequiresPasswordChange(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/api/auth/password", strings.NewReader(`{"currentPassword":"initial-password","newPassword":"Strong-password-9!"}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+loginResponse.Token)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

@@ -1,6 +1,0 @@
-{
-  "name": "Factory Bridge Web",
-  "description": "Web-based industrial equipment monitoring and parameter diagnostics application, inspired by factory-bridge.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

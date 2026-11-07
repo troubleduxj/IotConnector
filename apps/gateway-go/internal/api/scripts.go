@@ -288,6 +288,29 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 	return result, nil
 }
 
+// scriptWorkerAllowedEnv lists the only parent environment variables passed to
+// the user-script worker process. Names are compared case-insensitively.
+var scriptWorkerAllowedEnv = map[string]bool{
+	"PATH": true, "SYSTEMROOT": true, "WINDIR": true, "TEMP": true, "TMP": true,
+	"HOME": true, "USERPROFILE": true, "LANG": true, "LC_ALL": true, "TZ": true,
+}
+
+// scriptWorkerEnv returns a minimal allow-listed environment for the script
+// worker so secrets such as database passwords and admin tokens are not inherited.
+func scriptWorkerEnv() []string {
+	env := make([]string, 0, len(scriptWorkerAllowedEnv)+1)
+	for _, kv := range os.Environ() {
+		key, _, found := strings.Cut(kv, "=")
+		if !found || key == "" {
+			continue
+		}
+		if scriptWorkerAllowedEnv[strings.ToUpper(key)] {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "GATEWAY_GO_SCRIPT_WORKER=1")
+}
+
 func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]any, error) {
 	values := map[string]any{}
 	tags := map[string]string{}
@@ -308,7 +331,7 @@ func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]
 		return nil, err
 	}
 	command := exec.CommandContext(ctx, executable)
-	command.Env = append(os.Environ(), "GATEWAY_GO_SCRIPT_WORKER=1")
+	command.Env = scriptWorkerEnv()
 	command.Stdin = strings.NewReader(string(request))
 	output, err := command.Output()
 	duration := time.Now()

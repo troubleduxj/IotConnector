@@ -64,23 +64,17 @@ func (s *Server) saveRecipes(items []recipe) error {
 }
 
 func actorName(r *http.Request) string {
-	if value := r.Header.Get("X-User"); value != "" {
+	if value := actor(r); value != "" {
 		return value
 	}
 	return "api"
 }
 
 func (s *Server) recipes(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, http.StatusOK, s.recipesSnapshot())
 }
 
 func (s *Server) createRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var item recipe
 	if json.NewDecoder(r.Body).Decode(&item) != nil || strings.TrimSpace(item.Name) == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "name required"})
@@ -100,9 +94,6 @@ func (s *Server) createRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var patch struct {
 		Name        *string       `json:"name"`
 		Description *string       `json:"description"`
@@ -155,9 +146,6 @@ func sameJSON(a, b any) bool {
 }
 
 func (s *Server) deleteRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	old := s.recipesSnapshot()
@@ -182,9 +170,6 @@ func (s *Server) deleteRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) downloadRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleOperator) {
-		return
-	}
 	recipes := s.recipesSnapshot()
 	var selected *recipe
 	for i := range recipes {
@@ -258,9 +243,6 @@ func auditEvent(action, target string, detail map[string]any) audit.Event {
 }
 
 func (s *Server) recipeDownloads(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, 200, s.recipeDownloadsSnapshot())
 }
 func (s *Server) recipeDownloadsSnapshot() []recipeDownload {
@@ -281,9 +263,6 @@ func (s *Server) saveRecipeDownloads(items []recipeDownload) error {
 }
 
 func (s *Server) duplicateRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	for _, item := range s.recipesSnapshot() {
 		if item.ID == r.PathValue("recipeID") {
 			item.ID = fmt.Sprintf("rcp_%d", time.Now().UnixMilli())
@@ -307,9 +286,6 @@ func (s *Server) duplicateRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) exportRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	for _, item := range s.recipesSnapshot() {
 		if item.ID != r.PathValue("recipeID") {
 			continue
@@ -323,9 +299,6 @@ func (s *Server) exportRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) importRecipe(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var body struct {
 		Recipe struct {
 			Name        string       `json:"name"`

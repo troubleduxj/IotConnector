@@ -7,24 +7,15 @@ import (
 )
 
 func (s *Server) shadow(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	shadows := s.shadowSnapshot()
 	writeJSON(w, http.StatusOK, map[string]any{"shadows": shadows, "pending": s.shadowStore.PendingCount()})
 }
 
 func (s *Server) northbound(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": redactSecrets(s.northboundConfig()), "status": s.northboundStatus()})
 }
 
 func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var patch map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid northbound JSON"})
@@ -44,9 +35,6 @@ func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rebirthNorthbound(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	if s.northboundPublisher != nil {
 		s.northboundPublisher.Rebirth()
 	}

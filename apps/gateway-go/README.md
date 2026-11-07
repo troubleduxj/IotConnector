@@ -14,21 +14,45 @@ go run ./apps/gateway-go/cmd/factorybridge
 
 也可以在 `apps/gateway-go` 目录执行，启动入口会自动识别相邻的 `apps/gateway/data` 目录。
 
-可通过环境变量覆盖：
+### 命令
 
-- `GATEWAY_GO_PORT`：监听端口，默认 `18080`
-- `GATEWAY_GO_DATA_DIR`：配置目录，默认 `apps/gateway/data`
-- `GATEWAY_GO_API_TOKEN`：可选 Bearer Token；配置后保护通道、实时值和写入接口
-- `GATEWAY_GO_VIEWER_TOKEN`：可选只读 Token，可访问通道和实时值
-- `GATEWAY_GO_OPERATOR_TOKEN`：可选操作 Token，可在只读权限上写入点位
-- `GATEWAY_GO_ADMIN_TOKEN`：可选管理员 Token，继承全部当前 API 权限
-- `GATEWAY_GO_LOGIN_USERNAME`：密码登录用户名，默认 `admin`
-- `GATEWAY_GO_LOGIN_PASSWORD`：配置后启用密码登录；未配置时登录接口返回 `501`
-- `GATEWAY_GO_LOGIN_PASSWORD_HASH`：推荐配置 bcrypt 哈希；优先级高于明文密码变量
-- `GATEWAY_GO_MUST_CHANGE_PASSWORD`：首次初始化时要求改密，默认 `false`
-- `GATEWAY_GO_SESSION_TTL`：Session 有效期，默认 `8h`
-- `GATEWAY_GO_CORS_ORIGINS`：可选逗号分隔来源白名单，例如 `http://localhost:3000`
+```bash
+factorybridge run [--data-dir 目录] [--host 127.0.0.1] [--port 18080] [--log-level info] [--dev] [--dev-no-auth]
+factorybridge user create --name 用户名 --role viewer|operator|engineer|admin   # 口令交互输入，不回显
+factorybridge user list|passwd|role|unlock|disable|enable|delete --name 用户名
+factorybridge version [--json]
+```
+
+不带命令等同 `run`。退出码：0 成功、1 运行错误、2 参数错误、3 配置错误。脚本中设置口令用 `--password-stdin`。
+
+### 账号与角色
+
+- 用户与会话存放在数据目录下的 `gateway.db`（SQLite）。首次启动时，如果库中没有用户，会把旧的 `auth.json`（单个 admin）导入为 admin，并把原文件改名为 `auth.json.migrated`。
+- 生产模式没有默认账号。库为空时，先用 `factorybridge user create --name <名> --role admin` 创建首个管理员。
+- 四级角色：viewer（只读）< operator（写值、确认告警、运行脚本、下发配方）< engineer（改通道、位号、告警、配方、脚本、北向、通知）< admin（用户、会话、审计、驱动切换、删除通道）。
+- 口令至少 12 位，须含大写、小写、数字和特殊字符。连续失败 5 次锁定 15 分钟。管理员重置口令或在界面上创建账号后，用户下次登录必须修改。
+- 改角色、重置口令、禁用、删除后，该用户现有会话立即失效。
+- 静态令牌（下方 `*_TOKEN`）用于脚本和第三方只读或写值调用，不能管理用户。
+
+### 开发模式
+
+`run --dev` 只能监听回环地址，以服务方式运行时拒绝进入。它会做三件事：
+
+- 创建或重置 admin 账号 `dev`。口令取 `FB_DEV_PASSWORD`；未设置时随机生成，打印在启动日志里。
+- 放行 `http://localhost:*`、`http://127.0.0.1:*` 来源，Vite 开发服务器不用再配 CORS。
+- 在 `/api/system/info` 和 `/api/auth/me` 中返回 `devMode: true`。
+
+`run --dev-no-auth` 在此基础上跳过登录，所有请求按 admin 处理，审计中的操作者记为 `dev(no-auth)`。
+
+### 环境变量
+
+- `GATEWAY_GO_PORT`、`GATEWAY_GO_HOST`、`GATEWAY_GO_DATA_DIR`、`GATEWAY_GO_LOG_LEVEL`：同名命令行参数的缺省值
+- `GATEWAY_GO_VIEWER_TOKEN` / `GATEWAY_GO_OPERATOR_TOKEN` / `GATEWAY_GO_ADMIN_TOKEN`：静态令牌；`GATEWAY_GO_API_TOKEN` 为兼容旧配置，等同 operator
+- `GATEWAY_GO_SESSION_TTL`：会话有效期，默认 `8h`
+- `GATEWAY_GO_CORS_ORIGINS`：逗号分隔的来源白名单，例如 `http://localhost:3000`。写请求和 WebSocket 只接受同源或白名单来源
 - `GATEWAY_GO_DRIVER_MODE=go`：将已覆盖的 Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、SNMP、OPC UA 通道自动路由到 Go 驱动；显式 `params.driver` 优先，可按通道灰度或回滚
+
+已移除：`GATEWAY_GO_LOGIN_USERNAME`、`GATEWAY_GO_LOGIN_PASSWORD`、`GATEWAY_GO_LOGIN_PASSWORD_HASH`、`GATEWAY_GO_MUST_CHANGE_PASSWORD`。设置后不再生效，改用 `user` 子命令。另外，旧版本在未配置任何认证时会放行全部请求，现在不再这样。
 
 设备级灰度 API：`GET /api/channels/{channelId}/driver` 查看当前选择，管理员可通过 `PUT /api/channels/{channelId}/driver` 写入 `{"driver":"go"}`、`{"driver":"node"}` 或 `{"driver":"auto"}`。`go` 会按协议映射到对应 Go 驱动，`node` 保留 legacy 回滚标记，`auto` 清除显式覆盖并恢复全局模式。
 

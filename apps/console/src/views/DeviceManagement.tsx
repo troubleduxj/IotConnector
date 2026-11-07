@@ -9,7 +9,7 @@ import {
   getChannelDriver, updateChannel, updateChannelDriver, updateTag, type ChannelDriver, type ChannelTestResult, type GatewayChannel, type GatewayTag,
 } from '../api';
 import { useRuntime } from '../store/runtime';
-import { fetchChannelFrames, type CapturedFrame } from '../api';
+import { fetchChannelFrames, type CapturedFrame, type ConsoleRole } from '../api';
 import TagValue from '../components/TagValue';
 import { toast } from '../components/Toast';
 import { confirmDialog } from '../components/confirm';
@@ -32,7 +32,7 @@ const PROTOCOL_CAT_KEYS: Record<string, string> = {
 };
 
 type DeviceManagementProps = {
-  userRole?: 'admin' | 'engineer' | 'operator';
+  userRole?: ConsoleRole;
   standalone?: boolean;
   routeId?: string;
   routeMode?: 'view' | 'edit';

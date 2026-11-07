@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -50,4 +51,33 @@ func (l *Logger) Record(event Event) error {
 		return fmt.Errorf("write audit event: %w", err)
 	}
 	return nil
+}
+
+// Recent 返回最新的 limit 条事件（新的在前）。审计文件在 G3 迁入 SQLite 前为 JSONL，
+// 这里整文件读取；损坏行跳过。
+func (l *Logger) Recent(limit int) ([]Event, error) {
+	if l == nil || l.path == "" {
+		return []Event{}, nil
+	}
+	l.mu.Lock()
+	data, err := os.ReadFile(l.path)
+	l.mu.Unlock()
+	if os.IsNotExist(err) {
+		return []Event{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read audit log: %w", err)
+	}
+	lines := bytes.Split(data, []byte{'\n'})
+	events := make([]Event, 0, limit)
+	for i := len(lines) - 1; i >= 0 && len(events) < limit; i-- {
+		if len(bytes.TrimSpace(lines[i])) == 0 {
+			continue
+		}
+		var event Event
+		if json.Unmarshal(lines[i], &event) == nil {
+			events = append(events, event)
+		}
+	}
+	return events, nil
 }

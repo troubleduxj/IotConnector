@@ -3,8 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"mime"
@@ -28,7 +28,6 @@ import (
 	"github.com/factorybridge/iotconnector/gateway-go/internal/shadow"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/storage"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/version"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Server struct {
@@ -36,11 +35,9 @@ type Server struct {
 	cfgPtr              atomic.Pointer[config.Config]
 	engine              *acquisition.Engine
 	credentials         map[string]Role
-	sessions            *auth.Manager
-	passwordStore       *auth.PasswordStore
-	loginUsername       string
-	loginPassword       string
-	loginHash           string
+	users               *auth.UserStore
+	devMode             bool
+	devNoAuth           bool
 	audit               *audit.Logger
 	cors                map[string]struct{}
 	limiterMu           sync.Mutex
@@ -62,33 +59,34 @@ type Server struct {
 }
 
 type SecurityOptions struct {
-	Token              string // Backward-compatible operator token.
-	ViewerToken        string
-	OperatorToken      string
-	AdminToken         string
-	LoginUsername      string
-	LoginPassword      string
-	LoginPasswordHash  string
-	PasswordFile       string
-	MustChangePassword bool
-	SessionTTL         time.Duration
-	SessionFile        string
-	HistoryFile        string
-	Audit              *audit.Logger
-	ConfigStore        *config.Store
-	Storage            *storage.Writer
-	ShadowFile         string
-	CORSOrigins        []string
-	FailureLimit       int
-	FailureWindow      time.Duration
+	Token         string // Backward-compatible operator token.
+	ViewerToken   string
+	OperatorToken string
+	AdminToken    string
+	// Users 为空时只能用静态令牌访问（测试与无人值守场景）；生产由 run 命令打开 SQLite 后传入。
+	Users *auth.UserStore
+	// DevMode 放行 http://localhost:* 与 http://127.0.0.1:* 来源（Vite 开发服务器），
+	// 并在 /api/system/info 与 /api/auth/me 中标明。绑定地址由 run 命令强制为回环。
+	DevMode bool
+	// DevNoAuth 仅开发模式可用：所有请求按 admin 处理。
+	DevNoAuth     bool
+	HistoryFile   string
+	Audit         *audit.Logger
+	ConfigStore   *config.Store
+	Storage       *storage.Writer
+	ShadowFile    string
+	CORSOrigins   []string
+	FailureLimit  int
+	FailureWindow time.Duration
 }
 
-type Role string
+type Role = auth.Role
 
 const (
-	RoleViewer   Role = "viewer"
-	RoleOperator Role = "operator"
-	RoleAdmin    Role = "admin"
+	RoleViewer   = auth.RoleViewer
+	RoleOperator = auth.RoleOperator
+	RoleEngineer = auth.RoleEngineer
+	RoleAdmin    = auth.RoleAdmin
 )
 
 type authFailure struct {
@@ -105,9 +103,6 @@ func NewServerWithSecurity(cfg config.Config, engine *acquisition.Engine, authTo
 }
 
 func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options SecurityOptions) *Server {
-	if options.LoginUsername == "" {
-		options.LoginUsername = "admin"
-	}
 	origins := make(map[string]struct{}, len(options.CORSOrigins))
 	for _, origin := range options.CORSOrigins {
 		if trimmed := strings.TrimSpace(origin); trimmed != "" {
@@ -119,10 +114,6 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	}
 	if options.FailureWindow <= 0 {
 		options.FailureWindow = time.Minute
-	}
-	passwordStore, err := auth.OpenPasswordStore(options.PasswordFile, options.LoginUsername, options.LoginPassword, options.LoginPasswordHash, options.MustChangePassword)
-	if err != nil {
-		log.Printf("password store unavailable: %v", err)
 	}
 	credentials := make(map[string]Role)
 	if options.ViewerToken != "" {
@@ -139,7 +130,7 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	}
 	server := &Server{
 		startedAt: time.Now(), engine: engine, credentials: credentials, audit: options.Audit,
-		sessions: auth.NewManager(options.SessionTTL, options.SessionFile), passwordStore: passwordStore, loginUsername: options.LoginUsername, loginPassword: options.LoginPassword, loginHash: options.LoginPasswordHash,
+		users: options.Users, devMode: options.DevMode || options.DevNoAuth, devNoAuth: options.DevNoAuth,
 		cors: origins, failures: make(map[string]authFailure),
 		failureLimit: options.FailureLimit, failureWindow: options.FailureWindow,
 		configStore:  options.ConfigStore,
@@ -255,77 +246,85 @@ func (s *Server) shadowSnapshot() []map[string]any {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /metrics", s.prometheusMetrics)
-	mux.HandleFunc("GET /api/health", s.health)
-	mux.HandleFunc("GET /api/metrics", s.metrics)
-	mux.HandleFunc("GET /api/system/info", s.systemInfo)
-	mux.HandleFunc("POST /api/system/db-test", s.dbTest)
-	mux.HandleFunc("POST /api/system/db-init", s.dbInit)
-	mux.HandleFunc("GET /api/channels", s.channels)
-	mux.HandleFunc("POST /api/channels", s.createChannel)
-	mux.HandleFunc("PUT /api/channels/{channelID}", s.updateChannel)
-	mux.HandleFunc("GET /api/channels/{channelID}/driver", s.getChannelDriver)
-	mux.HandleFunc("PUT /api/channels/{channelID}/driver", s.updateChannelDriver)
-	mux.HandleFunc("DELETE /api/channels/{channelID}", s.deleteChannel)
-	mux.HandleFunc("POST /api/channels/{channelID}/test", s.testChannel)
-	mux.HandleFunc("GET /api/tags", s.tags)
-	mux.HandleFunc("POST /api/tags", s.createTag)
-	mux.HandleFunc("PUT /api/tags/{tagID}", s.updateTag)
-	mux.HandleFunc("DELETE /api/tags/{tagID}", s.deleteTag)
-	mux.HandleFunc("GET /api/config", s.fullConfig)
-	mux.HandleFunc("GET /api/scheduler", s.scheduler)
-	mux.HandleFunc("GET /api/alarms", s.alarmResponse)
-	mux.HandleFunc("POST /api/alarms", s.createAlarm)
-	mux.HandleFunc("PUT /api/alarms/{alarmID}", s.updateAlarm)
-	mux.HandleFunc("DELETE /api/alarms/{alarmID}", s.deleteAlarm)
-	mux.HandleFunc("POST /api/alarms/events/{eventID}/ack", s.ackAlarm)
-	mux.HandleFunc("GET /api/alarms/history", s.alarmHistory)
-	mux.HandleFunc("GET /api/history", s.history)
-	mux.HandleFunc("GET /api/storage-tasks", s.storageTasks)
-	mux.HandleFunc("GET /api/storage-tasks/stats", s.storageTaskStats)
-	mux.HandleFunc("POST /api/storage-tasks", s.createStorageTask)
-	mux.HandleFunc("PUT /api/storage-tasks/{taskID}", s.updateStorageTask)
-	mux.HandleFunc("DELETE /api/storage-tasks/{taskID}", s.deleteStorageTask)
-	mux.HandleFunc("GET /api/notifications", s.notifications)
-	mux.HandleFunc("PUT /api/notifications", s.updateNotifications)
-	mux.HandleFunc("PUT /api/notifications/v2", s.updateNotifications)
-	mux.HandleFunc("POST /api/notifications/test", s.testNotification)
-	mux.HandleFunc("GET /api/recipes", s.recipes)
-	mux.HandleFunc("POST /api/recipes", s.createRecipe)
-	mux.HandleFunc("PUT /api/recipes/{recipeID}", s.updateRecipe)
-	mux.HandleFunc("DELETE /api/recipes/{recipeID}", s.deleteRecipe)
-	mux.HandleFunc("POST /api/recipes/{recipeID}/download", s.downloadRecipe)
-	mux.HandleFunc("GET /api/recipes/downloads", s.recipeDownloads)
-	mux.HandleFunc("POST /api/recipes/{recipeID}/duplicate", s.duplicateRecipe)
-	mux.HandleFunc("GET /api/recipes/{recipeID}/export", s.exportRecipe)
-	mux.HandleFunc("POST /api/recipes/import", s.importRecipe)
-	mux.HandleFunc("GET /api/scripts", s.scriptsAPI)
-	mux.HandleFunc("POST /api/scripts", s.createScript)
-	mux.HandleFunc("PUT /api/scripts/{scriptID}", s.updateScript)
-	mux.HandleFunc("DELETE /api/scripts/{scriptID}", s.deleteScript)
-	mux.HandleFunc("POST /api/scripts/{scriptID}/run", s.runScript)
-	mux.HandleFunc("GET /api/scripts/{scriptID}/output", s.scriptOutput)
-	mux.HandleFunc("GET /api/shadow", s.shadow)
-	mux.HandleFunc("GET /api/northbound", s.northbound)
-	mux.HandleFunc("PUT /api/northbound", s.updateNorthbound)
-	mux.HandleFunc("POST /api/northbound/rebirth", s.rebirthNorthbound)
-	mux.HandleFunc("GET /api/tags/live", s.liveTags)
-	mux.HandleFunc("POST /api/tags/{tagID}/write", s.writeTag)
-	mux.HandleFunc("POST /api/auth/login", s.login)
-	mux.HandleFunc("GET /api/auth/me", s.me)
-	mux.HandleFunc("POST /api/auth/logout", s.logout)
-	mux.HandleFunc("POST /api/auth/password", s.changePassword)
-	mux.HandleFunc("POST /api/auth/change-password", s.changePassword)
-	mux.HandleFunc("GET /ws", s.websocketHandler)
+	s.route(mux, "GET /metrics", viewerOnly, s.prometheusMetrics)
+	s.route(mux, "GET /api/health", public, s.health)
+	s.route(mux, "GET /api/metrics", viewerOnly, s.metrics)
+	s.route(mux, "GET /api/system/info", viewerOnly, s.systemInfo)
+	s.route(mux, "POST /api/system/db-test", engineerOnly, s.dbTest)
+	s.route(mux, "POST /api/system/db-init", engineerOnly, s.dbInit)
+	s.route(mux, "GET /api/channels", viewerOnly, s.channels)
+	s.route(mux, "POST /api/channels", engineerOnly, s.createChannel)
+	s.route(mux, "PUT /api/channels/{channelID}", engineerOnly, s.updateChannel)
+	s.route(mux, "GET /api/channels/{channelID}/driver", operatorOnly, s.getChannelDriver)
+	s.route(mux, "PUT /api/channels/{channelID}/driver", adminOnly, s.updateChannelDriver)
+	s.route(mux, "DELETE /api/channels/{channelID}", adminOnly, s.deleteChannel)
+	s.route(mux, "POST /api/channels/{channelID}/test", engineerOnly, s.testChannel)
+	s.route(mux, "GET /api/tags", viewerOnly, s.tags)
+	s.route(mux, "POST /api/tags", engineerOnly, s.createTag)
+	s.route(mux, "PUT /api/tags/{tagID}", engineerOnly, s.updateTag)
+	s.route(mux, "DELETE /api/tags/{tagID}", engineerOnly, s.deleteTag)
+	s.route(mux, "GET /api/config", viewerOnly, s.fullConfig)
+	s.route(mux, "GET /api/scheduler", viewerOnly, s.scheduler)
+	s.route(mux, "GET /api/alarms", viewerOnly, s.alarmResponse)
+	s.route(mux, "POST /api/alarms", engineerOnly, s.createAlarm)
+	s.route(mux, "PUT /api/alarms/{alarmID}", engineerOnly, s.updateAlarm)
+	s.route(mux, "DELETE /api/alarms/{alarmID}", engineerOnly, s.deleteAlarm)
+	s.route(mux, "POST /api/alarms/events/{eventID}/ack", operatorOnly, s.ackAlarm)
+	s.route(mux, "GET /api/alarms/history", viewerOnly, s.alarmHistory)
+	s.route(mux, "GET /api/history", viewerOnly, s.history)
+	s.route(mux, "GET /api/storage-tasks", viewerOnly, s.storageTasks)
+	s.route(mux, "GET /api/storage-tasks/stats", viewerOnly, s.storageTaskStats)
+	s.route(mux, "POST /api/storage-tasks", engineerOnly, s.createStorageTask)
+	s.route(mux, "PUT /api/storage-tasks/{taskID}", engineerOnly, s.updateStorageTask)
+	s.route(mux, "DELETE /api/storage-tasks/{taskID}", engineerOnly, s.deleteStorageTask)
+	s.route(mux, "GET /api/notifications", viewerOnly, s.notifications)
+	s.route(mux, "PUT /api/notifications", engineerOnly, s.updateNotifications)
+	s.route(mux, "PUT /api/notifications/v2", engineerOnly, s.updateNotifications)
+	s.route(mux, "POST /api/notifications/test", engineerOnly, s.testNotification)
+	s.route(mux, "GET /api/recipes", viewerOnly, s.recipes)
+	s.route(mux, "POST /api/recipes", engineerOnly, s.createRecipe)
+	s.route(mux, "PUT /api/recipes/{recipeID}", engineerOnly, s.updateRecipe)
+	s.route(mux, "DELETE /api/recipes/{recipeID}", engineerOnly, s.deleteRecipe)
+	s.route(mux, "POST /api/recipes/{recipeID}/download", operatorOnly, s.downloadRecipe)
+	s.route(mux, "GET /api/recipes/downloads", viewerOnly, s.recipeDownloads)
+	s.route(mux, "POST /api/recipes/{recipeID}/duplicate", engineerOnly, s.duplicateRecipe)
+	s.route(mux, "GET /api/recipes/{recipeID}/export", engineerOnly, s.exportRecipe)
+	s.route(mux, "POST /api/recipes/import", engineerOnly, s.importRecipe)
+	s.route(mux, "GET /api/scripts", viewerOnly, s.scriptsAPI)
+	s.route(mux, "POST /api/scripts", engineerOnly, s.createScript)
+	s.route(mux, "PUT /api/scripts/{scriptID}", engineerOnly, s.updateScript)
+	s.route(mux, "DELETE /api/scripts/{scriptID}", engineerOnly, s.deleteScript)
+	s.route(mux, "POST /api/scripts/{scriptID}/run", operatorOnly, s.runScript)
+	s.route(mux, "GET /api/scripts/{scriptID}/output", viewerOnly, s.scriptOutput)
+	s.route(mux, "GET /api/shadow", viewerOnly, s.shadow)
+	s.route(mux, "GET /api/northbound", viewerOnly, s.northbound)
+	s.route(mux, "PUT /api/northbound", engineerOnly, s.updateNorthbound)
+	s.route(mux, "POST /api/northbound/rebirth", engineerOnly, s.rebirthNorthbound)
+	s.route(mux, "GET /api/tags/live", viewerOnly, s.liveTags)
+	s.route(mux, "POST /api/tags/{tagID}/write", operatorOnly, s.writeTag)
+	s.route(mux, "POST /api/auth/login", public, s.login)
+	s.route(mux, "GET /api/auth/me", signedIn, s.me)
+	s.route(mux, "POST /api/auth/logout", signedIn, s.logout)
+	s.route(mux, "POST /api/auth/password", signedIn, s.changePassword)
+	s.route(mux, "POST /api/auth/change-password", signedIn, s.changePassword)
+	s.route(mux, "GET /api/users", adminOnly, s.listUsers)
+	s.route(mux, "POST /api/users", adminOnly, s.createUser)
+	s.route(mux, "PUT /api/users/{userID}", adminOnly, s.updateUser)
+	s.route(mux, "DELETE /api/users/{userID}", adminOnly, s.deleteUser)
+	s.route(mux, "POST /api/users/{userID}/unlock", adminOnly, s.unlockUser)
+	s.route(mux, "GET /api/auth/sessions", adminOnly, s.listSessions)
+	s.route(mux, "DELETE /api/auth/sessions/{sessionID}", adminOnly, s.revokeSession)
+	s.route(mux, "GET /api/audit", adminOnly, s.auditLog)
+	s.route(mux, "GET /ws", public, s.websocketHandler)
 	return s.withCORS(mux)
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	if s.passwordStore == nil || !s.passwordStore.Enabled() {
+	if s.users == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]any{"ok": false, "error": "password login is not configured"})
 		return
 	}
-	// 按客户端 IP 限速（不按用户名，避免他人用错误口令锁死 admin）。
+	// 按客户端 IP 限速（账号级锁定另由用户库负责）。
 	if s.rateLimited(r) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(s.failureWindow.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "too many authentication failures"})
@@ -339,69 +338,44 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "username and password required"})
 		return
 	}
-	passwordOK := false
-	mustChange := false
-	if s.passwordStore != nil && s.passwordStore.Enabled() {
-		passwordOK = s.passwordStore.Verify(request.Username, request.Password)
-		mustChange = s.passwordStore.Record().MustChange
-	} else if s.loginHash != "" {
-		passwordOK = bcrypt.CompareHashAndPassword([]byte(s.loginHash), []byte(request.Password)) == nil
-	} else {
-		passwordOK = subtle.ConstantTimeCompare([]byte(request.Password), []byte(s.loginPassword)) == 1
-	}
-	if subtle.ConstantTimeCompare([]byte(request.Username), []byte(s.loginUsername)) != 1 || !passwordOK {
+	token, p, err := s.users.Login(r.Context(), request.Username, request.Password, s.clientKey(r), r.UserAgent())
+	if err != nil {
 		s.recordAuthFailure(r)
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid credentials"})
+		s.recordAudit(r, request.Username, "auth.login", "", map[string]any{"ok": false})
+		message := "invalid credentials"
+		if errors.Is(err, auth.ErrLocked) {
+			message = "account temporarily locked"
+		} else if !errors.Is(err, auth.ErrInvalidCredentials) {
+			log.Printf("login: %v", err)
+		}
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": message})
 		return
 	}
 	s.clearAuthFailure(r)
-	token, session, err := s.sessions.CreateWithState(request.Username, auth.RoleAdmin, mustChange)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "create session failed"})
-		return
-	}
+	s.recordAudit(r, p.Username, "auth.login", "", map[string]any{"ok": true, "session": p.SessionID})
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "token": token, "username": session.Username, "role": session.Role,
-		"user":      map[string]any{"id": session.Username, "username": session.Username, "role": session.Role},
-		"expiresAt": session.Expires, "mustChangePassword": session.MustChangePassword,
+		"ok": true, "token": token, "username": p.Username, "role": p.Role,
+		"user":               map[string]any{"id": p.UserID, "username": p.Username, "role": p.Role},
+		"mustChangePassword": p.MustChangePassword,
 	})
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	role, ok, mustChange := s.authenticate(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "authentication required"})
-		return
-	}
-	username := "token-user"
-	const prefix = "Bearer "
-	if authorization := r.Header.Get("Authorization"); strings.HasPrefix(authorization, prefix) {
-		if session, found := s.sessions.Authenticate(strings.TrimPrefix(authorization, prefix)); found {
-			username = session.Username
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": username, "username": username, "role": role, "mustChangePassword": mustChange})
+	p := principal(r)
+	writeJSON(w, http.StatusOK, map[string]any{"id": p.UserID, "username": p.Username, "role": p.Role, "mustChangePassword": p.MustChangePassword, "devMode": s.devMode})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	const prefix = "Bearer "
-	authorization := r.Header.Get("Authorization")
-	if len(authorization) > len(prefix) {
-		s.sessions.Revoke(authorization[len(prefix):])
+	if s.users != nil {
+		s.users.Logout(r.Context(), bearerToken(r))
 	}
+	s.recordAudit(r, actor(r), "auth.logout", "", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
-	const prefix = "Bearer "
-	authorization := r.Header.Get("Authorization")
-	if len(authorization) <= len(prefix) {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "session required"})
-		return
-	}
-	token := authorization[len(prefix):]
-	if _, ok := s.sessions.Authenticate(token); !ok || s.passwordStore == nil || !s.passwordStore.Enabled() {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "session required"})
+	if s.users == nil || principal(r).UserID == "" || s.devNoAuth {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "password change requires a user session"})
 		return
 	}
 	var request struct {
@@ -413,15 +387,15 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid JSON body"})
 		return
 	}
-	currentPassword := request.CurrentPassword
-	if currentPassword == "" {
-		currentPassword = request.OldPassword
+	current := request.CurrentPassword
+	if current == "" {
+		current = request.OldPassword
 	}
-	if err := s.passwordStore.ChangePassword(currentPassword, request.NewPassword); err != nil {
+	if err := s.users.ChangeOwnPassword(r.Context(), bearerToken(r), current, request.NewPassword); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	s.sessions.MarkPasswordChanged(token)
+	s.recordAudit(r, actor(r), "auth.password.change", principal(r).UserID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -438,6 +412,9 @@ func (s *Server) originAllowed(r *http.Request) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
 		return false // 包括 "null" 来源（沙箱 iframe、file://）
+	}
+	if s.devMode && u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1") {
+		return true
 	}
 	return strings.EqualFold(u.Host, r.Host)
 }
@@ -473,6 +450,9 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		}
 		origin := r.Header.Get("Origin")
 		_, allowed := s.cors[origin]
+		if !allowed && origin != "" && s.devMode {
+			allowed = s.originAllowed(r)
+		}
 		if origin != "" {
 			if !allowed {
 				if r.Method == http.MethodOptions {
@@ -481,7 +461,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 				}
 			} else {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-User")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 				w.Header().Add("Vary", "Origin")
 			}
@@ -509,9 +489,6 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	metrics := s.engine.Metrics()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"uptimeSec":   int(time.Since(s.startedAt).Seconds()),
@@ -556,23 +533,14 @@ func (s *Server) prometheusMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) channels(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, http.StatusOK, s.engine.Statuses())
 }
 
 func (s *Server) tags(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, http.StatusOK, s.cfg().Tags)
 }
 
 func (s *Server) fullConfig(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	current := s.cfg()
 	if current.Raw != nil {
 		writeJSON(w, http.StatusOK, redactSecrets(current.Raw))
@@ -582,9 +550,6 @@ func (s *Server) fullConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var channel domain.Channel
 	if err := json.NewDecoder(r.Body).Decode(&channel); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid channel JSON"})
@@ -609,9 +574,6 @@ func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("channelID")
 	var patch map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -647,9 +609,6 @@ func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getChannelDriver(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	id := r.PathValue("channelID")
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
@@ -669,9 +628,6 @@ func (s *Server) getChannelDriver(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateChannelDriver(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var request struct {
 		Driver string `json:"driver"`
 	}
@@ -741,9 +697,6 @@ func goDriverForProtocol(protocol string) (string, bool) {
 }
 
 func (s *Server) deleteChannel(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("channelID")
 	s.configMu.Lock()
 	found := false
@@ -776,9 +729,6 @@ func (s *Server) deleteChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createTag(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var tag domain.Tag
 	if err := json.NewDecoder(r.Body).Decode(&tag); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid tag JSON"})
@@ -815,9 +765,6 @@ func (s *Server) createTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("tagID")
 	var patch map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -851,9 +798,6 @@ func (s *Server) updateTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteTag(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("tagID")
 	s.configMu.Lock()
 	found := false
@@ -879,9 +823,6 @@ func (s *Server) deleteTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) testChannel(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleOperator) {
-		return
-	}
 	id := r.PathValue("channelID")
 	for _, status := range s.engine.Statuses() {
 		if status.ID == id {
@@ -948,9 +889,6 @@ func engineTags(cfg config.Config) []acquisition.Tag {
 }
 
 func (s *Server) scheduler(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	statuses := s.engine.Statuses()
 	online := 0
 	for _, status := range statuses {
@@ -987,16 +925,10 @@ func (s *Server) scheduler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) liveTags(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, http.StatusOK, wireSamples(s.engine.Snapshot()))
 }
 
 func (s *Server) writeTag(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleOperator) {
-		return
-	}
 	var request struct {
 		Value json.RawMessage `json:"value"`
 	}
@@ -1019,65 +951,9 @@ func (s *Server) writeTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordWrite(r, r.PathValue("tagID"), value, nil)
-	s.shadowStore.SetDesired(r.PathValue("tagID"), wireValue(value), r.Header.Get("X-User"))
+	s.shadowStore.SetDesired(r.PathValue("tagID"), wireValue(value), actor(r))
 	s.scheduleShadowPublish()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (s *Server) authorize(w http.ResponseWriter, r *http.Request, required Role) bool {
-	if len(s.credentials) == 0 && (s.passwordStore == nil || !s.passwordStore.Enabled()) {
-		return true
-	}
-	if s.rateLimited(r) {
-		w.Header().Set("Retry-After", "60")
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "too many authentication failures"})
-		return false
-	}
-	role, ok, mustChange := s.authenticate(r)
-	if !ok {
-		s.recordAuthFailure(r)
-		w.Header().Set("WWW-Authenticate", `Bearer realm="factorybridge"`)
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "authentication required"})
-		return false
-	}
-	if !roleAllows(role, required) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "insufficient role"})
-		return false
-	}
-	if mustChange && r.URL.Path != "/api/auth/password" {
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "password change required"})
-		return false
-	}
-	s.clearAuthFailure(r)
-	return true
-}
-
-func (s *Server) authenticate(r *http.Request) (Role, bool, bool) {
-	const prefix = "Bearer "
-	authorization := r.Header.Get("Authorization")
-	if len(authorization) <= len(prefix) || authorization[:len(prefix)] != prefix {
-		return "", false, false
-	}
-	presented := authorization[len(prefix):]
-	if session, ok := s.sessions.Authenticate(presented); ok {
-		return Role(session.Role), true, session.MustChangePassword
-	}
-	for token, role := range s.credentials {
-		if subtle.ConstantTimeCompare([]byte(presented), []byte(token)) == 1 {
-			return role, true, false
-		}
-	}
-	return "", false, false
-}
-
-func roleAllows(actual, required Role) bool {
-	if actual == RoleAdmin {
-		return true
-	}
-	if actual == required {
-		return true
-	}
-	return actual == RoleOperator && required == RoleViewer
 }
 
 func (s *Server) clientKey(r *http.Request) string {
@@ -1131,6 +1007,24 @@ func (s *Server) clearAuthFailure(r *http.Request) {
 }
 
 func (s *Server) recordWrite(r *http.Request, tagID string, value acquisition.Value, writeErr error) {
+	s.recordWriteBy(actor(r), tagID, value, writeErr)
+}
+
+// recordAudit 写一条审计事件；失败只记日志，不影响业务结果。
+func (s *Server) recordAudit(r *http.Request, who, action, target string, detail map[string]any) {
+	if s.audit == nil {
+		return
+	}
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	detail["ip"] = s.clientKey(r)
+	if err := s.audit.Record(audit.Event{Actor: who, Action: action, Target: target, Detail: detail}); err != nil {
+		log.Printf("audit write failed: %v", err)
+	}
+}
+
+func (s *Server) recordWriteBy(who, tagID string, value acquisition.Value, writeErr error) {
 	if s.audit == nil {
 		return
 	}
@@ -1139,7 +1033,7 @@ func (s *Server) recordWrite(r *http.Request, tagID string, value acquisition.Va
 		detail["error"] = writeErr.Error()
 	}
 	if err := s.audit.Record(audit.Event{
-		Actor:  r.Header.Get("X-User"),
+		Actor:  who,
 		Action: "tag.write",
 		Target: tagID,
 		Detail: detail,
@@ -1177,9 +1071,6 @@ func decodeWriteValue(raw json.RawMessage) (acquisition.Value, error) {
 }
 
 func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	storageStatus := storage.Status{Engine: "tdengine", State: "disabled"}
 	storageURL, storageDB := "", ""
 	if s.storage != nil {
@@ -1190,6 +1081,8 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":          "FactoryBridge Go Gateway",
 		"version":       version.Version,
+		"devMode":       s.devMode,
+		"devNoAuth":     s.devNoAuth,
 		"build":         version.Info(),
 		"startedAt":     s.startedAt,
 		"uptimeSec":     int(time.Since(s.startedAt).Seconds()),
@@ -1204,9 +1097,6 @@ func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dbTest(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	if s.storage == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "storage is not configured"})
 		return
@@ -1223,9 +1113,6 @@ func (s *Server) dbTest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dbInit(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	if s.storage == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "storage is not configured"})
 		return

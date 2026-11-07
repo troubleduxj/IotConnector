@@ -21,9 +21,8 @@ func loginRequest(password, remoteAddr string) *http.Request {
 // 回归 B5：登录接口必须限速，否则口令可被无限次尝试。
 func TestLoginIsRateLimitedPerClient(t *testing.T) {
 	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
-		LoginUsername: "admin",
-		LoginPassword: "correct-password",
-		FailureLimit:  3,
+		Users:        newTestUsers(t, [3]string{"admin", "correct-password", "admin"}),
+		FailureLimit: 3,
 	})
 	handler := server.Handler()
 
@@ -50,9 +49,8 @@ func TestLoginIsRateLimitedPerClient(t *testing.T) {
 
 func TestLoginSuccessClearsFailureCount(t *testing.T) {
 	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
-		LoginUsername: "admin",
-		LoginPassword: "correct-password",
-		FailureLimit:  3,
+		Users:        newTestUsers(t, [3]string{"admin", "correct-password", "admin"}),
+		FailureLimit: 3,
 	})
 	handler := server.Handler()
 	for _, password := range []string{"wrong", "wrong", "correct-password", "wrong", "wrong"} {
@@ -67,8 +65,7 @@ func TestLoginSuccessClearsFailureCount(t *testing.T) {
 
 func TestOversizedRequestBodyIsRejected(t *testing.T) {
 	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
-		LoginUsername: "admin",
-		LoginPassword: "correct-password",
+		Users: newTestUsers(t, [3]string{"admin", "correct-password", "admin"}),
 	})
 	body := `{"username":"admin","password":"` + strings.Repeat("x", maxRequestBodyBytes) + `"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))

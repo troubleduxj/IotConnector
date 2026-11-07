@@ -513,3 +513,23 @@ func truncate(s string, n int) string {
 	}
 	return s[:n]
 }
+
+// SetPassword 直接设置口令且不要求下次修改（开发账号用）。同样递增 token_version。
+func (s *UserStore) SetPassword(ctx context.Context, id, password string) error {
+	if err := ValidatePassword(password); err != nil {
+		return err
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = 0, failed_attempts = 0, locked_until = 0,
+        token_version = token_version + 1, updated_at = ? WHERE id = ?`, hash, s.now().UnixMilli(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -42,6 +43,7 @@ func register(c command) { commands[c.name] = c }
 
 func init() {
 	register(command{name: "run", summary: "前台运行网关", run: cmdRun})
+	register(command{name: "user", summary: "管理用户（create/list/passwd/role/unlock/disable/enable/delete）", run: cmdUser})
 	register(command{name: "version", summary: "显示版本、提交号与构建时间", run: cmdVersion})
 	register(command{name: "help", summary: "显示帮助", run: cmdHelp})
 }
@@ -118,9 +120,13 @@ func cmdVersion(args []string, stdout, stderr io.Writer) int {
 
 // runOptions 是 run 的参数。优先级：命令行 > 环境变量 > 默认值。
 type runOptions struct {
-	dataDir  string
-	port     int
-	logLevel slog.Level
+	dataDir   string
+	host      string
+	port      int
+	logLevel  slog.Level
+	dev       bool
+	devNoAuth bool
+	devPass   string
 }
 
 func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
@@ -129,8 +135,24 @@ func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
 	dataDir := fs.String("data-dir", envOr("GATEWAY_GO_DATA_DIR", defaultDataDir()), "数据目录（config.json、auth.json 等）；环境变量 GATEWAY_GO_DATA_DIR")
 	port := fs.Int("port", envInt("GATEWAY_GO_PORT", 18080), "HTTP 端口；环境变量 GATEWAY_GO_PORT")
 	logLevel := fs.String("log-level", envOr("GATEWAY_GO_LOG_LEVEL", "info"), "日志级别 debug|info|warn|error")
+	host := fs.String("host", envOr("GATEWAY_GO_HOST", "127.0.0.1"), "监听地址；开发模式强制 127.0.0.1")
+	dev := fs.Bool("dev", envBool("GATEWAY_GO_DEV", false), "开发模式：建开发账号、放行 localhost 来源、仅限回环地址")
+	devNoAuth := fs.Bool("dev-no-auth", false, "开发模式下跳过登录，所有请求按 admin 处理（隐含 --dev）")
 	if code, done := parseFlags(fs, args); done {
 		return code
+	}
+	if *devNoAuth {
+		*dev = true
+	}
+	if *dev {
+		if !isLoopback(*host) {
+			fmt.Fprintf(stderr, "开发模式只能监听回环地址，拒绝绑定 %s\n", *host)
+			return exitUsage
+		}
+		if runningAsService() {
+			fmt.Fprintln(stderr, "以服务方式运行时禁止进入开发模式")
+			return exitUsage
+		}
 	}
 	if *port < 1 || *port > 65535 {
 		fmt.Fprintf(stderr, "无效端口 %d\n", *port)
@@ -141,7 +163,8 @@ func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "无效日志级别 %q\n", *logLevel)
 		return exitUsage
 	}
-	return runGateway(runOptions{dataDir: *dataDir, port: *port, logLevel: level})
+	return runGateway(runOptions{dataDir: *dataDir, host: *host, port: *port, logLevel: level,
+		dev: *dev, devNoAuth: *devNoAuth, devPass: os.Getenv("FB_DEV_PASSWORD")})
 }
 
 // parseFlags 解析参数；返回 done=true 时调用方应直接以 code 退出（-h 或参数错误）。
@@ -157,4 +180,18 @@ func parseFlags(fs *flag.FlagSet, args []string) (int, bool) {
 		return exitUsage, true
 	}
 	return 0, false
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// runningAsService 判断是否由服务管理器启动。Linux systemd 设置 INVOCATION_ID；
+// Windows 服务由 H3 的 service 子命令注入 FB_SERVICE=1（WinSW/SCM 不提供可靠标记）。
+func runningAsService() bool {
+	return os.Getenv("INVOCATION_ID") != "" || os.Getenv("FB_SERVICE") == "1"
 }

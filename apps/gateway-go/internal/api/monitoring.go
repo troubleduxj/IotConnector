@@ -242,9 +242,6 @@ func abs(value float64) float64 {
 }
 
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	ids := strings.Split(r.URL.Query().Get("tagIds"), ",")
 	start, _ := strconv.ParseInt(r.URL.Query().Get("start"), 10, 64)
 	end, _ := strconv.ParseInt(r.URL.Query().Get("end"), 10, 64)
@@ -304,9 +301,6 @@ func historyStats(points []historyPoint) map[string]any {
 }
 
 func (s *Server) alarmResponse(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	s.alarms.mu.RLock()
 	active := make([]alarmEvent, 0, len(s.alarms.active))
 	for _, event := range s.alarms.active {
@@ -327,9 +321,6 @@ func (s *Server) saveAlarmRulesLocked() error {
 }
 
 func (s *Server) createAlarm(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var rule alarmRule
 	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid alarm JSON"})
@@ -357,9 +348,6 @@ func (s *Server) createAlarm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateAlarm(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("alarmID")
 	var patch map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -393,9 +381,6 @@ func (s *Server) updateAlarm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteAlarm(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("alarmID")
 	s.configMu.Lock()
 	s.alarms.mu.Lock()
@@ -423,9 +408,6 @@ func (s *Server) deleteAlarm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) alarmHistory(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	s.alarms.mu.RLock()
 	history := append([]alarmEvent(nil), s.alarms.history...)
 	s.alarms.mu.RUnlock()
@@ -433,18 +415,12 @@ func (s *Server) alarmHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ackAlarm(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleOperator) {
-		return
-	}
 	eventID := r.PathValue("eventID")
 	var request struct {
 		Note string `json:"note"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&request)
-	actor := r.Header.Get("X-User")
-	if actor == "" {
-		actor = "operator"
-	}
+	actor := actor(r)
 	s.alarms.mu.Lock()
 	var result *alarmEvent
 	for i := range s.alarms.history {

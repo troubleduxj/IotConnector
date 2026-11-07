@@ -34,3 +34,38 @@ func TestDispatchExitCodes(t *testing.T) {
 		}
 	}
 }
+
+func TestDevModeGuards(t *testing.T) {
+	cases := []struct {
+		args []string
+		env  map[string]string
+		out  string
+	}{
+		{[]string{"run", "--dev", "--host", "0.0.0.0"}, nil, "回环地址"},
+		{[]string{"run", "--dev-no-auth", "--host", "192.168.1.5"}, nil, "回环地址"},
+		{[]string{"run", "--dev"}, map[string]string{"INVOCATION_ID": "abc"}, "服务方式"},
+		{[]string{"run", "--dev"}, map[string]string{"FB_SERVICE": "1"}, "服务方式"},
+	}
+	for _, tc := range cases {
+		for k, v := range tc.env {
+			t.Setenv(k, v)
+		}
+		var stdout, stderr bytes.Buffer
+		if got := dispatch(tc.args, &stdout, &stderr); got != exitUsage || !strings.Contains(stderr.String(), tc.out) {
+			t.Errorf("%v env=%v: exit=%d stderr=%q", tc.args, tc.env, got, stderr.String())
+		}
+		for k := range tc.env {
+			t.Setenv(k, "")
+		}
+	}
+	for _, host := range []string{"127.0.0.1", "localhost", "::1"} {
+		if !isLoopback(host) {
+			t.Errorf("%s should be loopback", host)
+		}
+	}
+	for _, host := range []string{"0.0.0.0", "10.0.0.1", "example.com", ""} {
+		if isLoopback(host) {
+			t.Errorf("%s should not be loopback", host)
+		}
+	}
+}

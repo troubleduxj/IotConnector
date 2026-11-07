@@ -8,7 +8,7 @@ export type { AlarmEvent };
 
 const TOKEN_KEY = 'fb_token';
 const GATEWAY_URL = (import.meta.env.VITE_GATEWAY_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-export type ConsoleRole = 'admin' | 'engineer' | 'operator';
+export type ConsoleRole = 'admin' | 'engineer' | 'operator' | 'viewer';
 export interface ConsoleUser {
   id: string;
   username: string;
@@ -371,6 +371,7 @@ export interface ManagedUser {
   role: ConsoleRole;
   createdAt?: number;
   mustChangePassword?: boolean;
+  disabled?: boolean;
 }
 
 export async function fetchUsers(): Promise<ManagedUser[]> {
@@ -383,16 +384,22 @@ export async function createUser(username: string, password: string, role: Conso
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ username, password, role }),
   });
-  if (!res.ok) throw new Error(((await res.json()) as { error?: string }).error ?? '创建失败');
-  return (await res.json()) as ManagedUser;
+  // 响应体只能读一次：先读出再按状态码分支（原实现失败分支读后成功分支再读会抛错）
+  const body = (await res.json().catch(() => ({}))) as ManagedUser & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? '创建失败');
+  return body;
 }
 
-export async function updateUser(id: string, patch: { password?: string; role?: ConsoleRole }): Promise<Response> {
+export async function updateUser(id: string, patch: { password?: string; role?: ConsoleRole; disabled?: boolean }): Promise<Response> {
   return apiFetch(`/api/users/${id}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(patch),
   });
+}
+
+export async function unlockUser(id: string): Promise<Response> {
+  return apiFetch(`/api/users/${id}/unlock`, { method: 'POST' });
 }
 
 export async function deleteUser(id: string): Promise<Response> {

@@ -45,24 +45,15 @@ func (s *Server) saveStorageTasks(tasks []map[string]any) error {
 }
 
 func (s *Server) storageTasks(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, http.StatusOK, s.storageTasksSnapshot())
 }
 
 func (s *Server) storageTaskStats(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	result := s.taskEngine.stats()
 	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) createStorageTask(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid storage task JSON"})
@@ -94,9 +85,6 @@ func (s *Server) createStorageTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateStorageTask(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var patch map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid storage task JSON"})
@@ -133,9 +121,6 @@ func (s *Server) updateStorageTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteStorageTask(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	id := r.PathValue("taskID")
 	s.configMu.Lock()
 	tasks := s.storageTasksSnapshot()

@@ -47,7 +47,7 @@ func TestWriteTagAcceptsJSONScalar(t *testing.T) {
 	}
 	defer engine.Stop(context.Background())
 
-	server := NewServer(config.Config{}, engine)
+	server := NewServerWithOptions(config.Config{}, engine, SecurityOptions{AdminToken: testAdminToken})
 	tests := []struct {
 		name  string
 		body  string
@@ -72,6 +72,7 @@ func TestWriteTagAcceptsJSONScalar(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(test.body))
+			req.Header.Set("Authorization", "Bearer "+testAdminToken)
 			req.Header.Set("Content-Type", "application/json")
 			recorder := httptest.NewRecorder()
 			server.Handler().ServeHTTP(recorder, req)
@@ -91,8 +92,9 @@ func TestWriteTagAcceptsJSONScalar(t *testing.T) {
 }
 
 func TestPrometheusMetricsEndpoint(t *testing.T) {
-	server := NewServer(config.Config{}, acquisition.NewEngine(nil, nil, nil))
+	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{AdminToken: testAdminToken})
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
@@ -116,8 +118,9 @@ func TestPrometheusMetricsEndpoint(t *testing.T) {
 }
 
 func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
-	server := NewServer(config.Config{Channels: []domain.Channel{{ID: "bac-1", Protocol: "BACnet/IP", Params: map[string]any{}}}}, acquisition.NewEngine(nil, nil, nil))
+	server := NewServerWithOptions(config.Config{Channels: []domain.Channel{{ID: "bac-1", Protocol: "BACnet/IP", Params: map[string]any{}}}}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{AdminToken: testAdminToken})
 	request := httptest.NewRequest(http.MethodGet, "/api/channels/bac-1/driver", nil)
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"driver":"auto"`) {
@@ -125,6 +128,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPut, "/api/channels/bac-1/driver", strings.NewReader(`{"driver":"go"}`))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
@@ -136,6 +140,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPut, "/api/channels/bac-1/driver", strings.NewReader(`{"driver":"node"}`))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
@@ -144,6 +149,7 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 	}
 
 	request = httptest.NewRequest(http.MethodPut, "/api/channels/bac-1/driver", strings.NewReader(`{"driver":"auto"}`))
+	request.Header.Set("Authorization", "Bearer "+testAdminToken)
 	request.Header.Set("Content-Type", "application/json")
 	recorder = httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
@@ -157,9 +163,10 @@ func TestChannelDriverEndpointPersistsGraySwitch(t *testing.T) {
 
 func TestWriteTagRejectsMissingOrStructuredValue(t *testing.T) {
 	engine := acquisition.NewEngine(nil, nil, nil)
-	server := NewServer(config.Config{}, engine)
+	server := NewServerWithOptions(config.Config{}, engine, SecurityOptions{AdminToken: testAdminToken})
 	for _, body := range []string{`{}`, `{"value":null}`, `{"value":[]}`} {
 		req := httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+testAdminToken)
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, req)
@@ -204,7 +211,7 @@ func TestSecurityProtectsSensitiveEndpointsAndAuditsWrites(t *testing.T) {
 	request = httptest.NewRequest(http.MethodPost, "/api/tags/tag-1/write", strings.NewReader(`{"value":7}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer secret-token")
-	request.Header.Set("X-User", "operator-1")
+	request.Header.Set("X-User", "spoofed-admin") // B6：审计不得采信客户端声称的身份
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
@@ -215,7 +222,7 @@ func TestSecurityProtectsSensitiveEndpointsAndAuditsWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"actor":"operator-1"`) || !strings.Contains(string(b), `"action":"tag.write"`) {
+	if strings.Contains(string(b), "spoofed-admin") || !strings.Contains(string(b), `"actor":"token:operator"`) || !strings.Contains(string(b), `"action":"tag.write"`) {
 		t.Fatalf("audit record missing actor/action: %s", b)
 	}
 }
@@ -296,8 +303,7 @@ func TestRBACSeparatesViewerAndOperator(t *testing.T) {
 
 func TestPasswordLoginCreatesAndRevokesSession(t *testing.T) {
 	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
-		LoginUsername: "admin",
-		LoginPassword: "correct-password",
+		Users: newTestUsers(t, [3]string{"admin", "correct-password", "admin"}),
 	})
 	handler := server.Handler()
 
@@ -345,10 +351,11 @@ func TestPasswordLoginAcceptsBcryptHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
-		LoginUsername:     "admin",
-		LoginPasswordHash: string(hash),
-	})
+	users := newTestUsers(t)
+	if _, err := users.ImportUser(context.Background(), "admin", string(hash), RoleAdmin, false); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{Users: users})
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"hashed-password"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -360,10 +367,7 @@ func TestPasswordLoginAcceptsBcryptHash(t *testing.T) {
 
 func TestFirstLoginRequiresPasswordChange(t *testing.T) {
 	server := NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), SecurityOptions{
-		LoginUsername:      "admin",
-		LoginPassword:      "initial-password",
-		PasswordFile:       filepath.Join(t.TempDir(), "auth.json"),
-		MustChangePassword: true,
+		Users: newTestUsers(t, [3]string{"admin", "!initial-password", "admin"}),
 	})
 	handler := server.Handler()
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"admin","password":"initial-password"}`))
@@ -406,3 +410,5 @@ func TestFirstLoginRequiresPasswordChange(t *testing.T) {
 		t.Fatalf("protected endpoint after change status=%d", response.Code)
 	}
 }
+
+const testAdminToken = "test-admin-token"

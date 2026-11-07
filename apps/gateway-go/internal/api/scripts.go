@@ -370,15 +370,9 @@ func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]
 }
 
 func (s *Server) scriptsAPI(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, 200, s.scriptEngine.list())
 }
 func (s *Server) createScript(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var script gatewayScript
 	if json.NewDecoder(r.Body).Decode(&script) != nil || strings.TrimSpace(script.Name) == "" || strings.TrimSpace(script.Code) == "" {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "name & code required"})
@@ -405,9 +399,6 @@ func (s *Server) createScript(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, script)
 }
 func (s *Server) updateScript(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	var patch map[string]any
 	if json.NewDecoder(r.Body).Decode(&patch) != nil {
 		writeJSON(w, 400, map[string]any{"ok": false, "error": "invalid script JSON"})
@@ -455,9 +446,6 @@ func (s *Server) updateScript(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 404, map[string]any{"ok": false, "error": "script not found"})
 }
 func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleAdmin) {
-		return
-	}
 	s.configMu.Lock()
 	old := s.scriptEngine.scripts()
 	next := make([]gatewayScript, 0, len(old))
@@ -481,9 +469,6 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 func (s *Server) runScript(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleOperator) {
-		return
-	}
 	result, err := s.scriptEngine.run(r.PathValue("scriptID"))
 	if err != nil {
 		writeJSON(w, 404, map[string]any{"ok": false, "error": err.Error()})
@@ -492,8 +477,5 @@ func (s *Server) runScript(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, result)
 }
 func (s *Server) scriptOutput(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(w, r, RoleViewer) {
-		return
-	}
 	writeJSON(w, 200, map[string]any{"output": s.scriptEngine.getOutput(r.PathValue("scriptID"))})
 }

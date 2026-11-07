@@ -45,7 +45,7 @@ function deviceRouteFromHash(): { id: string; mode: 'view' | 'edit' } | null {
   return { id: decodeURIComponent(match[1]), mode: match[2] === 'edit' ? 'edit' : 'view' };
 }
 
-const ROLE_KEYS: Record<string, string> = { admin: 'role.admin', engineer: 'role.engineer', operator: 'role.operator' };
+const ROLE_KEYS: Record<string, string> = { admin: 'role.admin', engineer: 'role.engineer', operator: 'role.operator', viewer: 'role.viewer' };
 
 export default function App(): React.JSX.Element {
   return (

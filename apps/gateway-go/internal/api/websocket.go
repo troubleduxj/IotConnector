@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/auth"
 	"github.com/gorilla/websocket"
 )
 
@@ -86,7 +87,7 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
-	if mustChange || !roleAllows(role, RoleViewer) {
+	if mustChange || !auth.RoleAtLeast(role, RoleViewer) {
 		http.Error(w, "insufficient role", http.StatusForbidden)
 		return
 	}
@@ -175,7 +176,7 @@ func (s *Server) handleWebSocketMessage(client *wsClient, message wsClientMessag
 			return
 		}
 		// 与 REST 写入（POST /api/tags/{id}/write）同权限：至少 operator。
-		if !roleAllows(client.role, RoleOperator) {
+		if !auth.RoleAtLeast(client.role, RoleOperator) {
 			s.sendWebSocket(client, map[string]any{"type": "write-result", "tagId": message.TagID, "ok": false, "error": "insufficient role"})
 			return
 		}
@@ -184,8 +185,7 @@ func (s *Server) handleWebSocketMessage(client *wsClient, message wsClientMessag
 			writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			err = s.engine.Write(writeCtx, message.TagID, value)
 			cancel()
-			recordRequest := &http.Request{Header: http.Header{"X-User": []string{client.actor}}}
-			s.recordWrite(recordRequest, message.TagID, value, err)
+			s.recordWriteBy(client.actor, message.TagID, value, err)
 		}
 		result := map[string]any{"type": "write-result", "tagId": message.TagID, "ok": err == nil}
 		if err != nil {
@@ -215,23 +215,21 @@ func (s *Server) BroadcastStorageStatus() {
 	s.ws.broadcast(map[string]any{"type": "storage-status", "status": status}, true)
 }
 
+// authenticateWebSocket 校验握手。浏览器的 WebSocket API 不能设置 Authorization 头，
+// 所以同时接受 ?token= 查询参数（B9 计划改为短期票据）。
 func (s *Server) authenticateWebSocket(r *http.Request) (Role, bool, bool, string) {
-	if len(s.credentials) == 0 && (s.passwordStore == nil || !s.passwordStore.Enabled()) {
-		return RoleAdmin, true, false, "anonymous"
+	if s.devNoAuth {
+		return devPrincipal.Role, true, false, devPrincipal.Username
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := bearerToken(r)
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))
 	}
-	if session, ok := s.sessions.Authenticate(token); ok {
-		return Role(session.Role), true, session.MustChangePassword, session.Username
+	p, ok := s.authenticateToken(r.Context(), token)
+	if !ok {
+		return "", false, false, ""
 	}
-	for credential, role := range s.credentials {
-		if token == credential {
-			return role, true, false, "token-user"
-		}
-	}
-	return "", false, false, ""
+	return p.Role, true, p.MustChangePassword, p.Username
 }
 
 func wireSamples(samples []acquisition.Sample) []wsTagValue {

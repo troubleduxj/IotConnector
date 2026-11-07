@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -59,27 +60,38 @@ func runGateway(opts runOptions) int {
 		MaxQueue: envInt("GATEWAY_GO_OUTBOX_MAX", 100000), SegmentSize: envInt("GATEWAY_GO_OUTBOX_SEGMENT_SIZE", 10000),
 	})
 	auditLogger := audit.New(filepath.Join(dataDir, "audit.jsonl"))
+	users, database, err := openUserStore(ctx, dataDir, os.Stdout)
+	if err != nil {
+		logger.Error("open user store", "error", err)
+		return exitConfig
+	}
+	defer database.Close()
+	if opts.dev {
+		if err := ensureDevAccount(ctx, users, opts.devPass, logger); err != nil {
+			logger.Error("create dev account", "error", err)
+			return exitConfig
+		}
+		logger.Warn("DEVELOPMENT MODE: loopback only, localhost origins allowed", "noAuth", opts.devNoAuth)
+	} else if count, _ := users.CountUsers(ctx); count == 0 {
+		logger.Warn("no users exist; create the first admin with: factorybridge user create --name <name> --role admin")
+	}
 	serverHandler := api.NewServerWithOptions(
 		cfg,
 		engine,
 		api.SecurityOptions{
-			Token:              envOr("GATEWAY_GO_API_TOKEN", ""),
-			ViewerToken:        envOr("GATEWAY_GO_VIEWER_TOKEN", ""),
-			OperatorToken:      envOr("GATEWAY_GO_OPERATOR_TOKEN", ""),
-			AdminToken:         envOr("GATEWAY_GO_ADMIN_TOKEN", ""),
-			LoginUsername:      envOr("GATEWAY_GO_LOGIN_USERNAME", "admin"),
-			LoginPassword:      os.Getenv("GATEWAY_GO_LOGIN_PASSWORD"),
-			LoginPasswordHash:  os.Getenv("GATEWAY_GO_LOGIN_PASSWORD_HASH"),
-			PasswordFile:       filepath.Join(dataDir, "auth.json"),
-			MustChangePassword: envBool("GATEWAY_GO_MUST_CHANGE_PASSWORD", false),
-			SessionTTL:         envDuration("GATEWAY_GO_SESSION_TTL", 8*time.Hour),
-			SessionFile:        filepath.Join(dataDir, "sessions.json"),
-			HistoryFile:        filepath.Join(dataDir, "history.jsonl"),
-			Audit:              auditLogger,
-			ConfigStore:        &store,
-			Storage:            storageWriter,
-			ShadowFile:         filepath.Join(dataDir, "shadow.json"),
-			CORSOrigins:        splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
+			Token:         envOr("GATEWAY_GO_API_TOKEN", ""),
+			ViewerToken:   envOr("GATEWAY_GO_VIEWER_TOKEN", ""),
+			OperatorToken: envOr("GATEWAY_GO_OPERATOR_TOKEN", ""),
+			AdminToken:    envOr("GATEWAY_GO_ADMIN_TOKEN", ""),
+			Users:         users,
+			DevMode:       opts.dev,
+			DevNoAuth:     opts.devNoAuth,
+			HistoryFile:   filepath.Join(dataDir, "history.jsonl"),
+			Audit:         auditLogger,
+			ConfigStore:   &store,
+			Storage:       storageWriter,
+			ShadowFile:    filepath.Join(dataDir, "shadow.json"),
+			CORSOrigins:   splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
 		},
 	)
 	northboundPublisher := northbound.New(northbound.Config{Enabled: boolRaw(cfg.Raw["northbound"], "enabled"), URL: stringRaw(cfg.Raw["northbound"], "url", "mqtt://127.0.0.1:1883"), Username: stringRaw(cfg.Raw["northbound"], "username", ""), Password: stringRaw(cfg.Raw["northbound"], "password", ""), GroupID: stringRaw(cfg.Raw["northbound"], "groupId", "Factory"), EdgeNodeID: stringRaw(cfg.Raw["northbound"], "edgeNodeId", "FB_Edge_GW01"), DataFlushMs: intRaw(cfg.Raw["northbound"], "dataFlushMs", 1000)}, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
@@ -133,7 +145,7 @@ func runGateway(opts runOptions) int {
 	}()
 
 	server := &http.Server{
-		Addr:              "127.0.0.1:" + strconv.Itoa(port),
+		Addr:              net.JoinHostPort(opts.host, strconv.Itoa(port)),
 		Handler:           serverHandler.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		// 慢速客户端不能长期占住连接。WriteTimeout 不设：WebSocket 是长连接，

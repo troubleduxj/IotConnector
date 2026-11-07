@@ -617,6 +617,8 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                       <option value="admin">{t('role.admin')}</option>
                       <option value="engineer">{t('role.engineer')}</option>
                       <option value="operator">{t('role.operator')}</option>
+                    <option value="viewer">{t('role.viewer')}</option>
+                      <option value="viewer">{t('role.viewer')}</option>
                     </select>
                     <button
                       onClick={() => { setResetTarget(resetTarget === u.id ? null : u.id); setResetPw(''); }}
@@ -644,7 +646,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                       />
                       <button
                         onClick={() => void applyReset(u)}
-                        disabled={resetPw.length < 6}
+                        disabled={resetPw.length < 12}
                         className="shrink-0 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 disabled:opacity-50"
                       >
                         {t('sys.users.apply')}
@@ -688,7 +690,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                   </select>
                   <button
                     onClick={() => void addUser()}
-                    disabled={!newUser.username || newUser.password.length < 6 || userBusy}
+                    disabled={!newUser.username || newUser.password.length < 12 || userBusy}
                     className="flex items-center justify-center px-3 py-2 bg-indigo-600 text-white text-sm font-bold rounded-md hover:bg-indigo-700 disabled:opacity-50"
                   >
                     {userBusy ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Plus className="w-4 h-4 mr-1.5" />}

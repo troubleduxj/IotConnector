@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -928,6 +929,10 @@ func (s *Server) scheduler(w http.ResponseWriter, r *http.Request) {
 			online++
 		}
 	}
+	stats := s.engine.ChannelStats()
+	var totalSamples uint64
+	var totalRate, cycleSum float64
+	cycleChannels := 0
 	channels := make([]map[string]any, 0, len(s.cfg().Channels))
 	for _, channel := range s.cfg().Channels {
 		state := "disabled"
@@ -943,17 +948,42 @@ func (s *Server) scheduler(w http.ResponseWriter, r *http.Request) {
 				tagCount++
 			}
 		}
-		channels = append(channels, map[string]any{
+		st := stats[channel.ID]
+		totalSamples += st.Samples
+		totalRate += st.RateHz
+		if st.Cycles > 0 {
+			cycleSum += st.AvgCycleMs
+			cycleChannels++
+		}
+		// tx/rx：Go 驱动不单独统计请求与响应报文，以成功轮询周期数同时作为 tx/rx；
+		// timeoutRate = 失败次数 / (成功 + 失败)
+		attempts := st.Cycles + st.Errors
+		timeoutRate := 0.0
+		if attempts > 0 {
+			timeoutRate = float64(st.Errors) / float64(attempts)
+		}
+		item := map[string]any{
 			"id": channel.ID, "name": channel.Name, "protocol": channel.Protocol,
 			"enabled": channel.Enabled, "state": state, "pollIntervalMs": channel.PollIntervalMs,
-			"tags": tagCount, "samples": 0, "rateHz": 0, "tx": 0, "rx": 0, "err": 0,
-			"timeoutRate": 0, "avgCycleMs": 0,
-		})
+			"tags": tagCount, "samples": st.Samples, "rateHz": round1(st.RateHz), "tx": st.Cycles, "rx": st.Cycles, "err": st.Errors,
+			"timeoutRate": timeoutRate,
+		}
+		if st.Cycles > 0 {
+			item["avgCycleMs"] = round1(st.AvgCycleMs)
+		}
+		if st.LastSampleAt > 0 {
+			item["lastCommAt"] = st.LastSampleAt
+		}
+		channels = append(channels, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"uptimeSec": int(time.Since(s.startedAt).Seconds()), "totalSamples": 0, "rateHz": 0,
-		"onlineChannels": online, "avgCycleMs": 0, "channels": channels,
-	})
+	snapshot := map[string]any{
+		"uptimeSec": int(time.Since(s.startedAt).Seconds()), "totalSamples": totalSamples, "rateHz": round1(totalRate),
+		"onlineChannels": online, "channels": channels,
+	}
+	if cycleChannels > 0 {
+		snapshot["avgCycleMs"] = round1(cycleSum / float64(cycleChannels))
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *Server) liveTags(w http.ResponseWriter, r *http.Request) {
@@ -1197,3 +1227,5 @@ func (s *Server) withClientAllowlist(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func round1(v float64) float64 { return math.Round(v*10) / 10 }

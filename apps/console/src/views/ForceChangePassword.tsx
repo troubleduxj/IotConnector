@@ -13,7 +13,7 @@ export default function ForceChangePassword({ onDone }: { onDone: () => void }) 
   const { t } = useI18n();
 
   const submit = async (): Promise<void> => {
-    if (newPassword.length < 6) {
+    if (newPassword.length < 12) {
       setError(t('fcp.error.tooShort'));
       return;
     }

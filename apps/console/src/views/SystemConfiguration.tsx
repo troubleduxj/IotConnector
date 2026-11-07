@@ -617,7 +617,6 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                       <option value="admin">{t('role.admin')}</option>
                       <option value="engineer">{t('role.engineer')}</option>
                       <option value="operator">{t('role.operator')}</option>
-                    <option value="viewer">{t('role.viewer')}</option>
                       <option value="viewer">{t('role.viewer')}</option>
                     </select>
                     <button
@@ -687,6 +686,7 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
                     <option value="admin">{t('role.admin')}</option>
                     <option value="engineer">{t('role.engineer')}</option>
                     <option value="operator">{t('role.operator')}</option>
+                    <option value="viewer">{t('role.viewer')}</option>
                   </select>
                   <button
                     onClick={() => void addUser()}

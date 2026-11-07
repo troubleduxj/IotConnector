@@ -337,6 +337,16 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, "GET /api/auth/sessions", adminOnly, s.listSessions)
 	s.route(mux, "DELETE /api/auth/sessions/{sessionID}", adminOnly, s.revokeSession)
 	s.route(mux, "GET /api/audit", adminOnly, s.auditLog)
+	// 控制台功能缺口（与 Node 网关同名同权限）
+	s.route(mux, "GET /api/channels/{channelID}/export", engineerOnly, s.exportChannel)
+	s.route(mux, "POST /api/channels/import", engineerOnly, s.importChannel)
+	s.route(mux, "GET /api/channels/{channelID}/frames", operatorOnly, s.channelFrames)
+	s.route(mux, "GET /api/system/config-backup", adminOnly, s.configBackup)
+	s.route(mux, "POST /api/system/config-restore", adminOnly, s.configRestore)
+	s.route(mux, "POST /api/system/factory-reset", adminOnly, s.factoryReset)
+	s.route(mux, "GET /api/system/diag", adminOnly, s.systemDiag)
+	s.route(mux, "GET /api/system/openapi.json", operatorOnly, s.openAPIDoc)
+	s.route(mux, "POST /api/scheduler/rebalance", engineerOnly, s.rebalanceScheduler)
 	s.route(mux, "GET /ws", public, s.websocketHandler)
 	return s.withClientAllowlist(withWeb(s.withCORS(mux), s.web))
 }

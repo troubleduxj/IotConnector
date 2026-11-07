@@ -2,15 +2,21 @@ import { test, expect } from '@playwright/test';
 
 /**
  * 核心链路冒烟：
- *  ① 登录（admin/admin123）→ ② 仪表盘加载 → ③ 采集调度页实时指标（KPI+通道行）
+ *  ① 登录 → ② 仪表盘加载 → ③ 采集调度页实时指标（KPI+通道行）
  *  ④ 参数诊断写值弹窗打开 → ⑤ 历史查询：Bool 位号统计行 latest 为 true/false 而非 0/1
+ *
+ * 环境变量：E2E_USER（回退 GATEWAY_USER，默认 admin）、E2E_PASSWORD（回退 GATEWAY_PASSWORD，必填；缺失时登录用例跳过）。
  */
+const E2E_USER = process.env.E2E_USER ?? process.env.GATEWAY_USER ?? 'admin';
+const E2E_PASSWORD = process.env.E2E_PASSWORD ?? process.env.GATEWAY_PASSWORD ?? '';
+
 test.describe('Factory Bridge 核心链路冒烟', () => {
   test('登录 → 调度 → 诊断 → Bool 历史', async ({ page }) => {
+    test.skip(!E2E_PASSWORD, 'set E2E_PASSWORD (or GATEWAY_PASSWORD) to run e2e');
     // ① 登录
     await page.goto('/');
-    await page.locator('input').first().fill('admin'); // 用户名框（无显式 type）
-    await page.locator('input[type="password"]').first().fill('admin123');
+    await page.locator('input').first().fill(E2E_USER); // 用户名框（无显式 type）
+    await page.locator('input[type="password"]').first().fill(E2E_PASSWORD);
     await page.getByRole('button', { name: /登录|登\s*录/i }).click();
     await expect(page.locator('nav')).toContainText('仪表盘', { timeout: 10_000 });
     await expect(page.locator('main h1').first()).toContainText(/仪表盘|Dashboard/i);
@@ -43,7 +49,7 @@ test.describe('Factory Bridge 核心链路冒烟', () => {
 
   test('登录失败锁定提示与退出', async ({ page }) => {
     await page.goto('/');
-    await page.locator('input').first().fill('admin');
+    await page.locator('input').first().fill(E2E_USER);
     await page.locator('input[type="password"]').first().fill('wrong-pass-123');
     await page.locator('input[type="password"]').first().press('Enter'); // 登录框支持回车提交
     await expect(page.locator('body')).toContainText(/口令|错误|失败|锁定/i, { timeout: 8_000 });

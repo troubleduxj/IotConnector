@@ -2,9 +2,13 @@ import { test, expect } from '@playwright/test';
 
 test.describe('设备级 Go/Node 灰度', () => {
   test('管理员可切换并恢复 Auto', async ({ page }) => {
+    const user = process.env.E2E_USER ?? process.env.GATEWAY_USER ?? 'admin';
+    const password = process.env.E2E_PASSWORD ?? process.env.GATEWAY_PASSWORD ?? '';
+    test.skip(!password, 'set E2E_PASSWORD (or GATEWAY_PASSWORD) to run e2e');
+
     await page.goto('/');
-    await page.locator('input').first().fill('admin');
-    await page.locator('input[type="password"]').first().fill('admin123');
+    await page.locator('input').first().fill(user);
+    await page.locator('input[type="password"]').first().fill(password);
     await page.getByRole('button', { name: /登录|登\s*录/i }).click();
     await expect(page.locator('nav')).toContainText('设备管理', { timeout: 10_000 });
 

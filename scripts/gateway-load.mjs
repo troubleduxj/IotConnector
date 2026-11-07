@@ -6,8 +6,16 @@ const concurrency = Number(process.env.CONCURRENCY ?? 10);
 const requestsPerGateway = Number(process.env.REQUESTS ?? 100);
 const output = process.env.OUTPUT_FILE ?? resolve('docs/artifacts/gateway-load-latest.json');
 
+// 环境变量：GATEWAY_USER（默认 admin）、GATEWAY_PASSWORD（必填）。
+const gatewayUser = process.env.GATEWAY_USER ?? 'admin';
+const gatewayPassword = process.env.GATEWAY_PASSWORD;
+if (!gatewayPassword) {
+  console.error('GATEWAY_PASSWORD is required');
+  process.exit(2);
+}
+
 async function login(base) {
-  const response = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'admin123' }) });
+  const response = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: gatewayUser, password: gatewayPassword }) });
   if (!response.ok) throw new Error(`${base} login HTTP ${response.status}`);
   return (await response.json()).token;
 }

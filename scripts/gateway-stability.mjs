@@ -8,9 +8,17 @@ const output = resolve(process.env.OUTPUT_FILE ?? 'docs/artifacts/gateway-stabil
 const startedAt = new Date().toISOString();
 const samples = [];
 
+// 环境变量：GATEWAY_USER（默认 admin）、GATEWAY_PASSWORD（必填）。
+const gatewayUser = process.env.GATEWAY_USER ?? 'admin';
+const gatewayPassword = process.env.GATEWAY_PASSWORD;
+if (!gatewayPassword) {
+  console.error('GATEWAY_PASSWORD is required');
+  process.exit(2);
+}
+
 async function observe(base) {
   try {
-    const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'admin123' }), signal: AbortSignal.timeout(4000) });
+    const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: gatewayUser, password: gatewayPassword }), signal: AbortSignal.timeout(4000) });
     if (!login.ok) throw new Error(`login HTTP ${login.status}`);
     const token = (await login.json()).token;
     const headers = { authorization: `Bearer ${token}` };

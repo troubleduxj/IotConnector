@@ -11,7 +11,9 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "ci:local": "node scripts/ci-local.mjs",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

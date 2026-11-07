@@ -11,9 +11,9 @@
 
 | ID | 问题 | 位置 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|---|
-| A1 | Go 网关整个目录未入库，主用代码只存在本机磁盘；`GO_REFACTOR_PLAN.md`、9 个运维脚本及 22 个已修改文件未提交 | `apps/gateway-go/`、`scripts/`、`docs/` | 先做 A3，再分批提交；另建一个本地 bare 仓库（放在另一块盘或 NAS）作为 `origin` 并推送，防止单盘损坏丢代码 | P0 | S |
-| A2 | CI 只在 `main` 触发，本地只有 `master`、无 remote，Go 门禁实际从未运行 | `.github/workflows/ci.yml` | Q5 已决定：`git branch -m master main`；仓库在本地，GitHub Actions 不会运行，改为本地门禁脚本 `scripts/ci-local`（typecheck + vitest + go vet/test/build + 控制台构建），并挂到 `pre-push` 钩子；`ci.yml` 保留，等以后有远端时直接启用 | P0 | S |
-| A3 | `.gitignore` 未覆盖 `factorybridge.exe`（25 MB）、`.tmp`（31 MB）、`.playwright-cli`（69 MB）、`testdata/**/history.jsonl`（22.9 万行），根目录散落模拟器日志 | `.gitignore` | 补忽略规则，清理根目录日志 | P0 | S |
+| A1 | ✅ 已提交（阶段 0，92b746e 等 6 个提交）；本地 bare 备份仓库待你指定路径。Go 网关整个目录未入库，主用代码只存在本机磁盘；`GO_REFACTOR_PLAN.md`、9 个运维脚本及 22 个已修改文件未提交 | `apps/gateway-go/`、`scripts/`、`docs/` | 先做 A3，再分批提交；另建一个本地 bare 仓库（放在另一块盘或 NAS）作为 `origin` 并推送，防止单盘损坏丢代码 | P0 | S |
+| A2 | ✅ 已完成（阶段 0）：主分支改名 `main`；本地门禁 `pnpm ci:local`（`scripts/ci-local.mjs`），`.githooks/pre-push` 推送前跑快速模式；`ci.yml` 保留待有远端时启用。注意：用户级 `~/.npmrc` 的 `script-shell=cmd.exe` 会让非交互环境下的 pnpm 脚本不执行却返回 0，门禁脚本已在命令行清空该项 | `scripts/ci-local.mjs`、`.githooks/` | 新克隆后执行 `pnpm hooks:install` 启用钩子 | P0 | S |
+| A3 | ✅ 已完成（阶段 0，10ac5c9）。`.gitignore` 未覆盖 `factorybridge.exe`（25 MB）、`.tmp`（31 MB）、`.playwright-cli`（69 MB）、`testdata/**/history.jsonl`（22.9 万行），根目录散落模拟器日志 | `.gitignore` | 补忽略规则，清理根目录日志 | P0 | S |
 | A4 | Go 默认数据目录是 Node 的 `apps/gateway/data`，两套网关状态文件混放 | `cmd/factorybridge/main.go:272-282` | Go 使用独立数据目录，首次启动从 Node 目录导入配置 | P1 | S |
 | A5 | `.env.example`、`metadata.json` 是 Gemini/AI Studio 模板残留 | 仓库根 | 改为本项目真实环境变量说明 | P2 | S |
 | A6 | `admin123` 硬编码在种子配置、e2e 和 5 个脚本中；compose 使用 TDengine 默认 `root:taosdata` | `config.ts:199`、`e2e/`、`scripts/`、`docker-compose.yml` | 脚本改读环境变量；种子账号强制首登改密 | P1 | S |

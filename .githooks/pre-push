@@ -1,0 +1,4 @@
+#!/bin/sh
+# 推送前运行本地门禁（快速模式，跳过控制台构建）。
+# 跳过：git push --no-verify
+exec node "$(git rev-parse --show-toplevel)/scripts/ci-local.mjs" --quick

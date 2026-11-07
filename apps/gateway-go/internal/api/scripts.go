@@ -156,6 +156,15 @@ func (e *scriptEngine) getOutput(id string) []string {
 	defer e.mu.Unlock()
 	return append([]string(nil), e.outputs[id]...)
 }
+func (e *scriptEngine) resetFailures(id string) {
+	e.mu.Lock()
+	stat := e.stats[id]
+	stat.AutoDisabled = false
+	stat.ConsecutiveErrors = 0
+	e.stats[id] = stat
+	e.mu.Unlock()
+}
+
 func (e *scriptEngine) getStat(id string) scriptStat {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -452,6 +461,11 @@ func (s *Server) updateScript(w http.ResponseWriter, r *http.Request) {
 				items[i].Trigger = p.Trigger
 			}
 			if value, ok := patch["enabled"].(bool); ok {
+				// C9：手动重新启用时清除自动禁用标记与连续失败计数，否则 inline 模式永远拒绝执行，
+				// 隔离模式下一次失败就立刻再次被禁用。
+				if value && !items[i].Enabled {
+					s.scriptEngine.resetFailures(items[i].ID)
+				}
 				items[i].Enabled = value
 			}
 			err := s.scriptEngine.save(items)

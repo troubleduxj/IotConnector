@@ -1,6 +1,7 @@
 package northbound
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/eclipse/paho.mqtt.golang"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/acquisition"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 )
 
 type Config struct {
@@ -34,6 +36,9 @@ type Publisher struct {
 	mu        sync.Mutex
 	cfg       Config
 	stateFile string
+	// state 非空时离线队列逐条写 SQLite、序号写 kv 表（G4）；原实现每条消息、每次 seq++ 都重写整个文件
+	state     *db.Batch
+	nextID    int64
 	client    mqtt.Client
 	status    Status
 	queue     []queuedMessage
@@ -42,6 +47,7 @@ type Publisher struct {
 	OnCommand func(string, any) error
 }
 type queuedMessage struct {
+	id      int64
 	Topic   string `json:"topic"`
 	Payload []byte `json:"payload"`
 	Retain  bool   `json:"retain,omitempty"`
@@ -51,6 +57,71 @@ func New(cfg Config, stateFile string, channels []acquisition.Channel, tags []ac
 	p := &Publisher{cfg: cfg, stateFile: stateFile, channels: channels, tags: tags}
 	p.load()
 	return p
+}
+
+// NewDB 使用 SQLite 持久化队列与序号；库中无状态且存在旧 northbound.json 时导入一次并改名为 .migrated。
+func NewDB(cfg Config, database *db.DB, batch *db.Batch, legacyFile string, channels []acquisition.Channel, tags []acquisition.Tag) *Publisher {
+	p := &Publisher{cfg: cfg, state: batch, channels: channels, tags: tags}
+	var raw string
+	if database.QueryRow(`SELECT value FROM kv WHERE key = 'northbound.state'`).Scan(&raw) == nil {
+		var counters struct {
+			BDSeq, Seq uint64
+			Dropped    int
+		}
+		if json.Unmarshal([]byte(raw), &counters) == nil {
+			p.status.BDSeq, p.status.Seq, p.status.Dropped = counters.BDSeq, counters.Seq, counters.Dropped
+		}
+		rows, err := database.Query(`SELECT id, topic, payload, retain FROM northbound_queue ORDER BY id`)
+		if err == nil {
+			for rows.Next() {
+				var item queuedMessage
+				var retain int
+				if rows.Scan(&item.id, &item.Topic, &item.Payload, &retain) == nil {
+					item.Retain = retain == 1
+					p.queue = append(p.queue, item)
+				}
+			}
+			rows.Close()
+		}
+		p.nextID, _ = database.NextID(context.Background(), "northbound_queue")
+		return p
+	}
+	if legacyFile != "" {
+		p.stateFile = legacyFile
+		p.load()
+		p.stateFile = ""
+		for i := range p.queue {
+			p.nextID++
+			p.queue[i].id = p.nextID
+			p.insertLocked(p.queue[i])
+		}
+	}
+	p.saveCountersLocked()
+	if batch.Flush(context.Background()) == nil && legacyFile != "" {
+		if _, err := os.Stat(legacyFile); err == nil {
+			_ = os.Rename(legacyFile, legacyFile+".migrated")
+		}
+	}
+	return p
+}
+
+func (p *Publisher) insertLocked(item queuedMessage) {
+	p.state.Exec(`INSERT INTO northbound_queue(id, topic, payload, retain) VALUES (?, ?, ?, ?)`, item.id, item.Topic, item.Payload, boolInt(item.Retain))
+}
+
+func (p *Publisher) saveCountersLocked() {
+	b, _ := json.Marshal(struct {
+		BDSeq, Seq uint64
+		Dropped    int
+	}{p.status.BDSeq, p.status.Seq, p.status.Dropped})
+	p.state.Exec(`INSERT INTO kv(key, value) VALUES ('northbound.state', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, string(b))
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 func (p *Publisher) Status() Status {
 	p.mu.Lock()
@@ -257,18 +328,32 @@ func (p *Publisher) publishOrQueueWithRetain(topicName string, payload []byte, r
 			if p.queue[i].Topic == topicName {
 				p.queue[i].Payload = payload
 				p.queue[i].Retain = retain
-				p.persistLocked()
+				if p.state != nil {
+					p.state.Exec(`UPDATE northbound_queue SET payload = ?, retain = ? WHERE id = ?`, payload, boolInt(retain), p.queue[i].id)
+				} else {
+					p.persistLocked()
+				}
 				p.mu.Unlock()
 				return
 			}
 		}
 	}
 	if len(p.queue) >= 10000 {
+		if p.state != nil {
+			p.state.Exec(`DELETE FROM northbound_queue WHERE id = ?`, p.queue[0].id)
+		}
 		p.queue = p.queue[1:]
 		p.status.Dropped++
 	}
-	p.queue = append(p.queue, queuedMessage{Topic: topicName, Payload: payload, Retain: retain})
-	p.persistLocked()
+	p.nextID++
+	item := queuedMessage{id: p.nextID, Topic: topicName, Payload: payload, Retain: retain}
+	p.queue = append(p.queue, item)
+	if p.state != nil {
+		p.insertLocked(item)
+		p.saveCountersLocked()
+	} else {
+		p.persistLocked()
+	}
 	p.mu.Unlock()
 }
 
@@ -296,10 +381,15 @@ func (p *Publisher) flush() {
 			return
 		}
 		p.mu.Lock()
-		if len(p.queue) > 0 {
+		// 按 id 出队：发送期间队首可能已因溢出被丢弃，或被合并更新
+		for len(p.queue) > 0 && p.queue[0].id <= item.id {
 			p.queue = p.queue[1:]
 		}
-		p.persistLocked()
+		if p.state != nil {
+			p.state.Exec(`DELETE FROM northbound_queue WHERE id <= ?`, item.id)
+		} else {
+			p.persistLocked()
+		}
 		p.mu.Unlock()
 		p.recordPublished()
 	}
@@ -322,9 +412,17 @@ func (p *Publisher) load() {
 	}
 	if json.Unmarshal(b, &state) == nil {
 		p.status.BDSeq, p.status.Seq, p.status.Dropped, p.queue = state.BDSeq, state.Seq, state.Dropped, state.Queue
+		for i := range p.queue {
+			p.nextID++
+			p.queue[i].id = p.nextID
+		}
 	}
 }
 func (p *Publisher) persistLocked() {
+	if p.state != nil {
+		p.saveCountersLocked()
+		return
+	}
 	if p.stateFile == "" {
 		return
 	}

@@ -1,9 +1,13 @@
 package northbound
 
 import (
+	"context"
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 )
 
 func TestQueueCoalescesBirthAndDataSnapshots(t *testing.T) {
@@ -69,5 +73,47 @@ func TestDecodeSparkplugCommandMetrics(t *testing.T) {
 	decoded := decodeCommandMetrics(floatMetric)
 	if len(decoded) != 1 || math.Abs(decoded[0].Value.(float64)-36.5) > 0.001 {
 		t.Fatalf("float = %#v", decoded)
+	}
+}
+
+func TestDBQueueSurvivesRestartAndImportsLegacy(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "northbound.json")
+	old := New(Config{Enabled: true}, legacy, nil, nil)
+	old.publishOrQueue("spBv1.0/G/NDATA/E", []byte("a"))
+	old.publishOrQueue("spBv1.0/G/NDATA/E", []byte("b"))
+	_ = old.nextSeq()
+
+	database, err := db.Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	batch := db.NewBatch(database)
+	p := NewDB(Config{Enabled: true}, database, batch, legacy, nil, nil)
+	if got := p.Status().Queued; got != 2 {
+		t.Fatalf("imported queue=%d", got)
+	}
+	if _, err := os.Stat(legacy + ".migrated"); err != nil {
+		t.Fatalf("legacy not renamed: %v", err)
+	}
+	seq := p.Status().Seq
+	p.publishOrQueue("spBv1.0/G/DDATA/E/d1", []byte("x"))
+	p.publishOrQueue("spBv1.0/G/DDATA/E/d1", []byte("y")) // 合并，不新增
+	_ = p.nextSeq()
+	if err := batch.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewDB(Config{Enabled: true}, database, batch, legacy, nil, nil)
+	status := restarted.Status()
+	if status.Queued != 3 || status.Seq != seq+1 {
+		t.Fatalf("after restart queued=%d seq=%d (want 3, %d)", status.Queued, status.Seq, seq+1)
+	}
+	if string(restarted.queue[2].Payload) != "y" {
+		t.Fatalf("coalesced payload not persisted: %q", restarted.queue[2].Payload)
+	}
+	restarted.publishOrQueue("spBv1.0/G/NDATA/E", []byte("c"))
+	if err := batch.Flush(context.Background()); err != nil {
+		t.Fatalf("id collision after restart: %v", err)
 	}
 }

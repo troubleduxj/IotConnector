@@ -1,12 +1,16 @@
 package shadow
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 )
 
 type Reported struct {
@@ -47,9 +51,12 @@ type persistedDesired struct {
 	By    string `json:"by"`
 }
 
+// Store 是设备影子。配置了 SQLite 时每个位号一行，变化时只写该行（G4）；
+// 否则写 JSON 文件（测试与旧调用方）。原实现每个 SetReported 都重写整个文件且临时文件名固定、无 fsync。
 type Store struct {
 	mu       sync.RWMutex
 	path     string
+	batch    *db.Batch
 	reported map[string]Reported
 	desired  map[string]Desired
 	onChange func()
@@ -61,12 +68,85 @@ func New(path string, onChange func()) *Store {
 	return s
 }
 
+// NewDB 从 SQLite 恢复影子；库为空且存在旧 shadow.json 时导入一次，落盘后原文件改名为 .migrated。
+func NewDB(database *db.DB, batch *db.Batch, legacyPath string, onChange func()) *Store {
+	s := &Store{batch: batch, reported: map[string]Reported{}, desired: map[string]Desired{}, onChange: onChange}
+	rows, err := database.Query(`SELECT tag_id, reported, desired FROM shadow_entries`)
+	if err == nil {
+		for rows.Next() {
+			var id string
+			var reported, desired sql.NullString
+			if rows.Scan(&id, &reported, &desired) != nil {
+				continue
+			}
+			if reported.Valid {
+				var value Reported
+				if json.Unmarshal([]byte(reported.String), &value) == nil {
+					s.reported[id] = value
+				}
+			}
+			if desired.Valid {
+				var value Desired
+				if json.Unmarshal([]byte(desired.String), &value) == nil {
+					s.desired[id] = value
+				}
+			}
+		}
+		rows.Close()
+	}
+	if len(s.reported) == 0 && len(s.desired) == 0 && legacyPath != "" {
+		s.path = legacyPath
+		s.load()
+		s.path = ""
+		if len(s.reported) > 0 || len(s.desired) > 0 {
+			for id := range s.reported {
+				s.writeRowLocked(id)
+			}
+			for id := range s.desired {
+				s.writeRowLocked(id)
+			}
+			if batch.Flush(context.Background()) == nil {
+				_ = os.Rename(legacyPath, legacyPath+".migrated")
+			}
+		}
+	}
+	return s
+}
+
+// writeRowLocked 把一个位号的当前影子写入 SQLite（UPSERT 整行）。
+func (s *Store) writeRowLocked(tagID string) {
+	var reported, desired any
+	if value, ok := s.reported[tagID]; ok {
+		if b, err := json.Marshal(value); err == nil {
+			reported = string(b)
+		}
+	}
+	if value, ok := s.desired[tagID]; ok {
+		if b, err := json.Marshal(value); err == nil {
+			desired = string(b)
+		}
+	}
+	s.batch.Exec(`INSERT INTO shadow_entries(tag_id, reported, desired) VALUES (?, ?, ?)
+        ON CONFLICT(tag_id) DO UPDATE SET reported = excluded.reported, desired = excluded.desired`, tagID, reported, desired)
+}
+
+func (s *Store) changedLocked(tagID string) {
+	if s.batch != nil {
+		s.writeRowLocked(tagID)
+		return
+	}
+	s.persistLocked()
+}
+
 func (s *Store) SetReported(tagID string, value any, quality string, ts int64) {
 	s.mu.Lock()
 	previous, existed := s.reported[tagID]
 	s.reported[tagID] = Reported{Value: value, Quality: quality, TS: ts}
 	changed := !existed || !reflect.DeepEqual(previous, s.reported[tagID])
-	s.persistLocked()
+	// 值、质量码、时间戳都没变时不写库：采样周期内重复上报同一快照很常见
+	if changed {
+		s.changedLocked(tagID)
+	}
 	onChange := s.onChange
 	s.mu.Unlock()
 	if changed && onChange != nil {
@@ -77,7 +157,7 @@ func (s *Store) SetReported(tagID string, value any, quality string, ts int64) {
 func (s *Store) SetDesired(tagID string, value any, by string) {
 	s.mu.Lock()
 	s.desired[tagID] = Desired{Value: value, TS: time.Now().UnixMilli(), By: by}
-	s.persistLocked()
+	s.changedLocked(tagID)
 	onChange := s.onChange
 	s.mu.Unlock()
 	if onChange != nil {
@@ -159,8 +239,17 @@ func (s *Store) persistLocked() {
 	if os.MkdirAll(filepath.Dir(s.path), 0o750) != nil {
 		return
 	}
-	tmp := s.path + ".tmp"
-	if os.WriteFile(tmp, b, 0o640) == nil {
-		_ = os.Rename(tmp, s.path)
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".shadow-*.json")
+	if err != nil {
+		return
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(b); err != nil || tmp.Sync() != nil {
+		_ = tmp.Close()
+		return
+	}
+	if tmp.Close() == nil {
+		_ = os.Rename(name, s.path)
 	}
 }

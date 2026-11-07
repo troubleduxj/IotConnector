@@ -19,6 +19,7 @@ import (
 	"github.com/factorybridge/iotconnector/gateway-go/internal/api"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/audit"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/northbound"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/storage"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/version"
@@ -43,12 +44,28 @@ func runGateway(opts runOptions) int {
 		logger.Error("start acquisition engine", "error", err)
 		return exitError
 	}
+	// 状态库最先打开：outbox、历史、告警、审计、用户都依赖它（G1–G4）。
+	users, database, err := openUserStore(ctx, dataDir, os.Stdout)
+	if err != nil {
+		logger.Error("open state database", "error", err)
+		return exitConfig
+	}
+	defer database.Close()
+	stateBatch := db.NewBatch(database)
+	// 批量写入有独立的生命周期：收到退出信号后，等 HTTP 与采集都停下（不再产生写入），
+	// 再停止它，让最后一次提交包含关停期间的写入；之后才关库（defer database.Close）。
+	batchCtx, stopBatch := context.WithCancel(context.Background())
+	batchDone := make(chan struct{})
+	go func() { stateBatch.Run(batchCtx, time.Second); close(batchDone) }()
+	defer func() { stopBatch(); <-batchDone }()
+
 	tdengineURL := os.Getenv("TDENGINE_URL")
 	queueFile := ""
 	if tdengineURL != "" {
 		queueFile = filepath.Join(dataDir, "outbox.json")
 	}
 	storageWriter := storage.New(storage.Config{
+		State: stateBatch, StateDB: database,
 		URL: tdengineURL, User: envOr("TDENGINE_USER", "root"), Password: envOr("TDENGINE_PASSWORD", "taosdata"),
 		Database: envOr("TDENGINE_DB", "factory_bridge"), SuperTable: envOr("TDENGINE_STABLE", "st_factory_equipment"),
 		QueueFile: queueFile, AlarmQueueFile: func() string {
@@ -57,15 +74,9 @@ func runGateway(opts runOptions) int {
 			}
 			return filepath.Join(dataDir, "alarm-outbox.json")
 		}(),
-		MaxQueue: envInt("GATEWAY_GO_OUTBOX_MAX", 100000), SegmentSize: envInt("GATEWAY_GO_OUTBOX_SEGMENT_SIZE", 10000),
+		MaxQueue: envInt("GATEWAY_GO_OUTBOX_MAX", 100000),
 	})
-	auditLogger := audit.New(filepath.Join(dataDir, "audit.jsonl"))
-	users, database, err := openUserStore(ctx, dataDir, os.Stdout)
-	if err != nil {
-		logger.Error("open user store", "error", err)
-		return exitConfig
-	}
-	defer database.Close()
+	auditLogger := audit.NewDB(database, filepath.Join(dataDir, "audit.jsonl"))
 	if opts.dev {
 		if err := ensureDevAccount(ctx, users, opts.devPass, logger); err != nil {
 			logger.Error("create dev account", "error", err)
@@ -86,6 +97,8 @@ func runGateway(opts runOptions) int {
 			Users:         users,
 			DevMode:       opts.dev,
 			DevNoAuth:     opts.devNoAuth,
+			StateDB:       database,
+			State:         stateBatch,
 			HistoryFile:   filepath.Join(dataDir, "history.jsonl"),
 			Audit:         auditLogger,
 			ConfigStore:   &store,
@@ -94,7 +107,7 @@ func runGateway(opts runOptions) int {
 			CORSOrigins:   splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
 		},
 	)
-	northboundPublisher := northbound.New(northbound.Config{Enabled: boolRaw(cfg.Raw["northbound"], "enabled"), URL: stringRaw(cfg.Raw["northbound"], "url", "mqtt://127.0.0.1:1883"), Username: stringRaw(cfg.Raw["northbound"], "username", ""), Password: stringRaw(cfg.Raw["northbound"], "password", ""), GroupID: stringRaw(cfg.Raw["northbound"], "groupId", "Factory"), EdgeNodeID: stringRaw(cfg.Raw["northbound"], "edgeNodeId", "FB_Edge_GW01"), DataFlushMs: intRaw(cfg.Raw["northbound"], "dataFlushMs", 1000)}, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
+	northboundPublisher := northbound.NewDB(northbound.Config{Enabled: boolRaw(cfg.Raw["northbound"], "enabled"), URL: stringRaw(cfg.Raw["northbound"], "url", "mqtt://127.0.0.1:1883"), Username: stringRaw(cfg.Raw["northbound"], "username", ""), Password: stringRaw(cfg.Raw["northbound"], "password", ""), GroupID: stringRaw(cfg.Raw["northbound"], "groupId", "Factory"), EdgeNodeID: stringRaw(cfg.Raw["northbound"], "edgeNodeId", "FB_Edge_GW01"), DataFlushMs: intRaw(cfg.Raw["northbound"], "dataFlushMs", 1000)}, database, stateBatch, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
 	northboundPublisher.OnCommand = func(name string, raw any) error {
 		_ = auditLogger.Record(audit.Event{Actor: "mqtt", Action: "mqtt.cmd", Target: name, Detail: map[string]any{"value": raw}})
 		for _, tag := range toAcquisitionTags(cfg) {
@@ -128,6 +141,22 @@ func runGateway(opts runOptions) int {
 	}
 	serverHandler.AttachNorthbound(northboundPublisher)
 	northboundPublisher.Start()
+	// 每小时按保留期清理状态库（历史 7 天、告警 90 天、审计 365 天）
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			serverHandler.PruneState(ctx)
+			if err := auditLogger.Prune(ctx); err != nil && ctx.Err() == nil {
+				logger.Warn("prune audit", "error", err)
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -170,6 +199,7 @@ func runGateway(opts runOptions) int {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown", "error", err)
 	}
+	northboundPublisher.Stop()
 	if err := engine.Stop(shutdownCtx); err != nil {
 		logger.Error("stop acquisition engine", "error", err)
 	}

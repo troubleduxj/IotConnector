@@ -24,11 +24,11 @@
 |---|---|---|---|---|---|
 | B1 | ✅ 已修复（阶段 1，eae395d）。WebSocket `write` 只检查"已订阅"，不检查角色，viewer 可写 PLC | `internal/api/websocket.go:168-183` | `wsClient` 记录角色，写入要求 operator；补测试 | P0 | S |
 | B2 | ✅ 已修复（阶段 1，eae395d、acb3ca1）。WS `CheckOrigin` 恒为 true；CORS 只拦预检，简单跨域 POST 仍会执行；JSON 不校验 Content-Type | `websocket.go:85`、`server.go:418-423` | Origin 同源 + 白名单；POST/PUT 强制 `application/json` | P0 | S |
-| B3 | 未配置 Token/密码时"开放模式"按 admin 放行全部请求 | `server.go:941`、`websocket.go:213` | Q3 已决定：去掉"没配就放行"的隐式开放，改为显式开发模式，规则见 H 组 H5 | P0 | S |
+| B3 | ✅ 已完成（阶段 2，8ac541c）。未配置 Token/密码时"开放模式"按 admin 放行全部请求 | `server.go:941`、`websocket.go:213` | Q3 已决定：去掉"没配就放行"的隐式开放，改为显式开发模式，规则见 H 组 H5 | P0 | S |
 | B4 | ✅ 已修复（阶段 1，a495b8f）。敏感信息可读：`/api/config` 返回完整原始配置，`/api/northbound`、`/api/notifications` 返回 MQTT/SMTP/钉钉密钥；`/api/system/info` 无鉴权且含 TDengine URL | `server.go:514-520,1078`、`northbound.go:16`、`notifications.go:20` | 密码字段只写不读（省略即保留原值）；system/info 去掉内部地址 | P0 | M |
 | B5 | ✅ 已修复（阶段 1，acb3ca1）。登录未调用限速；失败计数 map 不清理；无请求体大小限制；`http.Server` 无读写超时 | `server.go:317-354,1014-1024`、`main.go:140-145` | 登录按 IP+用户名限速；`MaxBytesReader`；设置 Read/WriteTimeout | P0 | S |
-| B6 | 审计操作者取自客户端 `X-User` 头，可伪造 | `server.go:935,1041` | 从会话取用户名 | P1 | S |
-| B7 | 鉴权按路由各自调用，缺统一"默认拒绝"中间件 | `server.go:252` 起 62 条路由 | 统一中间件 + 公开路由白名单；RBAC 矩阵测试 | P1 | M |
+| B6 | ✅ 已完成（阶段 2，8ac541c）。审计操作者取自客户端 `X-User` 头，可伪造 | `server.go:935,1041` | 从会话取用户名 | P1 | S |
+| B7 | ✅ 已完成（阶段 2，8ac541c）。鉴权按路由各自调用，缺统一"默认拒绝"中间件 | `server.go:252` 起 62 条路由 | 统一中间件 + 公开路由白名单；RBAC 矩阵测试 | P1 | M |
 | B8 | 脚本子进程继承全部环境变量（含密钥），无内存上限；inline 模式写入次数不限 | `scripts.go:213-221,315` | 子进程只传白名单环境变量；设内存上限；inline 模式仅限开发 | P1 | S |
 | B9 | WS Token 比较非常量时间；Token 可经 query string 传递 | `websocket.go:218,224` | `subtle.ConstantTimeCompare`；改用首帧认证或短期票据 | P2 | S |
 
@@ -92,7 +92,7 @@
 | F1 | Go 网关不托管控制台，生产需另起 `npx serve`，compose 中控制台跑的是 Vite 开发服务器 | Go 网关可选托管 `web/` 静态目录（`os.Root`、CSP、缓存策略），也可独立部署到 Nginx/IIS | P1 | S |
 | F2 | 监听地址写死 `127.0.0.1`，只有 HTTP | 监听地址可配置；HTTPS（企业证书 / 自签名回退）；客户端网段白名单 | P1 | M |
 | F3 | 没有发布包 | 由 H6 覆盖：Windows/Linux 两套发布包 | P1 | S |
-| F4 | 有默认账号 | 由 H4、H5 覆盖：生产模式无默认账号，用 `user create` 或初始化码创建首个管理员 | P1 | M |
+| F4 | ✅ 已完成（阶段 2，8ac541c）。有默认账号 | 由 H4、H5 覆盖：生产模式无默认账号，用 `user create` 或初始化码创建首个管理员 | P1 | M |
 | F5 | API 无版本、错误格式不统一 | `/api/v1` + 统一错误体 `{error,message,requestId}`；保留 `/api` 兼容期 | P2 | M |
 | F6 | API 与告警/脚本调度耦合在 `api.Server` 中 | 抽出运行时接口（参考 koike `Runtime`），关闭管理 API 时采集、告警、北向照常运行 | P2 | L |
 
@@ -102,7 +102,7 @@
 
 | ID | 内容 | 依赖 | 优先级 | 工作量 |
 |---|---|---|---|---|
-| G1 | 引入 `modernc.org/sqlite`，新建 `internal/db`：单一 `gateway.db`、WAL 模式、`busy_timeout`、带版本号的 schema 迁移；数据目录独立于 Node（合并 A4） | — | P1 | M |
+| G1 | ✅ 已完成（阶段 2，a629c88）。引入 `modernc.org/sqlite`，新建 `internal/db`：单一 `gateway.db`、WAL 模式、`busy_timeout`、带版本号的 schema 迁移；数据目录独立于 Node（合并 A4） | — | P1 | M |
 | G2 | outbox 迁入 SQLite：按序追加、批量出队删除、上限和最大时长裁剪、丢弃计数；启动时导入旧 `outbox.json` 和分段文件 | G1 | P1 | M |
 | G3 | history 缓冲、告警事件、审计迁入 SQLite，按时间索引、按保留期清理；导入旧 `history.jsonl`、`alarms.jsonl*`、`audit.jsonl` 时跳过损坏行 | G1 | P1 | M |
 | G4 | 会话、shadow、北向序号迁入 SQLite；写入改为批量刷盘（按时间或条数），不再每个样本写一次 | G1 | P1 | S |
@@ -135,11 +135,11 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 
 | ID | 内容 | 依赖 | 优先级 | 工作量 |
 |---|---|---|---|---|
-| H1 | 命令框架：拆分 `cmd/factorybridge/main.go`，子命令分文件；统一 `--config`、`--data-dir`、`--log-level`；退出码规范（0 成功、1 一般错误、2 参数错误、3 配置错误） | — | P1 | M |
+| H1 | ✅ 已完成（阶段 2，00668a8）。命令框架：拆分 `cmd/factorybridge/main.go`，子命令分文件；统一 `--config`、`--data-dir`、`--log-level`；退出码规范（0 成功、1 一般错误、2 参数错误、3 配置错误） | — | P1 | M |
 | H2 | 配置改为 `config.yaml`（采集配置仍走 API 和 SQLite，见 G6）；优先级：命令行 > 环境变量（`FB_` 前缀）> 配置文件 > 默认值；现有 26 个 `GATEWAY_GO_*` 等变量保留一个版本的兼容期并打印弃用提示 | H1 | P1 | M |
 | H3 | 路径与平台：默认目录 Windows 为程序所在目录，Linux 为 `/etc/factorybridge`、`/var/lib/factorybridge`、`/var/log/factorybridge`；`service` 子命令 Windows 走 SCM（`golang.org/x/sys/windows/svc`，替代 WinSW），Linux 生成 systemd 单元（专用用户、`ProtectSystem=strict`、`ReadWritePaths`）；平台差异用 build tag 隔离 | H1 | P1 | M |
-| H4 | 认证体系：多用户 + 角色（viewer / operator / engineer / admin，与控制台已有的 `engineer` 对齐）；口令用 argon2id 或 bcrypt，加口令策略；访问令牌短期有效 + 刷新令牌轮换；API Key 最高只能是 operator；密钥文件放 `secrets/`，Windows 用 DPAPI 加密，Linux 用 0600 权限；统一鉴权中间件（合并 B7） | B1–B5、G1 | P0 | L |
-| H5 | 运行模式：见下方规则 | H4 | P0 | M |
+| H4 | ✅ 已完成（阶段 2，8ac541c）。认证体系：多用户 + 角色（viewer / operator / engineer / admin，与控制台已有的 `engineer` 对齐）；口令用 argon2id 或 bcrypt，加口令策略；访问令牌短期有效 + 刷新令牌轮换；API Key 最高只能是 operator；密钥文件放 `secrets/`，Windows 用 DPAPI 加密，Linux 用 0600 权限；统一鉴权中间件（合并 B7） | B1–B5、G1 | P0 | L |
+| H5 | ✅ 已完成（阶段 2，8ac541c）。运行模式：见下方规则 | H4 | P0 | M |
 | H6 | 发布：`build` 脚本交叉编译 `windows/amd64`、`linux/amd64`、`linux/arm64`（`CGO_ENABLED=0`，依赖 G1 选纯 Go 的 SQLite）；产出 zip/tar.gz，内含二进制、`web/`、`config.example.yaml`、文档、sha256；`version` 注入提交号 | H1、F1 | P1 | S |
 | H7 | 文档：部署手册、快速部署步骤、安全验收说明（参考 koike `docs/`），Windows 和 Linux 各一节 | H1–H6 | P2 | M |
 | H8 | CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |

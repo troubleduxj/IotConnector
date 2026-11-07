@@ -3,7 +3,7 @@
 param(
     [string]$GatewayUrl = "http://127.0.0.1:18080",
     [string]$Username = "admin",
-    [string]$Password = "admin123",
+    [string]$Password = $env:GATEWAY_PASSWORD,
     [string[]]$Protocols = @("Mitsubishi MELSEC", "Omron FINS", "EtherNet/IP (Rockwell)", "MQTT / Sparkplug B"),
     [int]$OfflineTimeoutSeconds = 20,
     [int]$RecoveryTimeoutSeconds = 40,
@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrEmpty($Password)) { throw "Set -Password or GATEWAY_PASSWORD" }
 $repo = Split-Path -Parent $PSScriptRoot
 
 function Invoke-Json([string]$Method, [string]$Url, [hashtable]$Headers = @{}, $Body = $null) {

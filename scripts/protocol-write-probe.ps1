@@ -3,11 +3,12 @@ param(
     [string]$GoUrl = "http://127.0.0.1:18080",
     [string]$NodeUrl = "http://127.0.0.1:18081",
     [string]$Username = "admin",
-    [string]$Password = "admin123",
+    [string]$Password = $env:GATEWAY_PASSWORD,
     [string]$OutputFile = ""
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrEmpty($Password)) { throw "Set -Password or GATEWAY_PASSWORD" }
 
 function Invoke-Json([string]$Method, [string]$Url, [hashtable]$Headers = @{}, $Body = $null) {
     if ($null -eq $Body) {

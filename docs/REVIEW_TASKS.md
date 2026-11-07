@@ -16,7 +16,7 @@
 | A3 | ✅ 已完成（阶段 0，10ac5c9）。`.gitignore` 未覆盖 `factorybridge.exe`（25 MB）、`.tmp`（31 MB）、`.playwright-cli`（69 MB）、`testdata/**/history.jsonl`（22.9 万行），根目录散落模拟器日志 | `.gitignore` | 补忽略规则，清理根目录日志 | P0 | S |
 | A4 | Go 默认数据目录是 Node 的 `apps/gateway/data`，两套网关状态文件混放 | `cmd/factorybridge/main.go:272-282` | Go 使用独立数据目录，首次启动从 Node 目录导入配置 | P1 | S |
 | A5 | `.env.example`、`metadata.json` 是 Gemini/AI Studio 模板残留 | 仓库根 | 改为本项目真实环境变量说明 | P2 | S |
-| A6 | `admin123` 硬编码在种子配置、e2e 和 5 个脚本中；compose 使用 TDengine 默认 `root:taosdata` | `config.ts:199`、`e2e/`、`scripts/`、`docker-compose.yml` | 脚本改读环境变量；种子账号强制首登改密 | P1 | S |
+| A6 | ✅ 已完成（ca132c3 及本次提交；TDengine 默认口令仍在，见下）。`admin123` 硬编码在种子配置、e2e 和 5 个脚本中；compose 使用 TDengine 默认 `root:taosdata` | `config.ts:199`、`e2e/`、`scripts/`、`docker-compose.yml` | 脚本改读环境变量；种子账号强制首登改密 | P1 | S |
 
 ## B. Go 网关安全（主用运行时）
 
@@ -29,8 +29,8 @@
 | B5 | ✅ 已修复（阶段 1，acb3ca1）。登录未调用限速；失败计数 map 不清理；无请求体大小限制；`http.Server` 无读写超时 | `server.go:317-354,1014-1024`、`main.go:140-145` | 登录按 IP+用户名限速；`MaxBytesReader`；设置 Read/WriteTimeout | P0 | S |
 | B6 | ✅ 已完成（阶段 2，8ac541c）。审计操作者取自客户端 `X-User` 头，可伪造 | `server.go:935,1041` | 从会话取用户名 | P1 | S |
 | B7 | ✅ 已完成（阶段 2，8ac541c）。鉴权按路由各自调用，缺统一"默认拒绝"中间件 | `server.go:252` 起 62 条路由 | 统一中间件 + 公开路由白名单；RBAC 矩阵测试 | P1 | M |
-| B8 | 脚本子进程继承全部环境变量（含密钥），无内存上限；inline 模式写入次数不限 | `scripts.go:213-221,315` | 子进程只传白名单环境变量；设内存上限；inline 模式仅限开发 | P1 | S |
-| B9 | WS Token 比较非常量时间；Token 可经 query string 传递 | `websocket.go:218,224` | `subtle.ConstantTimeCompare`；改用首帧认证或短期票据 | P2 | S |
+| B8 | ✅ 已完成（e3ad71f，环境变量白名单；内存上限推迟）。脚本子进程继承全部环境变量（含密钥），无内存上限；inline 模式写入次数不限 | `scripts.go:213-221,315` | 子进程只传白名单环境变量；设内存上限；inline 模式仅限开发 | P1 | S |
+| B9 | ✅ 已完成（370fc70，30 秒一次性票据；?token= 暂留并告警）。WS Token 比较非常量时间；Token 可经 query string 传递 | `websocket.go:218,224` | `subtle.ConstantTimeCompare`；改用首帧认证或短期票据 | P2 | S |
 
 ## C. Go 网关正确性与可靠性
 
@@ -41,10 +41,10 @@
 | C3 | ✅ 已完成（阶段 3，16a5fb1）。每个样本同步写盘：history 每点 fsync 且不轮转；outbox 每次入队重写整个队列（最多 10 万点）；shadow、northbound 状态同样 | `monitoring.go:72-78`、`tdengine.go:232,410-433`、`shadow.go:69`、`publisher.go:226` | 批量刷盘（按时间/条数）；history 轮转；outbox 改追加分段 | P1 | M |
 | C4 | ✅ 已完成（阶段 3，16a5fb1）。outbox 分段先删旧再写新，中间崩溃丢数据；northbound/shadow/password 写入非原子或无 fsync | `tdengine.go:417-420`、`publisher.go:337`、`shadow.go:162`、`password.go:140` | 统一使用"临时文件 + fsync + rename"工具函数 | P1 | S |
 | C5 | 改配置先改内存再保存，失败不回滚；每次改通道/位号重启全部驱动且持锁；北向发布器和 CMD 处理只认启动时配置 | `server.go:834-845`、`engine.go:114`、`main.go:90,93` | 保存成功后再切换快照；按通道增量重载；北向订阅配置变更 | P1 | M |
-| C6 | Patch 接口可改写 `id`/`channelId`，跳过端口和通道校验 | `server.go:568-569,772-773` | 禁止修改主键字段；更新后重新跑校验 | P1 | S |
-| C7 | WS 每个样本单独发一条消息；客户端缓冲（32）满时静默丢弃 | `server.go:176`、`websocket.go:75-78` | 按 50–100 ms 合并批次；记录丢弃计数 | P1 | S |
-| C8 | 单个 Modbus 位号出错导致整个通道 offline | `acquisition/modbus.go:99-101` | 位号级质量码，通道状态只反映连接 | P1 | S |
-| C9 | 脚本 `AutoDisabled` 重新启用后不复位 | `scripts.go:185,357` | 启用时清零崩溃计数 | P2 | S |
+| C6 | ✅ 已完成（f9b0e9b）。Patch 接口可改写 `id`/`channelId`，跳过端口和通道校验 | `server.go:568-569,772-773` | 禁止修改主键字段；更新后重新跑校验 | P1 | S |
+| C7 | ✅ 已完成（e30583f，100ms 合并，新增丢弃计数指标）。WS 每个样本单独发一条消息；客户端缓冲（32）满时静默丢弃 | `server.go:176`、`websocket.go:75-78` | 按 50–100 ms 合并批次；记录丢弃计数 | P1 | S |
+| C8 | ✅ 已完成（94d202c、21bc203、8d4d7ac）。单个 Modbus 位号出错导致整个通道 offline | `acquisition/modbus.go:99-101` | 位号级质量码，通道状态只反映连接 | P1 | S |
+| C9 | ✅ 已完成（87b5054）。脚本 `AutoDisabled` 重新启用后不复位 | `scripts.go:185,357` | 启用时清零崩溃计数 | P2 | S |
 | C10 | ✅ 已完成（阶段 3，16a5fb1）。关停时不停止北向发布器和脚本定时器，不做最终刷盘 | `main.go:155-165` | 有序关停 + 最终 flush | P2 | S |
 | C11 | ✅ 已完成（ac1b327、2eb3a70）。`/api/scheduler`、`/api/channels/{id}/test` 返回占位数据 | `server.go:825-828,892-898` | 实现或在 UI 标注"未实现" | P2 | M |
 
@@ -294,3 +294,22 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 - 报文抓包只覆盖 TCP 驱动（Modbus、MELSEC、FINS、EtherNet/IP、IEC104）。S7、OPC UA、SNMP、BACnet、MQTT 的诊断面板为空。
 - 导出的通道包里口令已脱敏，导入后需要重新填写。
 - `tx` 与 `rx` 都按成功轮询周期数统计，不是真实的报文数。
+
+## 第二组完成记录（2026-11-07）
+
+在隔离网关（18099）+ Modbus 模拟器上实测：
+
+- C8：在模拟器 1000 个寄存器之外加一个位号（41500）。通道保持 online，详情为 "OK 0ms, 1/4 tags bad"；只有该位号质量为 Bad，其余 3 个为 Good。
+- C7：5 秒内收到 6 个批次、共 24 个值；`factorybridge_websocket_dropped_total` 为 0。
+- B9：票据可建立连接，重复使用被拒。
+- C6、B8、C9：单元测试覆盖（patch_test、scripts_env_test、scripts_reenable_test）。
+- A6：压测、长稳、e2e 和 3 个 PowerShell 脚本改读环境变量（GATEWAY_PASSWORD、E2E_PASSWORD），未设置时报错或跳过。
+
+分工：A6、B8、C6、C8 由子任务（Haiku）实现，主会话核查。核查发现并修复：一次提交引用了不存在的测试辅助函数（8d4d7ac 修复）；周期延迟解析不认带逗号的状态详情（b0e1991）。首次 C8 实测用的地址 40500 在模拟器范围内，没有测到坏位号路径，已改用 41500 重测。
+
+未完成：
+- A4：Go 默认数据目录仍是 `apps/gateway/data`。
+- A5：模板残留文件。
+- A6 剩余：TDengine 仍默认 `root:taosdata`（compose、启动脚本、main.go 默认值）；主用网关 admin 口令需在现场更换。
+- B8 剩余：脚本子进程内存上限。
+- 主用网关 18080 仍运行 a893f69，未包含本组修复。

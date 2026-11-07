@@ -217,7 +217,7 @@ func (d *finsDriver) ensureConnectedLocked(ctx context.Context) error {
 	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < timeout {
 		timeout = time.Until(deadline)
 	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(d.channel.Host, strconv.Itoa(d.channel.Port)), timeout)
+	conn, err := dialCaptured(d.channel.ID, "tcp", net.JoinHostPort(d.channel.Host, strconv.Itoa(d.channel.Port)), timeout)
 	if err != nil {
 		return fmt.Errorf("FINS connect %s:%d: %w", d.channel.Host, d.channel.Port, err)
 	}

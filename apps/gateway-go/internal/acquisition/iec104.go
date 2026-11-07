@@ -134,7 +134,7 @@ func (d *iec104Driver) loop(ctx context.Context) {
 			return
 		}
 		address := net.JoinHostPort(d.channel.Host, strconv.Itoa(d.channel.Port))
-		conn, err := net.DialTimeout("tcp", address, 3*time.Second)
+		conn, err := dialCaptured(d.channel.ID, "tcp", address, 3*time.Second)
 		if err != nil {
 			d.setStatus(ChannelStatus{ID: d.channel.ID, State: "offline", Detail: "IEC104 connect " + address + ": " + err.Error()})
 			select {

@@ -222,7 +222,7 @@ func (d *modbusDriver) ensureConnectedLocked(ctx context.Context) error {
 			timeout = remaining
 		}
 	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(d.channel.Host, strconv.Itoa(d.channel.Port)), timeout)
+	conn, err := dialCaptured(d.channel.ID, "tcp", net.JoinHostPort(d.channel.Host, strconv.Itoa(d.channel.Port)), timeout)
 	if err != nil {
 		return fmt.Errorf("Modbus TCP connect %s:%d: %w", d.channel.Host, d.channel.Port, err)
 	}

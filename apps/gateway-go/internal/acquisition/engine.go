@@ -28,6 +28,8 @@ type Engine struct {
 	latencySamples     uint64
 	lastLatencyMs      int64
 	previousStates     map[string]string
+	stats              map[string]*channelStats
+	tagChannel         map[string]string
 }
 
 // RuntimeMetrics is the low-cardinality acquisition health snapshot exposed by
@@ -58,6 +60,7 @@ func NewEngine(channels []Channel, tags []Tag, factory DriverFactory) *Engine {
 		snapshots:      make(map[string]Sample),
 		previousStates: make(map[string]string),
 		factory:        factory,
+		tagChannel:     buildTagChannel(tags),
 	}
 }
 
@@ -121,6 +124,7 @@ func (e *Engine) Reload(ctx context.Context, channels []Channel, tags []Tag) err
 	}
 	e.channels = append([]Channel(nil), channels...)
 	e.tags = append([]Tag(nil), tags...)
+	e.tagChannel = buildTagChannel(tags)
 	e.drivers = make(map[string]Driver)
 	e.statuses = make(map[string]ChannelStatus)
 	e.snapshots = make(map[string]Sample)
@@ -267,6 +271,7 @@ func (e *Engine) publish(sample Sample) {
 	e.mu.Lock()
 	e.samplesTotal++
 	e.snapshots[sample.TagID] = sample
+	e.recordSampleLocked(sample.TagID, sample.ReceivedAt)
 	callback := e.onSample
 	e.mu.Unlock()
 	if callback != nil {
@@ -284,11 +289,13 @@ func (e *Engine) setStatus(status ChannelStatus) {
 	if status.State == "online" && previous == "offline" {
 		e.recoveries++
 	}
-	if latency, ok := statusLatency(status.Detail); ok {
+	latency, hasLatency := statusLatency(status.Detail)
+	if hasLatency {
 		e.latencyTotalMs += uint64(latency)
 		e.latencySamples++
 		e.lastLatencyMs = latency
 	}
+	e.recordStatusLocked(status, previous, latency, hasLatency)
 	e.previousStates[status.ID] = status.State
 	e.statuses[status.ID] = status
 	callback := e.onStatus

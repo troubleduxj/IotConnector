@@ -225,6 +225,9 @@ func (s *Server) openAPIDoc(w http.ResponseWriter, r *http.Request) {
 			"summary":    pattern,
 			"security":   security,
 			"x-min-role": role,
+			"responses": map[string]any{
+				"default": map[string]any{"description": "错误", "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"$ref": "#/components/schemas/Error"}}}},
+			},
 		}
 	}
 
@@ -234,11 +237,25 @@ func (s *Server) openAPIDoc(w http.ResponseWriter, r *http.Request) {
 		"info": map[string]any{
 			"title":   "FactoryBridge Edge Gateway REST API",
 			"version": version.Version,
+			// F5：/api/v1/... 与 /api/... 等价；错误响应统一为 components.schemas.Error。
+			"description": "所有路径也可加版本前缀访问：/api/v1/... 与 /api/... 等价，响应头 API-Version: 1。错误响应统一为 {ok:false, error, code}。",
 		},
 		"paths": paths,
 		"components": map[string]any{
 			"securitySchemes": map[string]any{
 				"bearerAuth": map[string]any{"type": "http", "scheme": "bearer"},
+			},
+			"schemas": map[string]any{
+				"Error": map[string]any{
+					"type":     "object",
+					"required": []string{"ok", "error", "code"},
+					"properties": map[string]any{
+						"ok":    map[string]any{"type": "boolean", "enum": []bool{false}},
+						"error": map[string]any{"type": "string", "description": "可读消息"},
+						"code":  map[string]any{"type": "string", "description": "机器可读代码，如 bad_request、unauthorized、forbidden、not_found、conflict、internal"},
+					},
+					"additionalProperties": true,
+				},
 			},
 		},
 	})

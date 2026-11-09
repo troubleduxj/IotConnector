@@ -355,7 +355,7 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, "GET /api/system/openapi.json", operatorOnly, s.openAPIDoc)
 	s.route(mux, "POST /api/scheduler/rebalance", engineerOnly, s.rebalanceScheduler)
 	s.route(mux, "GET /ws", public, s.websocketHandler)
-	return s.withClientAllowlist(withWeb(s.withCORS(mux), s.web))
+	return withAPIVersion(withErrorEnvelope(s.withClientAllowlist(withWeb(s.withCORS(mux), s.web))))
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {

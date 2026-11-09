@@ -3,7 +3,7 @@
  * 认证：令牌存 localStorage，全部请求自动附带 Authorization；401 触发全局登出事件。
  */
 
-import type { AlarmEvent, NotificationConfig } from '@iotconnector/shared';
+import type { AlarmEvent, NotificationConfig } from './shared';
 export type { AlarmEvent };
 
 const TOKEN_KEY = 'fb_token';

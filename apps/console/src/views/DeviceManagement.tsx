@@ -3,7 +3,7 @@ import {
   Plus, Save, Download, Upload, Network, Trash2, CheckCircle2, X, Edit2, Search,
   AlertTriangle, HelpCircle, Play, Radio, Loader2, Eye, ArrowLeft, ChevronLeft, ChevronRight,
 } from 'lucide-react';
-import { PROTOCOL_CONFIGS, getParamSchema, validateAddress, type Protocol } from '@iotconnector/shared';
+import { PROTOCOL_CONFIGS, getParamSchema, validateAddress, type Protocol } from '../shared';
 import {
   createChannel, createTag, deleteChannel, deleteTag, exportChannelConfig, fetchConfig, importChannelConfig, testChannelConnection,
   getChannelDriver, updateChannel, updateChannelDriver, updateTag, type ChannelDriver, type ChannelTestResult, type GatewayChannel, type GatewayTag,

@@ -1,7 +1,7 @@
 import net from 'node:net';
 import {
   U, TYPE, COT, splitFrames, decodeFrame, encodeIFrame, encodeSFrame, encodeAsdu, ioa, mSp, mMeNc, cIc,
-} from '../src/engine/drivers/iec104-codec';
+} from './iec104-codec';
 
 /**
  * IEC 60870-5-104 站端模拟器（配电自动化 RTU 风格）：

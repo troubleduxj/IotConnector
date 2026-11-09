@@ -6,7 +6,7 @@ import type {
   ServerMessage,
   StorageStatus,
   TagValueUpdate,
-} from '@iotconnector/shared';
+} from '../shared';
 import { fetchWsTicket, gatewayUrl, getToken } from '../api';
 
 /**

@@ -8,7 +8,7 @@
  * 模拟器控制：
  *   - ProtoForge（D:\Projects\sim-foundry-main）：POST /api/v1/protocols/{name}/stop|start，
  *     start 时按网关通道配置的端口启动，所以 ProtoForge 不需要事先配好端口。
- *   - IEC 60870-5-104：ProtoForge 没有该协议，仍用 apps/gateway/scripts/iec104-sim.ts（按 PID 停止、重新拉起）。
+ *   - IEC 60870-5-104：ProtoForge 没有该协议，仍用 tools/sim/iec104-sim.ts（按 PID 停止、重新拉起）。
  *
  * 环境变量（凭据不再写死在脚本里）：
  *   GATEWAY_URL        默认 http://127.0.0.1:18080
@@ -44,7 +44,7 @@ const PROTOFORGE_NAMES = {
   'BACnet/IP': 'bacnet',
   'MQTT / Sparkplug B': 'mqtt',
 };
-const LOCAL_SIMULATORS = { 'IEC 60870-5-104': { script: 'apps/gateway/scripts/iec104-sim.ts', portEnv: 'IEC104_SIM_PORT' } };
+const LOCAL_SIMULATORS = { 'IEC 60870-5-104': { script: 'tools/sim/iec104-sim.ts', portEnv: 'IEC104_SIM_PORT' } };
 
 const protocols = (process.env.PROTOCOLS ?? Object.keys(PROTOFORGE_NAMES).join(','))
   .split(',').map((value) => value.trim()).filter(Boolean);
@@ -118,7 +118,7 @@ async function simStart(protocol, port) {
   }
   const local = LOCAL_SIMULATORS[protocol];
   if (!local) throw new Error(`no simulator for ${protocol}`);
-  const tsx = resolve(root, 'apps/gateway/node_modules/.bin/tsx.cmd');
+  const tsx = resolve(root, 'tools/sim/node_modules/.bin/tsx.cmd');
   const child = spawn(tsx, [local.script], { cwd: root, env: { ...process.env, [local.portEnv]: String(port) }, detached: true, stdio: 'ignore', windowsHide: true, shell: true });
   child.unref();
 }

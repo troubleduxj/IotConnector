@@ -1,9 +1,9 @@
 # Factory Bridge 部署指南
 
 > 自 2026-11-07（阶段 4）起，主用运行时为 Go 网关单一可执行文件 `factorybridge`。
-> Node 网关（`apps/gateway`）已冻结，仅作历史参考，不作为部署方式。本目录下 `systemd/factory-bridge-gateway.service`
-> 与 `windows/`（WinSW）是 Node 网关的服务文件，同样冻结，不再更新。Linux 请使用 `factorybridge service install`，
-> 不要使用 `systemd/factory-bridge-gateway.service`。
+> Node 网关（`apps/gateway`）已冻结，仅作历史参考，不作为部署方式。本目录下 `windows/`（WinSW）是 Node 网关的服务文件，
+> 同样冻结；`systemd/factory-bridge-gateway.service` 是 `factorybridge service install` 在 Linux 上生成内容的参考副本。
+> 两个平台都请直接使用 `factorybridge service install`。
 
 本文说明如何安装、配置、升级和维护 Go 网关。环境变量的完整列表见仓库根目录的 `.env.example`，本文不重复。
 安全验收项见 `docs/SECURITY_ACCEPTANCE.md`，现场交付前逐项核对。
@@ -327,7 +327,7 @@ factorybridge service start
 
 联调与故障矩阵使用 ProtoForge（`D:\Projects\sim-foundry-main`，或镜像 `suoten/protoforge`），覆盖
 Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、OPC UA、SNMP、BACnet、MQTT。ProtoForge 没有 IEC 60870-5-104，
-该协议仍用 `apps/gateway/scripts/iec104-sim.ts`。
+该协议仍用 `tools/sim/iec104-sim.ts`。
 
 故障矩阵：`node scripts/fault-matrix.mjs`，所需环境变量见脚本头注释。
 

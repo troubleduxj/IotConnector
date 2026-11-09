@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Bell, Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Save, Send, Trash2, X,
 } from 'lucide-react';
-import { DEFAULT_NOTIFY_TEMPLATE, NOTIFY_TEMPLATE_VARIABLES, type NotificationConfig } from '@iotconnector/shared';
+import { DEFAULT_NOTIFY_TEMPLATE, NOTIFY_TEMPLATE_VARIABLES, type NotificationConfig } from '../shared';
 import {
   ackAlarm, createAlarm, deleteAlarm, fetchAlarmHistory, fetchAlarms, fetchGatewayTags,
   fetchNotifications, saveNotifications, testNotificationChannel, updateAlarm,

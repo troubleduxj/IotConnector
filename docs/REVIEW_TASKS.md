@@ -81,7 +81,7 @@
 | ID | 问题 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|
 | E1 | 本机无 gcc，`go test -race` 从未运行 | CI（Linux）加 `-race` | P0 | S |
-| E2 | 部分完成（cmd 57%、api 51%，见 2026-11-09 记录）。Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
+| E2 | 部分完成（cmd 57%、api 62%，全量路由×角色矩阵 4defa80）。Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
 | E3 | ✅ 已完成（阶段 1–3 随附：esc_test、outbox 重启/导入测试、concurrency_test）。无 `esc`/SQL、outbox 崩溃恢复、并发改配置测试 | 针对 C1/C2/C4 补测试 | P1 | S |
 | E4 | e2e 仅 87 行，依赖本机已启动服务且绑定 Edge，进不了 CI | e2e 自带启动（Go + 模拟器 + 静态控制台），CI 用 Chromium | P2 | M |
 
@@ -341,7 +341,7 @@ A4、A5 随后完成：
 - F5：`/api/v1/...` 与 `/api/...` 指向同一组处理函数（在鉴权、白名单、CORS 之前改写路径，权限一致），响应头 `API-Version: 1`。所有 `/api` 错误响应统一为 `{"ok":false,"error":"…","code":"…"}`：原有 `error` 文字不变（控制台照旧读取），按状态码补 `code`，原有额外字段保留；ServeMux 的纯文本 404/405 改写为 JSON。OpenAPI 文档增加 `Error` 结构。隔离网关实测：错误登录、无令牌、未知路径、405、参数错误、跨站来源都返回统一格式，成功响应不变，控制台页面正常。
 - H7（子任务 Haiku 编写，主会话核查）：`deploy/README.md` 扩展为完整部署手册；新增 `docs/SECURITY_ACCEPTANCE.md` 安全验收清单。核查了文中所有 API 路径、命令行参数和环境变量均存在于代码；改正 3 处：明文 HTTP 访问 HTTPS 端口实测返回 400；会话默认 8 小时；脚本自动禁用的表现。
 - 配置备份口令（核查时发现，随后修复）：见下节。
-- 待办：`deploy/systemd/factory-bridge-gateway.service` 仍是 Node 网关的单元文件，应删除或改为 `factorybridge service install` 生成的内容。
+- `deploy/systemd/factory-bridge-gateway.service` 已改为 `factorybridge service install` 生成内容的参考副本（2026-11-09）。
 
 ## 配置备份不再导出口令（2026-11-09）
 

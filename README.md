@@ -172,7 +172,7 @@
 
 ## 🚀 快速启动 (Getting Started)
 
-> Phase 0 起项目为 pnpm monorepo：`apps/console`（Web 控制台）+ `apps/gateway`（网关运行时）+ `packages/shared`（共享模型与协议 schema）。产品需求见 `docs/PRD.md`，UI 标准见 `docs/UI_DESIGN_GUIDELINES.md`。
+> 项目为 pnpm monorepo：`apps/console`（Web 控制台）+ `apps/gateway-go`（Go 网关）+ `tools/sim`（Modbus、IEC104 模拟器）。Node 网关与 `packages/shared` 已于 2026-11-09 删除（D0-5），最后版本见 tag `node-final`。
 
 1. **安装依赖**：
    ```bash
@@ -185,7 +185,7 @@
    ```
 
 3. **（可选）启动协议模拟器**：S7 / Modbus / OPC UA / MELSEC / FINS / EtherNet-IP 六协议模拟器，
-   让各通道经真实 TCP 采集到数据（各模拟器启动脚本见 `apps/gateway/package.json`）：
+   让各通道经真实 TCP 采集到数据（Modbus、IEC104 模拟器见 `tools/sim`，其余协议用 ProtoForge）：
    ```bash
    pnpm --filter @iotconnector/gateway s7-sim
    pnpm dev:modbus-sim

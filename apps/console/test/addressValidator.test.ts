@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addressHint, validateAddress } from '../src/addressValidator';
+import { addressHint, validateAddress } from '../src/shared/addressValidator';
 
 describe('validateAddress', () => {
   it('Modbus TCP 接受五位数字寄存器地址', () => {

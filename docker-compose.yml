@@ -37,13 +37,13 @@ services:
 
   iec104-sim:
     image: node:22-alpine
-    working_dir: /workspace/apps/gateway
+    working_dir: /workspace/tools/sim
     volumes:
       - .:/workspace
       - node_modules_root:/workspace/node_modules
-      - node_modules_gw:/workspace/apps/gateway/node_modules
+      - node_modules_sim:/workspace/tools/sim/node_modules
     network_mode: "service:gateway"
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile --filter @iotconnector/gateway... && IEC104_SIM_PORT=12404 pnpm iec104-sim"
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile --filter @iotconnector/sim... && IEC104_SIM_PORT=12404 pnpm iec104-sim"
 
   gateway:
     build:
@@ -72,4 +72,4 @@ volumes:
   gateway-data:
   protoforge-data:
   node_modules_root:
-  node_modules_gw:
+  node_modules_sim:

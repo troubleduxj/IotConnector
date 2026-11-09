@@ -13,8 +13,7 @@
     "e2e": "playwright test",
     "ci:local": "node scripts/ci-local.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
-    "release": "node scripts/release.mjs",
-    "dev:node-gateway": "pnpm --filter @iotconnector/gateway dev"
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

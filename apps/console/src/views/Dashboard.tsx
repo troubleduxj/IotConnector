@@ -15,7 +15,7 @@ import {
   ackAlarm, fetchAlarms, fetchConfig, fetchHistory, fetchScheduler,
   type AlarmsResponse, type GatewayChannel, type GatewayTag, type SchedulerStats,
 } from '../api';
-import { PROTOCOL_CONFIGS, type Protocol } from '@iotconnector/shared';
+import { PROTOCOL_CONFIGS, type Protocol } from '../shared';
 import { useRuntime } from '../store/runtime';
 import { useI18n } from '../i18n';
 import { alarmKindSymbol } from '../components/alarmKind';

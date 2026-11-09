@@ -91,3 +91,22 @@ func TestRunRejectsLargeRequest(t *testing.T) {
 		t.Fatalf("expected request limit error, got %v", err)
 	}
 }
+
+// B8：脚本持续分配内存时被中断，且不执行写值。
+func TestRunInterruptsOnMemoryLimit(t *testing.T) {
+	code := `Write("a", 1); var keep = []; for (;;) { keep.push(new Array(1000).fill("xxxxxxxxxxxxxxxx" + keep.length)); }`
+	response := runRequest(t, Request{Code: code, Tags: map[string]string{"a": "tag-a"}})
+	if response.OK || response.Error != memoryLimitMessage {
+		t.Fatalf("expected memory limit error, got %+v", response)
+	}
+	if len(response.Writes) != 0 {
+		t.Fatalf("writes from an over-limit script must be dropped: %+v", response.Writes)
+	}
+}
+
+func TestRunNormalScriptUnaffectedByMemoryWatch(t *testing.T) {
+	response := runRequest(t, Request{Code: `var a = []; for (var i = 0; i < 10000; i++) a.push(i); Write("a", a.length)`, Tags: map[string]string{"a": "tag-a"}})
+	if !response.OK || len(response.Writes) != 1 {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}

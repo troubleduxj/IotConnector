@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -346,7 +347,10 @@ func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]
 	duration := time.Now()
 	var response scriptworker.Response
 	if decodeErr := json.Unmarshal(output, &response); decodeErr != nil {
-		if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && strings.Contains(string(exitErr.Stderr), "script memory limit exceeded") {
+			response.Error = "script memory limit exceeded"
+		} else if err != nil {
 			response.Error = err.Error()
 		} else {
 			response.Error = decodeErr.Error()

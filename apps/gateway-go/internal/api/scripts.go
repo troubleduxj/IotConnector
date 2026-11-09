@@ -357,6 +357,10 @@ func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]
 		}
 		response.OK = false
 	}
+	// 只有脚本成功时才执行写值（双重保护：即使子进程返回了写值也不执行）。
+	if !response.OK {
+		response.Writes = nil
+	}
 	for _, write := range response.Writes {
 		if writeErr := e.server.engine.Write(context.Background(), write.TagID, decodeAnyValue(write.Value)); writeErr != nil {
 			response.Outputs = append(response.Outputs, "Write failed: "+writeErr.Error())

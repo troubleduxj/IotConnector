@@ -169,10 +169,12 @@ func Run() error {
 	timer.Stop()
 	response := Response{OK: runErr == nil, Outputs: outputs, Writes: writes, DurationMs: time.Since(start).Milliseconds()}
 	if runErr != nil {
+		// 脚本中途失败（异常、超时、内存超限）时，之前登记的写值一律丢弃：
+		// 只执行了一半的逻辑不应把部分结果写进 PLC。与 inline 模式行为一致。
 		response.Error = runErr.Error()
+		response.Writes = nil
 		if overLimit.Load() {
 			response.Error = memoryLimitMessage
-			response.Writes = nil // 超限中断的脚本不执行写值
 		}
 	}
 	return json.NewEncoder(os.Stdout).Encode(response)

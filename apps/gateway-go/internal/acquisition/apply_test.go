@@ -37,8 +37,8 @@ func (d countingDriver) Stop(context.Context) error {
 	return nil
 }
 func (countingDriver) Read(context.Context, []Tag) ([]Sample, error) { return nil, nil }
-func (countingDriver) Test(context.Context, []Tag) error              { return nil }
-func (countingDriver) Write(context.Context, Tag, Value) error        { return nil }
+func (countingDriver) Test(context.Context, []Tag) error             { return nil }
+func (countingDriver) Write(context.Context, Tag, Value) error       { return nil }
 
 func countingEngine(t *testing.T, channels []Channel, tags []Tag) (*Engine, *driverCounts) {
 	t.Helper()

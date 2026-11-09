@@ -116,3 +116,21 @@ func TestRunNormalScriptUnaffectedByMemoryWatch(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 }
+
+// 脚本抛异常或超时，之前登记的写值都不执行。
+func TestRunDropsWritesOnFailure(t *testing.T) {
+	tags := map[string]string{"a": "tag-a"}
+	for name, code := range map[string]string{
+		"throw":   `Write("a", 1); throw new Error("boom")`,
+		"timeout": `Write("a", 1); for (;;) {}`,
+		"badread": `Write("a", 1); Read("missing")`,
+	} {
+		response := runRequest(t, Request{Code: code, Tags: tags})
+		if response.OK || response.Error == "" {
+			t.Fatalf("%s: expected failure, got %+v", name, response)
+		}
+		if len(response.Writes) != 0 {
+			t.Fatalf("%s: writes from a failed script must be dropped: %+v", name, response.Writes)
+		}
+	}
+}

@@ -58,8 +58,8 @@
 | D0-1 | ✅ 已完成（阶段 4，d815b8f）。打冻结标签（如 `node-final`），之后 `apps/gateway` 只读 | P1 | S |
 | D0-2 | ✅ 已完成（阶段 4，d815b8f）。`scripts/start-node-rollback.ps1`、`switch-console-gateway.ps1` 标记废弃；回滚改为"回退到上一个 Go 版本" | P1 | S |
 | D0-3 | ✅ 已完成（阶段 4，d815b8f）。根 `package.json` 的 `dev`/`dev:gateway`、compose 的 `gateway` 服务改指 Go；模拟器脚本迁出 `apps/gateway`（e2e 和故障矩阵依赖它们） | P1 | M |
-| D0-4 | `packages/shared` 的类型改为由 Go API 契约生成，或改为前端私有 | P2 | M |
-| D0-5 | 确认 Go 补齐 Node 独有功能（用户管理、会话管理、审计查询、通道导入导出、备份恢复、恢复出厂）后，删除 `apps/gateway` 及其 vitest 测试 | P2 | L |
+| D0-4 | ✅ 已完成（2026-11-09，并入控制台 `apps/console/src/shared`）。`packages/shared` 的类型改为由 Go API 契约生成，或改为前端私有 | P2 | M |
+| D0-5 | ✅ 已完成（2026-11-09，tag `node-final` 保留最后版本）。确认 Go 补齐 Node 独有功能（用户管理、会话管理、审计查询、通道导入导出、备份恢复、恢复出厂）后，删除 `apps/gateway` 及其 vitest 测试 | P2 | L |
 
 以下为 Node 已知问题，仅供参考，不修复：
 
@@ -348,3 +348,11 @@ A4、A5 随后完成：
 - `GET /api/system/config-backup` 默认把口令类字段置空并加 `<字段>Set` 标记（与各配置页"只写不读"一致），响应带 `secretsOmitted: true`。需要完整迁移时显式加 `?includeSecrets=1`，审计日志记录该参数。
 - `POST /api/system/config-restore`：文件里为空的口令沿用本机当前值（通道、位号按 ID 对应）；本机也没有、但备份标记原本已设置的，列在响应 `secretsMissing` 中，控制台恢复后提示需重新填写。`<字段>Set` 标记不写入配置。
 - 测试 5 个新用例（默认不泄露、显式包含、同机恢复保留口令、新网关列出缺失项、完整备份以文件为准）。隔离网关实测：北向口令写入后，默认备份不含该口令，完整备份含；用默认备份恢复后口令仍在，`passwordSet` 未写入 config.json。
+
+## D0-4、D0-5：删除 Node 网关（2026-11-09，分支 chore/remove-node-gateway）
+
+- D0-4：`packages/shared`（协议元数据、参数表、地址校验、类型）只剩控制台使用，并入 `apps/console/src/shared`，测试移到 `apps/console/test`。不改为由 Go 契约生成：Go 侧没有这些元数据，代价大于收益。
+- D0-5：删除 `apps/gateway`（64 个受控文件）与 `packages/shared`。最后版本见 tag `node-final`（eacc6b0）。磁盘上未受控的 `apps/gateway/data`（72 MB，A4 之前的数据目录、首次启动复制的来源）未删除。
+- 保留的模拟器：Modbus TCP 与 IEC104 迁到 `tools/sim`（包名 `@iotconnector/sim`，IEC104 编解码一并迁入）。其余协议用 ProtoForge。compose 的 iec104-sim 服务、`scripts/fault-matrix.mjs` 与部署手册已改路径。
+- 删除只服务 Node 的脚本：`start-node-rollback.ps1`、`restart-gateways.ps1`、`start-go-gateway.ps1`、`compare-gateways.ps1`、`fault-matrix.ps1`、`protocol-write-probe.ps1`、`start-all.sh`，以及根 `package.json` 的 `dev:node-gateway` 和 Node 网关专用的开发依赖。
+- 验证：门禁通过（typecheck、vitest、go vet、go test、go build）；`tools/sim` 类型检查通过，两个模拟器实际启动监听；控制台构建成功。

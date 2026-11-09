@@ -62,7 +62,7 @@
 * **IEC 60870-5-104 (2404)**：电力远动/配电自动化，零依赖手写协议栈（iec104-codec：APCI I/S/U 帧 +
   ASDU M_SP_NA/M_ME_NC/C_IC_NA 编解码）；驱动 TCP → STARTDT 激活 → 周期总召唤（cot=6）→ 按 IOA 匹配
   位号（Bool→单点遥信、数值→浮点遥测）→ publish，S 帧确认；位号地址 = IOA:n；内置站端模拟器
-  `pnpm --filter @iotconnector/gateway iec104-sim`（遥测 IOA 1-4 动态 + 遥信 IOA 1001-1004 周期翻转）。
+  `pnpm --filter @iotconnector/sim iec104-sim`（遥测 IOA 1-4 动态 + 遥信 IOA 1001-1004 周期翻转）。
 * **SNMP v1/v2c (161)**：UPS / PDU / 环境传感器 / 网络设备 / 能耗表轮询，位号地址为点分 OID，
   OctetString 自动转数值/字符串；内置 net-snmp Agent 模拟器（`pnpm --filter @iotconnector/gateway snmp-sim`）。
 * **MQTT 南向采集 (1883)**：订阅型驱动——位号地址 = 订阅主题，支持「主题#字段路径」语法
@@ -179,17 +179,16 @@
    pnpm install
    ```
 
-2. **一键启动（网关 8080 + 控制台 3000）**：
+2. **启动 Go 网关（开发模式）与控制台**：
    ```bash
-   pnpm dev
+   pnpm dev:gateway   # Go 网关，http://127.0.0.1:18080，开发模式只监听回环地址
+   pnpm dev           # 控制台，http://localhost:3000
    ```
 
-3. **（可选）启动协议模拟器**：S7 / Modbus / OPC UA / MELSEC / FINS / EtherNet-IP 六协议模拟器，
-   让各通道经真实 TCP 采集到数据（Modbus、IEC104 模拟器见 `tools/sim`，其余协议用 ProtoForge）：
+3. **（可选）启动协议模拟器**：Modbus TCP 与 IEC104 用 `tools/sim`，其余协议用 ProtoForge（见 `deploy/README.md` 的"模拟器"一节）：
    ```bash
-   pnpm --filter @iotconnector/gateway s7-sim
-   pnpm dev:modbus-sim
-   pnpm --filter @iotconnector/gateway opcua-sim
+   pnpm --filter @iotconnector/sim modbus-sim   # 默认 127.0.0.1:15020，MODBUS_SIM_PORT 可改
+   pnpm --filter @iotconnector/sim iec104-sim   # 默认 :2404，IEC104_SIM_PORT 可改
    ```
 
 4. **访问控制台**：

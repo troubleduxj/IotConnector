@@ -150,6 +150,16 @@ CREATE TABLE kv (
     value TEXT NOT NULL
 );
 `},
+	// G6：采集配置整份存库，每次保存一个版本；config.json 只是镜像。
+	{3, "config versions", `
+CREATE TABLE config_versions (
+    version    INTEGER PRIMARY KEY AUTOINCREMENT,
+    saved_at   INTEGER NOT NULL,
+    actor      TEXT NOT NULL DEFAULT '',
+    sha256     TEXT NOT NULL,
+    body       TEXT NOT NULL
+);
+`},
 }
 
 func (db *DB) migrate(ctx context.Context) error {

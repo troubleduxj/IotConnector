@@ -134,11 +134,11 @@ func TestConfigRestoreUsesSecretsFromFullBackup(t *testing.T) {
 	}
 }
 
-func newOpsServer(t *testing.T, cfg config.Config) (*Server, config.Store) {
+func newOpsServer(t *testing.T, cfg config.Config) (*Server, *config.Store) {
 	t.Helper()
 	store := config.NewStore(t.TempDir())
 	if err := store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
-	return systemOpsServer(t, cfg, &store), store
+	return systemOpsServer(t, cfg, &store), &store
 }

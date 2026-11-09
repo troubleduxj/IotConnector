@@ -90,7 +90,7 @@ factorybridge user disable|enable|unlock|delete --name <用户名> --data-dir <�
 
 | 文件 | 内容 |
 | --- | --- |
-| `gateway.db`、`gateway.db-wal`、`gateway.db-shm` | SQLite 状态库：用户、会话、历史、告警、审计、待发送队列、北向队列、影子数据 |
+| `gateway.db`、`gateway.db-wal`、`gateway.db-shm` | SQLite 状态库：采集配置（按版本保存）、用户、会话、历史、告警、审计、待发送队列、北向队列、影子数据 |
 | `config.json` | 通道、位号、通知、北向等配置 |
 | `tls/selfsigned.crt`、`tls/selfsigned.key` | 自动生成的自签名证书（仅在未提供证书时生成） |
 | `outbox.json`、`alarm-outbox.json` | TDengine 写入队列（仅在设置 `FB_TDENGINE_URL` 时使用） |
@@ -230,6 +230,15 @@ Docker Compose 演示栈（`docker-compose.yml`）中，`FB_TDENGINE_PASSWORD` �
 - 不带 `--dry-run` 执行 `migrate` 会立即导入旧文件。建议先停止网关再执行。
 
 ## 备份与恢复
+
+采集配置（通道、位号、告警、脚本、北向、通知等）以 `gateway.db` 中按版本保存的内容为准，`config.json` 是每次保存时同步写出的镜像。停机时手工修改 `config.json`，下次启动会导入为新版本并在日志中提示。查看与导出历史版本：
+
+```
+factorybridge config list --data-dir <数据目录>
+factorybridge config export --data-dir <数据目录> --version <N> --out <文件>
+```
+
+导出的文件可以直接当 `config.json` 用，也可以经控制台"恢复配置"导入，实现回退。
 
 ### 备份内容
 

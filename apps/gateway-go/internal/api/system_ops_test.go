@@ -133,7 +133,7 @@ func TestConfigRestoreRoundTripPersistsToStore(t *testing.T) {
 		t.Fatalf("target channels=%d want %d", got, len(sourceServer.cfg().Channels))
 	}
 
-	reloaded, err := config.NewStore(dir).Load()
+	reloaded, err := func() (config.Config, error) { st := config.NewStore(dir); return st.Load() }()
 	if err != nil {
 		t.Fatalf("reload store: %v", err)
 	}

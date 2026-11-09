@@ -913,7 +913,8 @@ func (s *Server) commitConfigLocked(update func(*config.Config)) (*config.Config
 	}
 	update(&next)
 	if s.configStore != nil {
-		if err := s.configStore.Save(next); err != nil {
+		// 修改者记为 "api"；具体操作者已在审计日志中（G6 的版本只记来源）。
+		if err := s.configStore.SaveAs(next, "api"); err != nil {
 			return s.cfg(), err
 		}
 	}

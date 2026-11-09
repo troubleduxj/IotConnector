@@ -1,13 +1,14 @@
 package config
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/factorybridge/iotconnector/gateway-go/internal/db"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/domain"
 )
 
@@ -26,21 +27,54 @@ type Config struct {
 type Store struct {
 	Dir  string
 	Path string
+	// db 非空时以 gateway.db 中的版本为准，config.json 为镜像（G6）。
+	db           *db.DB
+	keepVersions int
+	importedEdit bool
 }
 
+// NewStore 只读写 config.json（测试、离线工具，以及未打开状态库的场景）。
 func NewStore(dir string) Store {
 	return Store{Dir: dir, Path: filepath.Join(dir, "config.json")}
 }
 
-func (s Store) Load() (Config, error) {
+// NewStoreDB 以 gateway.db 为准保存配置版本，config.json 每次同步写出（G6）。
+func NewStoreDB(dir string, database *db.DB) *Store {
+	return &Store{Dir: dir, Path: filepath.Join(dir, "config.json"), db: database, keepVersions: DefaultKeepVersions}
+}
+
+func (s *Store) Load() (Config, error) {
+	if s.dbEnabled() {
+		return s.loadDB()
+	}
+	cfg, ok, err := s.loadFile()
+	if err != nil {
+		return Config{}, err
+	}
+	if !ok {
+		return Config{SchemaVersion: CurrentSchemaVersion, Raw: map[string]any{}}, nil
+	}
+	return cfg, nil
+}
+
+// loadFile 读取 config.json；文件不存在时 ok=false、err=nil。
+func (s *Store) loadFile() (Config, bool, error) {
 	b, err := os.ReadFile(s.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Config{SchemaVersion: CurrentSchemaVersion, Raw: map[string]any{}}, nil
+			return Config{}, false, nil
 		}
-		return Config{}, fmt.Errorf("read config: %w", err)
+		return Config{}, false, fmt.Errorf("read config: %w", err)
 	}
+	cfg, err := parse(b)
+	if err != nil {
+		return Config{}, true, err
+	}
+	return cfg, true, nil
+}
 
+// parse 解析配置 JSON 并执行 schema 迁移；未知字段保留在 Raw。
+func parse(b []byte) (Config, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
@@ -63,16 +97,28 @@ func (s Store) Load() (Config, error) {
 	return cfg, nil
 }
 
-func (s Store) Save(cfg Config) error {
-	if cfg.Raw == nil {
-		cfg.Raw = map[string]any{}
+// Save 保存配置：启用数据库时先写入新版本，再更新 config.json 镜像。
+func (s *Store) Save(cfg Config) error { return s.SaveAs(cfg, "") }
+
+// SaveAs 与 Save 相同，并记录修改者（用户名或来源，如 "api"、"restore"）。
+func (s *Store) SaveAs(cfg Config, actor string) error {
+	if s.dbEnabled() {
+		body, err := encodeBody(cfg)
+		if err != nil {
+			return err
+		}
+		if err := s.insertVersion(context.Background(), body, actor); err != nil {
+			return err
+		}
 	}
-	cfg.Raw["schemaVersion"] = CurrentSchemaVersion
-	cfg.Raw["channels"] = cfg.Channels
-	cfg.Raw["tags"] = cfg.Tags
-	b, err := json.MarshalIndent(cfg.Raw, "", "  ")
+	return s.writeFile(cfg)
+}
+
+// writeFile 原子写出 config.json。
+func (s *Store) writeFile(cfg Config) error {
+	b, err := encodeBody(cfg)
 	if err != nil {
-		return fmt.Errorf("encode config: %w", err)
+		return err
 	}
 	if err := os.MkdirAll(s.Dir, 0o750); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
@@ -90,7 +136,7 @@ func (s Store) Save(cfg Config) error {
 		_ = tmp.Close()
 		return fmt.Errorf("set config permissions: %w", err)
 	}
-	if _, err := tmp.Write(bytes.TrimSpace(b)); err != nil {
+	if _, err := tmp.Write(b); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write config temp file: %w", err)
 	}

@@ -39,24 +39,28 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 	dataDir := opts.dataDir
 	port := opts.port
 
-	store := config.NewStore(dataDir)
-	cfg, err := store.Load()
-	if err != nil {
-		logger.Error("load config", "error", err)
-		return exitConfig
-	}
-	engine := acquisition.NewEngine(toAcquisitionChannels(cfg), toAcquisitionTags(cfg), acquisition.NewFactory())
-	if err := engine.Start(ctx); err != nil {
-		logger.Error("start acquisition engine", "error", err)
-		return exitError
-	}
-	// 状态库最先打开：outbox、历史、告警、审计、用户都依赖它（G1–G4）。
+	// 状态库最先打开：配置版本、outbox、历史、告警、审计、用户都依赖它（G1–G4、G6）。
 	users, database, err := openUserStore(ctx, dataDir, os.Stdout)
 	if err != nil {
 		logger.Error("open state database", "error", err)
 		return exitConfig
 	}
 	defer database.Close()
+	// 采集配置以 gateway.db 中的最新版本为准，config.json 是镜像（G6）。
+	store := config.NewStoreDB(dataDir, database)
+	cfg, err := store.Load()
+	if err != nil {
+		logger.Error("load config", "error", err)
+		return exitConfig
+	}
+	if store.ImportedEditedFile() {
+		logger.Warn("config.json differs from the latest stored version (edited while stopped?); imported it as a new version", "file", store.Path)
+	}
+	engine := acquisition.NewEngine(toAcquisitionChannels(cfg), toAcquisitionTags(cfg), acquisition.NewFactory())
+	if err := engine.Start(ctx); err != nil {
+		logger.Error("start acquisition engine", "error", err)
+		return exitError
+	}
 	stateBatch := db.NewBatch(database)
 	// 批量写入有独立的生命周期：收到退出信号后，等 HTTP 与采集都停下（不再产生写入），
 	// 再停止它，让最后一次提交包含关停期间的写入；之后才关库（defer database.Close）。
@@ -132,7 +136,7 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 			State:          stateBatch,
 			HistoryFile:    filepath.Join(dataDir, "history.jsonl"),
 			Audit:          auditLogger,
-			ConfigStore:    &store,
+			ConfigStore:    store,
 			Storage:        storageWriter,
 			ShadowFile:     filepath.Join(dataDir, "shadow.json"),
 			CORSOrigins:    splitCSV(setting("corsOrigins", "")),

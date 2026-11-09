@@ -393,8 +393,8 @@ A4、A5 随后完成：
 - **H8 Linux 服务**（更正：上一版记录写"已实测"是错的，当时测试容器没起来，脚本没跑过）。现已在带 systemd 的 Debian 容器里实际执行 `service install/start/status/stop/uninstall`，结果见下方"H8 实测结果"。
 - **H8 实测结果**（带 systemd 的 Debian bookworm 容器，linux/amd64 发布包）：`service install` 生成单元文件（`User=factorybridge`，`ReadWritePaths` 为数据目录），自动创建 `factorybridge` 系统账号，数据目录属主 `factorybridge`、权限 750；`service start` 后健康检查正常，`systemctl` 显示 active，`User=factorybridge`、`ProtectSystem=strict`、`NoNewPrivileges=yes`；`kill -9` 主进程后 systemd 自动拉起新进程；`service stop` 后 inactive；`service uninstall` 删除单元文件，数据目录（`config.json`、`gateway.db`）与账号保留。
 - **H8 Windows 实测**（用户在管理员 PowerShell 中执行，测试实例 `fb-svctest`、端口 18280，不影响主用网关）：`service install` 注册成功，运行账号为虚拟账号 `NT SERVICEb-svctest`；`start` 后状态运行中并写出 `gateway.db`；`status` 显示 PID、命令行与账号；`stop` 后已停止；`uninstall` 后 `sc query` 返回 1060（服务不存在），数据目录保留。未测：崩溃后自动重启（代码已设置 10/30/60 秒三次重启，未在 SCM 上触发验证）。
-- **发现（已修复，待管理员复验）**：Windows 数据目录 ACL 继承了上级目录的权限。实测 `icacls` 显示除服务账号外，`Authenticated Users` 有修改权限、`Users` 有读权限，即本机任何登录用户都能读写 `gateway.db` 和 `config.json`（含明文口令）。安装程序只追加了服务账号的授权，没有断开继承。安全清单中"只有管理员和服务账号可访问"的期望与实际不符。
+- **发现（已修复并复验）**：Windows 数据目录 ACL 继承了上级目录的权限。实测 `icacls` 显示除服务账号外，`Authenticated Users` 有修改权限、`Users` 有读权限，即本机任何登录用户都能读写 `gateway.db` 和 `config.json`（含明文口令）。安装程序只追加了服务账号的授权，没有断开继承。安全清单中"只有管理员和服务账号可访问"的期望与实际不符。
   - 修复（`cmd/factorybridge/acl_windows.go`）：安装时分两步执行 icacls：先在目录本身断开继承、只显式授予 SYSTEM 与 Administrators（完全控制）和服务账号（修改）；再对已有子项 `/reset`，改为继承收紧后的目录权限。用 SID 指定内置组，不受系统语言影响。
   - 分两步是实测得出的：一次调用里同时 `/inheritance:r` 与 `/T` 会把已有文件的 ACL 清空，连服务账号也打不开 `gateway.db`。
-  - 新增 Windows 测试（无需管理员）：在临时目录上验证目录不再继承、已有文件与子目录文件只剩三条且仍可读、新建文件只继承三条、空目录不报错。需要管理员在真实服务上复验一次。
+  - 新增 Windows 测试（无需管理员）：在临时目录上验证目录不再继承、已有文件与子目录文件只剩三条且仍可读、新建文件只继承三条、空目录不报错。管理员复验（真实服务 `fb-svctest`，6853086）：数据目录与 `gateway.db` 均只有 `NT SERVICEb-svctest`、`BUILTIN\Administrators`、`NT AUTHORITY\SYSTEM` 三条，目录条目不带 `(I)`；以本机普通账号（未提权）列目录、读 `gateway.db`、写入新文件均被拒绝；卸载后 `sc query` 返回 1060，数据目录保留。
 - 仍未做：E4 e2e 进 CI（需要 CI 环境）。

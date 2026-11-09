@@ -44,7 +44,7 @@ type scriptStat struct {
 const maxScriptCodeBytes = 64 * 1024
 
 type scriptEngine struct {
-	server  *Server
+	host    runtimeHost
 	mu      sync.Mutex
 	outputs map[string][]string
 	stats   map[string]scriptStat
@@ -52,8 +52,8 @@ type scriptEngine struct {
 	last    map[string]any
 }
 
-func newScriptEngine(server *Server) *scriptEngine {
-	return &scriptEngine{server: server, outputs: map[string][]string{}, stats: map[string]scriptStat{}, timers: map[string]chan struct{}{}, last: map[string]any{}}
+func newScriptEngine(host runtimeHost) *scriptEngine {
+	return &scriptEngine{host: host, outputs: map[string][]string{}, stats: map[string]scriptStat{}, timers: map[string]chan struct{}{}, last: map[string]any{}}
 }
 
 func (e *scriptEngine) configure() {
@@ -123,7 +123,7 @@ func (e *scriptEngine) onSample(sample acquisition.Sample) {
 }
 
 func (e *scriptEngine) scripts() []gatewayScript {
-	items, ok := e.server.cfg().Raw["scripts"].([]any)
+	items, ok := e.host.cfg().Raw["scripts"].([]any)
 	if !ok {
 		return []gatewayScript{}
 	}
@@ -141,7 +141,7 @@ func (e *scriptEngine) save(items []gatewayScript) error {
 	if err = json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
-	return e.server.commitRawLocked("scripts", raw)
+	return e.host.commitRawLocked("scripts", raw)
 }
 
 func (e *scriptEngine) list() []map[string]any {
@@ -200,9 +200,9 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 	runtime := goja.New()
 	start := time.Now()
 	lookup := func(key string) (any, error) {
-		for _, tag := range e.server.cfg().Tags {
+		for _, tag := range e.host.cfg().Tags {
 			if tag.ID == key || tag.Name == key {
-				if sample, ok := e.server.engine.SnapshotByID(tag.ID); ok {
+				if sample, ok := e.host.acquisition().SnapshotByID(tag.ID); ok {
 					return wireValue(sample.Value), nil
 				}
 				return nil, fmt.Errorf("Read: tag has no value")
@@ -218,7 +218,7 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 		return value
 	})
 	runtime.Set("Write", func(key string, value any) {
-		for _, tag := range e.server.cfg().Tags {
+		for _, tag := range e.host.cfg().Tags {
 			if tag.ID == key || tag.Name == key {
 				writes = append(writes, struct {
 					tagID string
@@ -254,7 +254,7 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 	timer.Stop()
 	if execErr == nil {
 		for _, write := range writes {
-			if err := e.server.engine.Write(context.Background(), write.tagID, write.value); err != nil {
+			if err := e.host.acquisition().Write(context.Background(), write.tagID, write.value); err != nil {
 				outputs = append(outputs, "Write failed: "+err.Error())
 			}
 		}
@@ -288,9 +288,9 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 				items[i].Enabled = false
 			}
 		}
-		e.server.configMu.Lock()
+		e.host.lockConfig()
 		_ = e.save(items)
-		e.server.configMu.Unlock()
+		e.host.unlockConfig()
 	}
 	result := map[string]any{"ok": execErr == nil, "outputs": e.getOutput(id), "durationMs": duration}
 	if execErr != nil {
@@ -325,9 +325,9 @@ func scriptWorkerEnv() []string {
 func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]any, error) {
 	values := map[string]any{}
 	tags := map[string]string{}
-	for _, tag := range e.server.cfg().Tags {
+	for _, tag := range e.host.cfg().Tags {
 		tags[tag.ID], tags[tag.Name] = tag.ID, tag.ID
-		if sample, ok := e.server.engine.SnapshotByID(tag.ID); ok {
+		if sample, ok := e.host.acquisition().SnapshotByID(tag.ID); ok {
 			values[tag.ID], values[tag.Name] = wireValue(sample.Value), wireValue(sample.Value)
 		}
 	}
@@ -363,7 +363,7 @@ func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]
 		response.Writes = nil
 	}
 	for _, write := range response.Writes {
-		if writeErr := e.server.engine.Write(context.Background(), write.TagID, decodeAnyValue(write.Value)); writeErr != nil {
+		if writeErr := e.host.acquisition().Write(context.Background(), write.TagID, decodeAnyValue(write.Value)); writeErr != nil {
 			response.Outputs = append(response.Outputs, "Write failed: "+writeErr.Error())
 		}
 	}
@@ -398,9 +398,9 @@ func (e *scriptEngine) runIsolated(id string, script gatewayScript) (map[string]
 				items[i].Enabled = false
 			}
 		}
-		e.server.configMu.Lock()
+		e.host.lockConfig()
 		_ = e.save(items)
-		e.server.configMu.Unlock()
+		e.host.unlockConfig()
 		e.configure()
 	}
 	result := map[string]any{"ok": response.OK, "outputs": e.getOutput(id), "durationMs": response.DurationMs}

@@ -233,6 +233,15 @@ func decodeAnyValue(value any) acquisition.Value {
 		return acquisition.StringValue(v)
 	case float64:
 		return acquisition.NumberValue(v)
+	// inline 脚本（goja）把整数交给 Go 时是 int64，不经 JSON；原先落到 default 被当成字符串写入。
+	case int64:
+		return acquisition.NumberValue(float64(v))
+	case int:
+		return acquisition.NumberValue(float64(v))
+	case int32:
+		return acquisition.NumberValue(float64(v))
+	case float32:
+		return acquisition.NumberValue(float64(v))
 	default:
 		return acquisition.StringValue(fmt.Sprint(v))
 	}

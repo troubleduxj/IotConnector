@@ -155,7 +155,7 @@ func stringValue(value any) string {
 }
 
 type storageTaskEngine struct {
-	server   *Server
+	host     runtimeHost
 	mu       sync.Mutex
 	timers   map[string]*time.Ticker
 	stop     chan struct{}
@@ -164,8 +164,8 @@ type storageTaskEngine struct {
 	edge     map[string]bool
 }
 
-func newStorageTaskEngine(server *Server) *storageTaskEngine {
-	engine := &storageTaskEngine{server: server, timers: make(map[string]*time.Ticker), stop: make(chan struct{}), statsMap: make(map[string]map[string]any), last: make(map[string]float64), edge: make(map[string]bool)}
+func newStorageTaskEngine(host runtimeHost) *storageTaskEngine {
+	engine := &storageTaskEngine{host: host, timers: make(map[string]*time.Ticker), stop: make(chan struct{}), statsMap: make(map[string]map[string]any), last: make(map[string]float64), edge: make(map[string]bool)}
 	engine.sync()
 	return engine
 }
@@ -176,13 +176,13 @@ func (e *storageTaskEngine) sync() {
 		timer.Stop()
 	}
 	e.timers = make(map[string]*time.Ticker)
-	tasks := e.server.storageTasksSnapshot()
+	tasks := e.host.storageTasksSnapshot()
 	for _, task := range tasks {
 		if !boolValue(task["enabled"], true) || stringValue(task["id"]) == "" {
 			continue
 		}
 		trigger, _ := task["trigger"].(map[string]any)
-		if stringValue(trigger["mode"]) != "cycle" || e.server.storage == nil || !e.server.storage.Enabled() {
+		if stringValue(trigger["mode"]) != "cycle" || e.host.storageWriter() == nil || !e.host.storageWriter().Enabled() {
 			continue
 		}
 		interval := intValue(trigger["intervalMs"], 1000)
@@ -212,7 +212,7 @@ func (e *storageTaskEngine) onSample(sample acquisition.Sample) {
 	if !ok {
 		return
 	}
-	for _, task := range e.server.storageTasksSnapshot() {
+	for _, task := range e.host.storageTasksSnapshot() {
 		if !boolValue(task["enabled"], true) {
 			continue
 		}
@@ -238,7 +238,7 @@ func (e *storageTaskEngine) onBoolSample(sample acquisition.Sample) {
 	if sample.Value.Bool == nil {
 		return
 	}
-	for _, task := range e.server.storageTasksSnapshot() {
+	for _, task := range e.host.storageTasksSnapshot() {
 		trigger, _ := task["trigger"].(map[string]any)
 		if !boolValue(task["enabled"], true) || stringValue(trigger["mode"]) != "edge" || stringValue(trigger["tagId"]) != sample.TagID {
 			continue
@@ -254,7 +254,7 @@ func (e *storageTaskEngine) onBoolSample(sample acquisition.Sample) {
 }
 
 func (e *storageTaskEngine) writeSnapshot(task map[string]any) {
-	if e.server.storage == nil || !e.server.storage.Enabled() {
+	if e.host.storageWriter() == nil || !e.host.storageWriter().Enabled() {
 		return
 	}
 	mappings, _ := task["mappings"].([]any)
@@ -271,7 +271,7 @@ func (e *storageTaskEngine) writeSnapshot(task map[string]any) {
 			continue
 		}
 		columns = append(columns, "`"+column+"`")
-		value := e.server.engine.SnapshotValue(tagID)
+		value := e.host.acquisition().SnapshotValue(tagID)
 		values = append(values, sqlValue(value))
 	}
 	if len(columns) == 1 {
@@ -283,11 +283,11 @@ func (e *storageTaskEngine) writeSnapshot(task map[string]any) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := e.server.storage.Execute(ctx, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (ts TIMESTAMP, %s)", sanitizeSQLName(e.server.storageDB()), table, strings.Join(columns[1:], " DOUBLE, ")+" DOUBLE")); err != nil {
+	if err := e.host.storageWriter().Execute(ctx, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (ts TIMESTAMP, %s)", sanitizeSQLName(e.host.storageDB()), table, strings.Join(columns[1:], " DOUBLE, ")+" DOUBLE")); err != nil {
 		e.record(stringValue(task["id"]), false, err)
 		return
 	}
-	if err := e.server.storage.Execute(ctx, fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", sanitizeSQLName(e.server.storageDB()), table, strings.Join(columns, ","), strings.Join(values, ","))); err != nil {
+	if err := e.host.storageWriter().Execute(ctx, fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", sanitizeSQLName(e.host.storageDB()), table, strings.Join(columns, ","), strings.Join(values, ","))); err != nil {
 		e.record(stringValue(task["id"]), false, err)
 		return
 	}
@@ -331,7 +331,7 @@ func (e *storageTaskEngine) stats() map[string]map[string]any {
 	for id, stat := range e.statsMap {
 		out[id] = cloneMap(stat)
 	}
-	for _, task := range e.server.storageTasksSnapshot() {
+	for _, task := range e.host.storageTasksSnapshot() {
 		id := stringValue(task["id"])
 		if _, ok := out[id]; !ok {
 			out[id] = map[string]any{"writes": 0, "errors": 0, "ratePerMin": 0}

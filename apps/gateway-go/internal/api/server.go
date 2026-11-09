@@ -66,6 +66,8 @@ type Server struct {
 	shadowMu            sync.Mutex
 	shadowTimer         *time.Timer
 	scriptEngine        *scriptEngine
+	// runtime 负责采集样本的分发（F6），HTTP 处理函数不再直接参与。
+	runtime *Runtime
 }
 
 type SecurityOptions struct {
@@ -170,36 +172,6 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	server.ws = newWSHub()
 	server.liveBatch = newSampleBatcher(server.ws)
 	server.wsTickets = newWSTicketStore()
-	engine.SetOnSample(func(sample acquisition.Sample) {
-		server.historyStore.add(sample)
-		if server.storage != nil {
-			for _, tag := range server.cfg().Tags {
-				if tag.ID == sample.TagID {
-					server.storage.Enqueue(acquisition.Tag{ID: tag.ID, Name: tag.Name, ChannelID: tag.ChannelID, DataType: tag.DataType}, sample)
-					break
-				}
-			}
-		}
-		if server.taskEngine != nil {
-			server.taskEngine.onSample(sample)
-			server.taskEngine.onBoolSample(sample)
-		}
-		if server.northboundPublisher != nil {
-			server.northboundPublisher.PublishSample(sample)
-		}
-		if server.scriptEngine != nil {
-			server.scriptEngine.onSample(sample)
-		}
-		server.shadowStore.SetReported(sample.TagID, wireValue(sample.Value), string(sample.Quality), sample.SampledAt)
-		server.scheduleShadowPublish()
-		for _, tag := range server.cfg().Tags {
-			if tag.ID == sample.TagID {
-				server.alarms.evaluate(tag, sample)
-				break
-			}
-		}
-		server.liveBatch.add(sample) // 每 100ms 合并推送一次（C7）
-	})
 	server.alarms.onEvent = func(event alarmEvent) {
 		server.ws.broadcast(map[string]any{"type": "alarm", "event": event}, true)
 		server.dispatchNotification(event)
@@ -210,6 +182,8 @@ func NewServerWithOptions(cfg config.Config, engine *acquisition.Engine, options
 	server.taskEngine = newStorageTaskEngine(server)
 	server.scriptEngine = newScriptEngine(server)
 	server.scriptEngine.configure()
+	server.runtime = &Runtime{server: server}
+	engine.SetOnSample(server.runtime.onSample)
 	engine.SetOnStatus(func(status acquisition.ChannelStatus) {
 		server.ws.broadcast(map[string]any{"type": "channel-status", "status": status}, false)
 	})

@@ -123,7 +123,13 @@ export default function SystemConfiguration(_props: { dbType?: string, setDbType
       const bundle = JSON.parse(await file.text()) as { format?: string; config?: unknown };
       if (bundle.format !== 'factorybridge-config@1') { toast(t('sys.info.restoreBadFormat'), false); return; }
       const r = await restoreConfigBackup(bundle);
-      toast(t('sys.info.restoreDone', { n: r.counts?.channels ?? 0 }));
+      const missing = r.secretsMissing ?? [];
+      if (missing.length > 0) {
+        const list = missing.slice(0, 8).join(', ') + (missing.length > 8 ? ' …' : '');
+        toast(t('sys.info.restoreSecretsMissing', { n: r.counts?.channels ?? 0, m: missing.length, list }), false);
+      } else {
+        toast(t('sys.info.restoreDone', { n: r.counts?.channels ?? 0 }));
+      }
       fetchSystemInfo().then(setSysInfo).catch(() => {});
       void refreshUsers();
     } catch (e) {

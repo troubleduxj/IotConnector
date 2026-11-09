@@ -206,3 +206,33 @@ func TestWriterRecoversAfterTDengineWriteFailure(t *testing.T) {
 		t.Fatalf("unexpected recovery status: %#v", recovered)
 	}
 }
+
+// 全新时序库（数据库不存在）：首次 Flush 时自动建库建表并转为 online，不需要人工点"创建数据库"；
+// 之后的 Flush 不再重复建库。
+func TestFlushInitializesFreshDatabaseOnce(t *testing.T) {
+	var creates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "CREATE DATABASE") {
+			creates.Add(1)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+	}))
+	defer server.Close()
+	writer := New(Config{URL: server.URL, User: "root", Password: "p", Database: "factory_bridge", SuperTable: "st_factory_equipment"})
+	if writer.Status().State != "offline" {
+		t.Fatalf("initial state = %q", writer.Status().State)
+	}
+	for i := 0; i < 3; i++ {
+		if err := writer.Flush(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if writer.Status().State != "online" {
+		t.Fatalf("state after flush = %q, want online", writer.Status().State)
+	}
+	if n := creates.Load(); n != 1 {
+		t.Fatalf("CREATE DATABASE sent %d times, want 1", n)
+	}
+}

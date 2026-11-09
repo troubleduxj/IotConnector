@@ -92,6 +92,9 @@ type Writer struct {
 	nextAlarm  int64
 	status     Status
 	client     *http.Client
+	// schemaReady 表示本进程已成功建过库表。全新部署时库不存在，原先只有队列非空、
+	// 或在控制台点"创建数据库"才会建库，空网关一直显示 offline（2026-11-09 compose 实启发现）。
+	schemaReady bool
 }
 
 // Keep recovery writes below TDengine/taosAdapter SQL size limits. The queue
@@ -255,10 +258,23 @@ func (w *Writer) Flush(ctx context.Context) error {
 		return nil
 	}
 	w.mu.Lock()
-	if len(w.queue) == 0 && len(w.alarmQueue) == 0 {
+	ready := w.schemaReady
+	empty := len(w.queue) == 0 && len(w.alarmQueue) == 0
+	w.mu.Unlock()
+	if !ready {
+		if err := w.ensureSchema(ctx); err != nil {
+			w.setError(err)
+			return err
+		}
+		w.mu.Lock()
+		w.schemaReady = true
+		w.status.State, w.status.Error = "online", ""
 		w.mu.Unlock()
+	}
+	if empty {
 		return nil
 	}
+	w.mu.Lock()
 	batchSize := len(w.queue)
 	if batchSize > maxInsertPoints {
 		batchSize = maxInsertPoints
@@ -271,10 +287,6 @@ func (w *Writer) Flush(ctx context.Context) error {
 			w.setError(err)
 			return err
 		}
-	}
-	if err := w.ensureSchema(ctx); err != nil {
-		w.setError(err)
-		return err
 	}
 	parts := make([]string, 0, len(batch))
 	for _, p := range batch {
@@ -374,6 +386,8 @@ func (w *Writer) queryResponse(ctx context.Context, sql string) ([]byte, error) 
 
 func (w *Writer) setError(err error) {
 	w.mu.Lock()
+	// 出错后下次重新确认库表存在（库可能被删除或重建）。
+	w.schemaReady = false
 	w.status.State = "offline"
 	w.status.Error = err.Error()
 	w.mu.Unlock()

@@ -6,6 +6,10 @@ FROM gcr.io/distroless/static-debian12:nonroot
 ARG PKG
 COPY ${PKG}/factorybridge /opt/factorybridge/factorybridge
 COPY ${PKG}/web /opt/factorybridge/web
+# /data 必须事先以 nonroot（65532）属主存在于镜像里：新建的命名卷会继承镜像中该目录的属主与权限。
+# 否则卷由 root 拥有，网关以 nonroot 运行时无法创建 gateway.db（2026-11-09 compose 实启时发现）。
+# distroless 没有 shell，不能 RUN mkdir；用 COPY --chown 带一个空目录进来。
+COPY --chown=65532:65532 deploy/docker/data/ /data/
 VOLUME ["/data"]
 EXPOSE 18080
 USER nonroot:nonroot

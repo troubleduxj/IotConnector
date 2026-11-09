@@ -1,0 +1,1 @@
+# 占位：让 Dockerfile 以 nonroot 属主创建 /data（见 Dockerfile）。

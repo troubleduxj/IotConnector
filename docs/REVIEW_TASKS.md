@@ -80,7 +80,7 @@
 
 | ID | 问题 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|
-| E1 | 本机无 gcc，`go test -race` 从未运行 | CI（Linux）加 `-race` | P0 | S |
+| E1 | ✅ 已完成（2026-11-09，Docker Linux 容器）。本机无 gcc，`go test -race` 从未运行 | CI（Linux）加 `-race` | P0 | S |
 | E2 | 部分完成（cmd 57%、api 62%，全量路由×角色矩阵 4defa80）。Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
 | E3 | ✅ 已完成（阶段 1–3 随附：esc_test、outbox 重启/导入测试、concurrency_test）。无 `esc`/SQL、outbox 崩溃恢复、并发改配置测试 | 针对 C1/C2/C4 补测试 | P1 | S |
 | E4 | e2e 仅 87 行，依赖本机已启动服务且绑定 Edge，进不了 CI | e2e 自带启动（Go + 模拟器 + 静态控制台），CI 用 Chromium | P2 | M |
@@ -142,7 +142,7 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 | H5 | ✅ 已完成（阶段 2，8ac541c）。运行模式：见下方规则 | H4 | P0 | M |
 | H6 | ✅ 已完成（阶段 4，26603e5）。发布：`build` 脚本交叉编译 `windows/amd64`、`linux/amd64`、`linux/arm64`（`CGO_ENABLED=0`，依赖 G1 选纯 Go 的 SQLite）；产出 zip/tar.gz，内含二进制、`web/`、`config.example.yaml`、文档、sha256；`version` 注入提交号 | H1、F1 | P1 | S |
 | H7 | ✅ 已完成（a206729）。文档：部署手册、快速部署步骤、安全验收说明（参考 koike `docs/`），Windows 和 Linux 各一节 | H1–H6 | P2 | M |
-| H8 | CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |
+| H8 | ✅ Linux 部分完成（systemd 容器实测）；Windows SCM 仍需管理员权限。CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |
 
 ### H5 运行模式规则
 
@@ -381,3 +381,11 @@ A4、A5 随后完成：
 - 新命令 `factorybridge config list` 与 `config export [--version N] [--out 文件]`，导出的文件可直接当 `config.json` 用，或经控制台"恢复配置"导入。
 - 测试：config 包 5 个、cmd 1 个新用例。隔离网关实测（主用网关数据的副本）：首次启动导入为版本 1；经 API 改通道得到版本 2，镜像同步；停机手改 `config.json` 后重启，日志提示并导入为版本 3；导出版本 1 内容为原值。
 - 未改：API 层的版本只记来源 `api`，具体操作者仍以审计日志为准；暂无"回退到某版本"的接口，回退方式是导出该版本再经"恢复配置"导入。
+
+## 用 Docker 补齐的验证（2026-11-09）
+
+- **E1 `go test -race`**：在 `golang:1.26-bookworm` 容器里对全部包运行。发现一处真实数据竞争：脚本内存看门狗读的上限变量被测试改写（`internal/scriptworker`），已改为原子变量。另有内存上限用例在 -race 下先触发 1 秒超时，测试中把时限放宽到 20 秒。修复后全部包通过，0 处数据竞争。
+- **北向 MQTT**：原 broker 容器 `iotconnector-mqtt-18840` 因挂载的 `mosquitto.conf` 不存在无法启动，改用新容器 `fb-mqtt-18840`（127.0.0.1:18840）。主用网关 2 秒内自动连上，补发了离线期间排队的 30 条消息；手动 REBIRTH 后收到 NBIRTH、10 个 DBIRTH 和影子消息。
+- **Compose 实启**：用 linux/amd64 发布包构建网关镜像，与 TDengine、ProtoForge、IEC104 模拟器一起启动（测试时端口改为 18180/8100/16141/16160，避免与主用网关冲突）。4 个服务均运行，网关经 HTTPS 提供 API 与控制台，`user create` 可用，时序库连通并建库。修复：IEC104 模拟器服务原用 `pnpm install` 安装整个工作区，在容器里失败，改为 `npx tsx` 直接运行。
+- **H8 Linux 服务**：在带 systemd 的 Debian 容器里执行 `service install/start/status/stop/uninstall`。单元文件、`factorybridge` 系统账号、数据目录属主均正确；服务以非 root 运行；`kill -9` 后 5 秒内自动重启；卸载后单元文件删除、数据目录保留。
+- 仍未做：Windows 服务（需管理员权限）；E4 e2e 进 CI（需要 CI 环境）。

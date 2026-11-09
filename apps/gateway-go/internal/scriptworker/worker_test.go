@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runRequest(t *testing.T, request Request) Response {
@@ -97,9 +98,16 @@ func TestRunRejectsLargeRequest(t *testing.T) {
 // B8：脚本持续分配内存时被中断，且不执行写值。
 func TestRunInterruptsOnMemoryLimit(t *testing.T) {
 	// 调低软上限：64 MB 在负载高的机器上 1 秒内可能分配不到，会先触发超时。
-	oldSoft := maxHeapBytes
-	maxHeapBytes = heapBytes() + 16<<20
-	t.Cleanup(func() { maxHeapBytes = oldSoft; debug.SetMemoryLimit(math.MaxInt64) })
+	oldSoft := maxHeapBytes.Load()
+	maxHeapBytes.Store(heapBytes() + 16<<20)
+	// 时限放宽到 20 秒：本用例检查内存上限，不该和超时赛跑（-race 下分配慢很多）。
+	oldTimeout := scriptTimeout.Load()
+	scriptTimeout.Store(int64(20 * time.Second))
+	t.Cleanup(func() {
+		maxHeapBytes.Store(oldSoft)
+		scriptTimeout.Store(oldTimeout)
+		debug.SetMemoryLimit(math.MaxInt64)
+	})
 	code := `Write("a", 1); var keep = []; for (;;) { keep.push(new Array(1000).fill("xxxxxxxxxxxxxxxx" + keep.length)); }`
 	response := runRequest(t, Request{Code: code, Tags: map[string]string{"a": "tag-a"}})
 	if response.OK || response.Error != memoryLimitMessage {

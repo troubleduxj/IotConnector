@@ -32,10 +32,17 @@ const memoryLimitMessage = "script memory limit exceeded"
 // 超过 maxHeapBytes 时中断脚本；中断要等到下一条 JS 指令才生效，
 // 单次巨大分配（如 'x'.repeat(1e9)）来不及中断，超过 hardHeapBytes 时直接退出子进程。
 // 用变量而非常量，测试可调低以免受机器速度影响。
-var (
-	maxHeapBytes  uint64 = 64 << 20
-	hardHeapBytes uint64 = 128 << 20
-)
+// 原子变量：看门狗协程读取，测试会调低（go test -race 发现普通变量在此处有数据竞争）。
+var maxHeapBytes, hardHeapBytes atomic.Uint64
+
+// scriptTimeout 是单次运行的时限（纳秒）。默认 1 秒；测试在 -race 下会调长，避免内存用例先超时。
+var scriptTimeout atomic.Int64
+
+func init() {
+	maxHeapBytes.Store(64 << 20)
+	hardHeapBytes.Store(128 << 20)
+	scriptTimeout.Store(int64(time.Second))
+}
 
 // heapBytes 返回当前堆上对象占用的字节数。
 func heapBytes() uint64 {
@@ -59,11 +66,11 @@ func watchHeap(interrupt func(), exceeded *atomic.Bool) func() {
 				return
 			case <-ticker.C:
 				used := heapBytes()
-				if used > hardHeapBytes {
+				if used > hardHeapBytes.Load() {
 					fmt.Fprintln(os.Stderr, memoryLimitMessage)
 					os.Exit(memoryExitCode)
 				}
-				if used > maxHeapBytes && !exceeded.Swap(true) {
+				if used > maxHeapBytes.Load() && !exceeded.Swap(true) {
 					interrupt()
 				}
 			}
@@ -106,7 +113,7 @@ func Run() error {
 		return fmt.Errorf("script code exceeds %d bytes", maxCodeBytes)
 	}
 	// 让 GC 在接近上限时更积极回收，减少误判。
-	debug.SetMemoryLimit(int64(maxHeapBytes))
+	debug.SetMemoryLimit(int64(maxHeapBytes.Load()))
 	start := time.Now()
 	runtime := goja.New()
 	outputs := []string{}
@@ -161,7 +168,7 @@ func Run() error {
 	}
 	runtime.Set("log", logFn)
 	runtime.Set("console", map[string]any{"log": logFn})
-	timer := time.AfterFunc(time.Second, func() { runtime.Interrupt("script timeout") })
+	timer := time.AfterFunc(time.Duration(scriptTimeout.Load()), func() { runtime.Interrupt("script timeout") })
 	var overLimit atomic.Bool
 	stopWatch := watchHeap(func() { runtime.Interrupt(memoryLimitMessage) }, &overLimit)
 	_, runErr := runtime.RunString(request.Code)

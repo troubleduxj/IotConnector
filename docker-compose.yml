@@ -40,10 +40,10 @@ services:
     working_dir: /workspace/tools/sim
     volumes:
       - .:/workspace
-      - node_modules_root:/workspace/node_modules
-      - node_modules_sim:/workspace/tools/sim/node_modules
     network_mode: "service:gateway"
-    command: sh -c "corepack enable && pnpm install --frozen-lockfile --filter @iotconnector/sim... && IEC104_SIM_PORT=12404 pnpm iec104-sim"
+    # 不经 pnpm 安装整个工作区（工作区含 Windows 专用依赖且会触发 corepack 交互）：
+    # 用 npx 临时取 tsx 直接运行模拟器，它只依赖 Node 内置模块。
+    command: sh -c "IEC104_SIM_PORT=12404 npx --yes tsx@4 iec104-sim.ts"
 
   gateway:
     build:
@@ -71,5 +71,3 @@ volumes:
   tdengine-data:
   gateway-data:
   protoforge-data:
-  node_modules_root:
-  node_modules_sim:

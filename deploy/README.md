@@ -128,7 +128,7 @@ cd D:\FactoryBridge\factorybridge-<版本>-windows-amd64
 - `service install` 需要管理员权限。服务名默认 `factorybridge`，用 `--name` 改名。
 - 服务的执行文件是安装时正在运行的 `factorybridge.exe` 的真实路径。请在最终安装位置执行 `service install`，
   移动可执行文件后需要卸载再重装。
-- 运行账号是虚拟账号 `NT SERVICE\<服务名>`，不是 LocalSystem。安装时会给该账号授予数据目录的修改权限（`icacls ... (OI)(CI)M`）。
+- 运行账号是虚拟账号 `NT SERVICE\<服务名>`，不是 LocalSystem。安装时断开数据目录从上级继承的权限，只保留 SYSTEM、Administrators（完全控制）与该服务账号（修改）；目录内已有和之后新建的文件都继承这三条。本机其他登录用户无法读取 `gateway.db`、`config.json` 和 TLS 私钥。
 - 启动类型为延迟自动启动。异常退出后 10 秒、30 秒、60 秒各重启一次。
 - `--` 之后是传给 `run` 的参数（`--host`、`--port`、`--allow-cidr`、`--tls-cert` 等）。这些参数在安装时固化，
   改参数需要 `service uninstall` 后重新 `install`。

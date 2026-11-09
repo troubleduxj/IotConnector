@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -117,11 +116,10 @@ func installWindowsService(opts serviceOptions, stdout io.Writer) error {
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 60 * time.Second},
 	}, 24*3600)
-	// 虚拟账号默认无权写数据目录；授予修改权限（含子目录与文件继承）
-	grant := exec.Command("icacls", opts.dataDir, "/grant", account+":(OI)(CI)M", "/T", "/Q")
-	if out, err := grant.CombinedOutput(); err != nil {
+	// 虚拟账号默认无权写数据目录；同时断开上级继承，只留 SYSTEM、Administrators 与服务账号（见 acl_windows.go）。
+	if err := restrictDataDir(opts.dataDir, account); err != nil {
 		_ = s.Delete()
-		return fmt.Errorf("为 %s 授予数据目录权限失败：%v\n%s", account, err, out)
+		return fmt.Errorf("设置数据目录权限失败：%w", err)
 	}
 	fmt.Fprintf(stdout, "已安装服务 %s，运行账号 %s\n命令：%s %v\n启动：factorybridge service start --name %s\n",
 		opts.name, account, opts.exe, serviceCommandLine(opts), opts.name)

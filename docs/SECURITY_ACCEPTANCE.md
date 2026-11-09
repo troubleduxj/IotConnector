@@ -138,7 +138,7 @@ Windows 上的命令用 PowerShell 执行。Linux 上的命令用 bash 执行。
 - [ ] 数据目录权限符合要求
   - 验证：
     - Linux：`ls -ld <数据目录>` 与 `ls -l <数据目录>`。
-    - Windows：`icacls <数据目录>`。
+    - Windows：`icacls <数据目录>` 与 `icacls <数据目录>\config.json`；期望只有 `NT AUTHORITY\SYSTEM`、`BUILTIN\Administrators` 和 `NT SERVICE\<服务名>` 三条，目录本身的条目不带 `(I)`（未继承上级），且没有 `Users`、`Authenticated Users`、`Everyone`。
   - 期望：Linux 上数据目录属主为服务账号 `factorybridge`，目录权限 `750`，`gateway.db` 与审计文件权限 `640`。Windows 上只有管理员、服务账号 `NT SERVICE\<服务名>` 和运维人员有权限，普通用户没有读取权限。
 
 ## 五、脚本沙箱

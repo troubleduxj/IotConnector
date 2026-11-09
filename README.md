@@ -58,13 +58,13 @@
 * **BACnet/IP (47808)**：楼宇自控 HVAC/冷机/照明/电力表，位号地址 = 对象类型:实例（AI:1/AV:3/BI:1/BV:2），
   读 PresentValue（readPropertyMultiple 批量轮询），AV/AO/BV 支持下发；驱动以 raw dgram 实现
   （bacstack beta 的发送端口=绑定端口，同机模拟器必然冲突）；内置模拟器
-  `pnpm --filter @iotconnector/gateway bacnet-sim`（复用 bacstack 编解码，含可写 AV/BV）。
+  ProtoForge 的 BACnet 模拟器（见 `deploy/README.md`）。
 * **IEC 60870-5-104 (2404)**：电力远动/配电自动化，零依赖手写协议栈（iec104-codec：APCI I/S/U 帧 +
   ASDU M_SP_NA/M_ME_NC/C_IC_NA 编解码）；驱动 TCP → STARTDT 激活 → 周期总召唤（cot=6）→ 按 IOA 匹配
   位号（Bool→单点遥信、数值→浮点遥测）→ publish，S 帧确认；位号地址 = IOA:n；内置站端模拟器
   `pnpm --filter @iotconnector/sim iec104-sim`（遥测 IOA 1-4 动态 + 遥信 IOA 1001-1004 周期翻转）。
 * **SNMP v1/v2c (161)**：UPS / PDU / 环境传感器 / 网络设备 / 能耗表轮询，位号地址为点分 OID，
-  OctetString 自动转数值/字符串；内置 net-snmp Agent 模拟器（`pnpm --filter @iotconnector/gateway snmp-sim`）。
+  OctetString 自动转数值/字符串；模拟用 ProtoForge 的 SNMP 模拟器。
 * **MQTT 南向采集 (1883)**：订阅型驱动——位号地址 = 订阅主题，支持「主题#字段路径」语法
   （如 `factory/line1/status#temp` 取 JSON 字段、`factory/line1/counter#` 取原始标量），
   多位号可共用主题各取字段；配套 aedes 完整 broker（`mqtt-dev-broker`）与发布模拟器（`mqtt-sim`）。
@@ -216,7 +216,7 @@ Linux systemd 单元见 `deploy/systemd/`，Windows WinSW 包装见 `deploy/wind
 docker run -d --name tdengine --restart unless-stopped -p 16030:6030 -p 16041:6041 tdengine/tdengine:3.3.6.13
 
 # 网关开启存储
-TDENGINE_URL=http://127.0.0.1:16041 pnpm --filter @iotconnector/gateway dev
+TDENGINE_URL=http://127.0.0.1:16041 TDENGINE_PASSWORD=<口令> pnpm dev:gateway
 ```
 
 - 写入管道：SQL 批量 `INSERT INTO db.tb_x USING <STable> TAGS(...) VALUES ...`，
@@ -243,7 +243,7 @@ OPN（打开安全通道）帧后会直接断开连接——node-opcua 客户端
 - Reliable Outbox：断线期间 DDATA 入持久队列（outbox.jsonl，上限 1 万条），
   broker 恢复后按序补传；报文内保留原始采样时间戳。
 - 状态/配置：`GET|PUT /api/northbound`、`POST /api/northbound/rebirth`；System Config 页有配置卡片。
-- 验证 broker：`pnpm --filter @iotconnector/gateway mqtt-broker`（最小 MQTT broker，打印收到的发布）。
+- 验证 broker：ProtoForge 的 MQTT 模拟器，或任意 MQTT broker（如 mosquitto）。
 
 ### S7 驱动选型说明
 

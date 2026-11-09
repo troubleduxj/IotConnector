@@ -80,42 +80,42 @@ Windows 上的命令用 PowerShell 执行。Linux 上的命令用 bash 执行。
   - 期望：没有 `listening on a non-loopback address without --allow-cidr` 警告。
 
 - [ ] CORS 来源只包含实际使用的控制台站点
-  - 验证：查看 `GATEWAY_GO_CORS_ORIGINS` 的值（环境变量设置位置见下文“三、运行配置”）。
+  - 验证：查看 `FB_CORS_ORIGINS` 的值（环境变量设置位置见下文“三、运行配置”）。
   - 期望：未设置，或只包含现场确实使用的控制台站点地址。不包含 `*`。
 
 ## 三、运行配置
 
 - [ ] 开发模式未开启
-  - 验证：查看服务启动参数。执行 `factorybridge run --help` 不能判断实际运行状态，所以检查启动参数和环境变量：`GATEWAY_GO_DEV`。
-  - 期望：启动参数中没有 `--dev` 或 `--dev-no-auth`，`GATEWAY_GO_DEV` 未设置或为 `false`。
+  - 验证：查看服务启动参数。执行 `factorybridge run --help` 不能判断实际运行状态，所以检查启动参数和环境变量：`FB_DEV`。
+  - 期望：启动参数中没有 `--dev` 或 `--dev-no-auth`，`FB_DEV` 未设置或为 `false`。
   - 说明：`--dev` 和 `--dev-no-auth` 只允许在回环地址运行，而且服务安装时就会被拒绝（`service install` 会报错）。这一项只需确认现场没有绕过的方式，例如前台运行的开发实例占用了同一端口。
 
 - [ ] 静态 API 令牌未设置，除非现场有明确的集成需要
   - 验证：
-    - Windows：`[Environment]::GetEnvironmentVariables('Machine').Keys | Where-Object { $_ -like 'GATEWAY_GO_*_TOKEN' -or $_ -eq 'GATEWAY_GO_API_TOKEN' }`，并检查用户级环境变量。
+    - Windows：`[Environment]::GetEnvironmentVariables('Machine').Keys | Where-Object { $_ -like 'GATEWAY_GO_*_TOKEN' -or $_ -eq 'FB_API_TOKEN' }`，并检查用户级环境变量。
     - Linux：`systemctl show factorybridge -p Environment`，并检查 `/etc/systemd/system/factorybridge.service.d/` 下的覆盖文件。
-  - 期望：`GATEWAY_GO_API_TOKEN`、`GATEWAY_GO_VIEWER_TOKEN`、`GATEWAY_GO_OPERATOR_TOKEN`、`GATEWAY_GO_ADMIN_TOKEN` 均未设置。
-  - 说明：静态令牌不会过期，且绕过用户账号和会话。`GATEWAY_GO_API_TOKEN` 的权限是 `operator`。如果确需设置，令牌长度足够长，只授予需要的最低角色，并记录用途和持有人。
+  - 期望：`FB_API_TOKEN`、`FB_VIEWER_TOKEN`、`FB_OPERATOR_TOKEN`、`FB_ADMIN_TOKEN` 均未设置。
+  - 说明：静态令牌不会过期，且绕过用户账号和会话。`FB_API_TOKEN` 的权限是 `operator`。如果确需设置，令牌长度足够长，只授予需要的最低角色，并记录用途和持有人。
 
 - [ ] 脚本内联执行开关未开启
-  - 验证：同上，检查服务环境中的 `GATEWAY_GO_SCRIPT_INLINE`。
+  - 验证：同上，检查服务环境中的 `FB_SCRIPT_INLINE`。
   - 期望：未设置。只有值为 `1` 时脚本才在网关进程内执行，绕过子进程隔离。
 
 - [ ] 会话有效期符合现场要求
-  - 验证：检查 `GATEWAY_GO_SESSION_TTL` 的值。
+  - 验证：检查 `FB_SESSION_TTL` 的值。
   - 期望：未设置（默认 8 小时，见 `internal/auth/users.go`）或设置为现场确认的时长。
 
 ## 四、数据库与口令
 
-- [ ] 设置了 TDengine 时，TDengine root 密码已修改，且 `TDENGINE_PASSWORD` 已设置
-  - 验证：检查服务环境中的 `TDENGINE_URL` 与 `TDENGINE_PASSWORD` 是否都设置。用旧的默认密码 `taosdata` 尝试连接 TDengine REST 接口（`curl -u root:taosdata http://<TDengine 地址>:6041/rest/sql -d "show databases"`），应失败。
+- [ ] 设置了 TDengine 时，TDengine root 密码已修改，且 `FB_TDENGINE_PASSWORD` 已设置
+  - 验证：检查服务环境中的 `FB_TDENGINE_URL` 与 `FB_TDENGINE_PASSWORD` 是否都设置。用旧的默认密码 `taosdata` 尝试连接 TDengine REST 接口（`curl -u root:taosdata http://<TDengine 地址>:6041/rest/sql -d "show databases"`），应失败。
   - 期望：
-    - 若设置了 `TDENGINE_URL`，则 `TDENGINE_PASSWORD` 也已设置。只设置 URL 时网关以退出码 `3` 退出。
+    - 若设置了 `FB_TDENGINE_URL`，则 `FB_TDENGINE_PASSWORD` 也已设置。只设置 URL 时网关以退出码 `3` 退出。
     - 旧默认密码无法登录 TDengine。
-  - 说明：`docker-compose.yml` 的默认值 `${TDENGINE_PASSWORD:-taosdata}` 只适用于演示栈。
+  - 说明：`docker-compose.yml` 的默认值 `${FB_TDENGINE_PASSWORD:-taosdata}` 只适用于演示栈。
 
-- [ ] 未设置 `TDENGINE_URL` 时，网关不尝试连接 TDengine
-  - 验证：检查服务环境中的 `TDENGINE_URL`。
+- [ ] 未设置 `FB_TDENGINE_URL` 时，网关不尝试连接 TDengine
+  - 验证：检查服务环境中的 `FB_TDENGINE_URL`。
   - 期望：未设置，或为现场确认的 TDengine 地址。
 
 - [ ] 北向 MQTT 密码在 GET 响应中不可见
@@ -148,7 +148,7 @@ Windows 上的命令用 PowerShell 执行。Linux 上的命令用 bash 执行。
   - 期望：脚本运行期间出现独立子进程，子进程的环境变量 `GATEWAY_GO_SCRIPT_WORKER=1`。依据：`internal/api/scripts.go` 中的 `runIsolated`。
 
 - [ ] 子进程只继承白名单内的环境变量
-  - 验证：查看 `internal/api/scripts.go` 中的 `scriptWorkerAllowedEnv`。在服务环境中设置一个无关的变量（例如 `TDENGINE_PASSWORD`），运行脚本，确认脚本无法读取它（可通过脚本输出验证）。
+  - 验证：查看 `internal/api/scripts.go` 中的 `scriptWorkerAllowedEnv`。在服务环境中设置一个无关的变量（例如 `FB_TDENGINE_PASSWORD`），运行脚本，确认脚本无法读取它（可通过脚本输出验证）。
   - 期望：子进程只有 `PATH`、`SYSTEMROOT`、`WINDIR`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`LANG`、`LC_ALL`、`TZ` 与 `GATEWAY_GO_SCRIPT_WORKER`。数据库密码、管理员令牌不会被传入。
 
 - [ ] 脚本执行超时为 1 秒

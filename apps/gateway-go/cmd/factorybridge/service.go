@@ -125,7 +125,7 @@ func validateRunArgs(args []string) error {
 	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	for _, name := range []string{"host", "web-dir", "log-level", "tls-cert", "tls-key", "allow-cidr"} {
+	for _, name := range []string{"host", "web-dir", "log-level", "tls-cert", "tls-key", "allow-cidr", "config"} {
 		fs.String(name, "", "")
 	}
 	fs.Int("port", 0, "")

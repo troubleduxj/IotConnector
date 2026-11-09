@@ -81,7 +81,7 @@ factorybridge user disable|enable|unlock|delete --name <用户名> --data-dir <�
 
 数据目录保存配置、状态库和证书。目录位置按以下规则确定：
 
-1. 指定 `--data-dir` 或环境变量 `GATEWAY_GO_DATA_DIR` 时，使用该目录。
+1. 指定 `--data-dir` 或环境变量 `FB_DATA_DIR` 时，使用该目录。
 2. 未指定时，从仓库内运行（当前目录有 `apps/gateway-go`，或在仓库根、`apps/gateway-go` 下有 `go.mod` 与 `cmd/factorybridge`）
    使用 `apps/gateway-go/data`，或仓库根下的 `data`。
 3. 其它位置（发布包）使用可执行文件旁的 `data/`。
@@ -93,14 +93,14 @@ factorybridge user disable|enable|unlock|delete --name <用户名> --data-dir <�
 | `gateway.db`、`gateway.db-wal`、`gateway.db-shm` | SQLite 状态库：用户、会话、历史、告警、审计、待发送队列、北向队列、影子数据 |
 | `config.json` | 通道、位号、通知、北向等配置 |
 | `tls/selfsigned.crt`、`tls/selfsigned.key` | 自动生成的自签名证书（仅在未提供证书时生成） |
-| `outbox.json`、`alarm-outbox.json` | TDengine 写入队列（仅在设置 `TDENGINE_URL` 时使用） |
+| `outbox.json`、`alarm-outbox.json` | TDengine 写入队列（仅在设置 `FB_TDENGINE_URL` 时使用） |
 | `northbound.json` | 北向相关状态的旧版文件，首次启动导入库后改名为 `*.migrated` |
 
 首次复制旧数据：未显式指定数据目录，且目标目录里还没有 `config.json` 与 `gateway.db` 时，网关会从旧的 Node 网关目录
 `apps/gateway/data` 复制状态（只复制，不移动，旧目录不改动）。这个规则只在仓库内运行时生效。发布包不会复制旧数据。
 要从旧版迁移，把旧目录的 `config.json`、`auth.json` 等文件手工放入新数据目录，网关会在启动时导入。
 
-显式指定 `--data-dir` 或 `GATEWAY_GO_DATA_DIR` 后，不做任何复制。
+显式指定 `--data-dir` 或 `FB_DATA_DIR` 后，不做任何复制。
 
 服务安装时必须给出绝对路径的数据目录，例如 `D:\FactoryBridge\data` 或 `/var/lib/factorybridge`。
 
@@ -182,7 +182,7 @@ factorybridge run --host 0.0.0.0 --allow-cidr 10.0.0.0/8,192.168.1.20
 
 ### 访问白名单
 
-`--allow-cidr` 接受逗号分隔的网段或单个地址，例如 `10.0.0.0/8,192.168.1.20`。环境变量 `GATEWAY_GO_ALLOW_CIDRS` 等效。
+`--allow-cidr` 接受逗号分隔的网段或单个地址，例如 `10.0.0.0/8,192.168.1.20`。环境变量 `FB_ALLOW_CIDRS` 等效。
 
 - 白名单按 TCP 对端地址判断，不信任 `X-Forwarded-For`。
 - 不在白名单内的来源会收到 HTTP 403，错误信息为 `client address not allowed`。
@@ -191,20 +191,20 @@ factorybridge run --host 0.0.0.0 --allow-cidr 10.0.0.0/8,192.168.1.20
 
 ### 控制台
 
-`web/` 与可执行文件同目录时，网关在同一端口提供控制台。也可用 `--web-dir` 指定目录，或设置 `GATEWAY_GO_WEB_DIR`。
+`web/` 与可执行文件同目录时，网关在同一端口提供控制台。也可用 `--web-dir` 指定目录，或设置 `FB_WEB_DIR`。
 
-如果控制台放在另一台 Web 服务器（Nginx、IIS）上，需要在 `GATEWAY_GO_CORS_ORIGINS` 中加入该站点的来源，逗号分隔。
+如果控制台放在另一台 Web 服务器（Nginx、IIS）上，需要在 `FB_CORS_ORIGINS` 中加入该站点的来源，逗号分隔。
 
 ## TDengine
 
 TDengine 是可选的历史存储。配置方式：
 
-- `TDENGINE_URL`：TDengine REST 地址，例如 `http://tdengine:6041`。设置后网关启用写入，并使用 `outbox.json` 做离线缓存。
-- `TDENGINE_PASSWORD`：必须与 `TDENGINE_URL` 同时设置。只设置 URL 不设置密码时，网关记录错误并以退出码 `3` 退出，不会回退到默认密码。
-- `TDENGINE_USER`（默认 `root`）、`TDENGINE_DB`、`TDENGINE_STABLE` 可选。
+- `FB_TDENGINE_URL`：TDengine REST 地址，例如 `http://tdengine:6041`。设置后网关启用写入，并使用 `outbox.json` 做离线缓存。
+- `FB_TDENGINE_PASSWORD`：必须与 `FB_TDENGINE_URL` 同时设置。只设置 URL 不设置密码时，网关记录错误并以退出码 `3` 退出，不会回退到默认密码。
+- `FB_TDENGINE_USER`（默认 `root`）、`FB_TDENGINE_DB`、`FB_TDENGINE_STABLE` 可选。
 
-Docker Compose 演示栈（`docker-compose.yml`）中，`TDENGINE_PASSWORD` 默认值为 `${TDENGINE_PASSWORD:-taosdata}`，
-即 TDengine 镜像的默认密码。这只适用于演示。生产环境必须修改 TDengine 的 root 密码，并显式设置 `TDENGINE_PASSWORD`。
+Docker Compose 演示栈（`docker-compose.yml`）中，`FB_TDENGINE_PASSWORD` 默认值为 `${FB_TDENGINE_PASSWORD:-taosdata}`，
+即 TDengine 镜像的默认密码。这只适用于演示。生产环境必须修改 TDengine 的 root 密码，并显式设置 `FB_TDENGINE_PASSWORD`。
 
 ## 北向 MQTT
 
@@ -293,11 +293,11 @@ factorybridge service start
 | `0` | 正常退出，或命令成功 |
 | `1` | 运行期错误，例如 HTTP 服务异常停止、状态库写入失败、服务管理器操作失败 |
 | `2` | 命令或参数错误，例如未知命令、未知参数、开发模式参数不合法、非回环地址上的开发模式 |
-| `3` | 配置或数据文件错误，例如 `config.json` 解析失败、状态库打开失败、TLS 证书加载失败、`TDENGINE_URL` 设置但缺少 `TDENGINE_PASSWORD` |
+| `3` | 配置或数据文件错误，例如 `config.json` 解析失败、状态库打开失败、TLS 证书加载失败、`FB_TDENGINE_URL` 设置但缺少 `FB_TDENGINE_PASSWORD` |
 
 ### 日志位置
 
-- 前台运行（`factorybridge run`）：日志输出到标准输出，格式为 `slog` 文本。级别由 `--log-level` 或 `GATEWAY_GO_LOG_LEVEL` 控制。
+- 前台运行（`factorybridge run`）：日志输出到标准输出，格式为 `slog` 文本。级别由 `--log-level` 或 `FB_LOG_LEVEL` 控制。
 - Linux 服务：标准输出由 systemd 收集，用 `journalctl -u factorybridge -f` 查看。
 - Windows 服务：服务进程的标准输出不会写入文件。网关不写 Windows 事件日志或日志文件（代码中没有相应实现）。
   需要持久日志时，要在服务外层做重定向或由现场规范补充，这一点当前版本没有内置方案。
@@ -310,11 +310,17 @@ factorybridge service start
   Windows 防火墙也要放行端口。
 - 浏览器提示证书不受信任：使用了自签名证书，换成企业 CA 证书，见「对外监听与 HTTPS」。
 - 请求返回 403 `client address not allowed`：客户端地址不在 `--allow-cidr` 中。
-- 退出码 `3` 且日志提到 `TDENGINE_PASSWORD`：设置了 `TDENGINE_URL`，但没有设置密码。
+- 退出码 `3` 且日志提到 `FB_TDENGINE_PASSWORD`：设置了 `FB_TDENGINE_URL`，但没有设置密码。
 - 服务无法启动，Windows 上 `service start` 超时：用 `factorybridge run --data-dir <数据目录>` 前台运行，直接看错误输出。
 - 服务无法写数据库：检查数据目录的权限。Windows 上服务账号 `NT SERVICE\<名称>` 需要修改权限；Linux 上数据目录属主应为服务账号。
 
 ## 环境变量
+
+运行参数有三种来源，优先级为：命令行参数 > 环境变量 > 配置文件 > 默认值。
+
+- 环境变量统一用 `FB_` 前缀，完整列表见仓库根目录的 `.env.example`。旧名（`GATEWAY_GO_*`、`TDENGINE_*`）本版本仍生效，启动时提示一次弃用，下个版本移除。
+- 配置文件用 `--config <文件>` 或 `FB_CONFIG` 指定，YAML 格式，示例见 `deploy/factorybridge.example.yaml`。它只放运行参数；口令、令牌和开发模式只能用环境变量设置，写进配置文件或写错键名时网关拒绝启动（退出码 3）。
+- 以服务方式安装时可以把配置文件路径放在 `--` 之后：`factorybridge service install --data-dir <数据目录> -- --config <配置文件>`。
 
 完整列表见仓库根目录的 `.env.example`，包括 `GATEWAY_GO_*`、`TDENGINE_*` 和 `FB_DEV_PASSWORD`。
 命令行参数的优先级高于环境变量，环境变量高于默认值。

@@ -136,7 +136,7 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 | ID | 内容 | 依赖 | 优先级 | 工作量 |
 |---|---|---|---|---|
 | H1 | ✅ 已完成（阶段 2，00668a8）。命令框架：拆分 `cmd/factorybridge/main.go`，子命令分文件；统一 `--config`、`--data-dir`、`--log-level`；退出码规范（0 成功、1 一般错误、2 参数错误、3 配置错误） | — | P1 | M |
-| H2 | 配置改为 `config.yaml`（采集配置仍走 API 和 SQLite，见 G6）；优先级：命令行 > 环境变量（`FB_` 前缀）> 配置文件 > 默认值；现有 26 个 `GATEWAY_GO_*` 等变量保留一个版本的兼容期并打印弃用提示 | H1 | P1 | M |
+| H2 | ✅ 已完成（2026-11-09）。配置改为 `config.yaml`（采集配置仍走 API 和 SQLite，见 G6）；优先级：命令行 > 环境变量（`FB_` 前缀）> 配置文件 > 默认值；现有 26 个 `GATEWAY_GO_*` 等变量保留一个版本的兼容期并打印弃用提示 | H1 | P1 | M |
 | H3 | ✅ 已完成（阶段 4，fb06c51）。路径与平台：默认目录 Windows 为程序所在目录，Linux 为 `/etc/factorybridge`、`/var/lib/factorybridge`、`/var/log/factorybridge`；`service` 子命令 Windows 走 SCM（`golang.org/x/sys/windows/svc`，替代 WinSW），Linux 生成 systemd 单元（专用用户、`ProtectSystem=strict`、`ReadWritePaths`）；平台差异用 build tag 隔离 | H1 | P1 | M |
 | H4 | ✅ 已完成（阶段 2，8ac541c）。认证体系：多用户 + 角色（viewer / operator / engineer / admin，与控制台已有的 `engineer` 对齐）；口令用 argon2id 或 bcrypt，加口令策略；访问令牌短期有效 + 刷新令牌轮换；API Key 最高只能是 operator；密钥文件放 `secrets/`，Windows 用 DPAPI 加密，Linux 用 0600 权限；统一鉴权中间件（合并 B7） | B1–B5、G1 | P0 | L |
 | H5 | ✅ 已完成（阶段 2，8ac541c）。运行模式：见下方规则 | H4 | P0 | M |
@@ -356,3 +356,12 @@ A4、A5 随后完成：
 - 保留的模拟器：Modbus TCP 与 IEC104 迁到 `tools/sim`（包名 `@iotconnector/sim`，IEC104 编解码一并迁入）。其余协议用 ProtoForge。compose 的 iec104-sim 服务、`scripts/fault-matrix.mjs` 与部署手册已改路径。
 - 删除只服务 Node 的脚本：`start-node-rollback.ps1`、`restart-gateways.ps1`、`start-go-gateway.ps1`、`compare-gateways.ps1`、`fault-matrix.ps1`、`protocol-write-probe.ps1`、`start-all.sh`，以及根 `package.json` 的 `dev:node-gateway` 和 Node 网关专用的开发依赖。
 - 验证：门禁通过（typecheck、vitest、go vet、go test、go build）；`tools/sim` 类型检查通过，两个模拟器实际启动监听；控制台构建成功。
+
+## H2：配置文件与 FB_ 环境变量（2026-11-09）
+
+- `factorybridge run --config <文件>`（或 `FB_CONFIG`）读取 YAML 运行参数，示例 `deploy/factorybridge.example.yaml`。优先级：命令行 > 环境变量 > 配置文件 > 默认值。配置文件只放运行参数，采集配置仍在 `config.json`（G6 另议）。
+- 环境变量统一为 `FB_` 前缀（FB_PORT、FB_DATA_DIR、FB_TDENGINE_URL 等）。旧名 `GATEWAY_GO_*`、`TDENGINE_*` 本版本仍生效，每个旧名首次使用时提示一次弃用；新旧同时设置以新名为准。
+- 口令、令牌、开发模式不接受配置文件；未知键拒绝启动（退出码 3），避免拼错后静默不生效。数据目录写在配置文件中视为显式指定，不从旧 Node 目录复制。
+- 新增 6 个测试（优先级、弃用提示只出现一次、未知/口令键拒绝、`--config` 解析、配置文件中的数据目录、TDengine 口令新旧名）。用编译后的二进制实测：配置文件端口生效；旧变量覆盖文件并提示弃用；FB_ 新名覆盖旧名；配置文件含口令时退出码 3。
+- 已改为新名：`.env.example`、`scripts/start-go-local.ps1`、`docker-compose.yml`、部署手册、安全清单。
+- 依赖：`gopkg.in/yaml.v3` 由间接依赖改为直接依赖（本机模块缓存已有，未联网）。

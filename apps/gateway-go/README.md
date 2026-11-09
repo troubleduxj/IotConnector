@@ -1,6 +1,6 @@
 # FactoryBridge Go Gateway
 
-这是 Go 网关渐进式重构实现。已覆盖 Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、SNMP、OPC UA、BACnet/IP；设置 `GATEWAY_GO_DRIVER_MODE=go` 后可对这些通道启用 Go 驱动，Node 仍可通过显式配置保留灰度回滚。
+这是 Go 网关渐进式重构实现。已覆盖 Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、SNMP、OPC UA、BACnet/IP；设置 `FB_DRIVER_MODE=go` 后可对这些通道启用 Go 驱动，Node 仍可通过显式配置保留灰度回滚。
 
 ## 启动
 
@@ -12,7 +12,7 @@ go run ./apps/gateway-go/cmd/factorybridge
 
 默认监听 `http://127.0.0.1:18080`，数据目录为 `apps/gateway-go/data`（在 `apps/gateway-go` 目录执行时为 `./data`；发布包为可执行文件旁的 `data/`）。
 
-该目录首次启动且为空时，会从旧的 Node 数据目录 `apps/gateway/data` 复制 `config.json`、`gateway.db`（一致快照）和尚未导入的旧状态文件，旧目录不改动。用 `--data-dir` 或 `GATEWAY_GO_DATA_DIR` 显式指定目录时不导入。
+该目录首次启动且为空时，会从旧的 Node 数据目录 `apps/gateway/data` 复制 `config.json`、`gateway.db`（一致快照）和尚未导入的旧状态文件，旧目录不改动。用 `--data-dir` 或 `FB_DATA_DIR` 显式指定目录时不导入。
 
 ### 命令
 
@@ -46,11 +46,11 @@ factorybridge version [--json]
 
 ### 环境变量
 
-- `GATEWAY_GO_PORT`、`GATEWAY_GO_HOST`、`GATEWAY_GO_DATA_DIR`、`GATEWAY_GO_LOG_LEVEL`：同名命令行参数的缺省值
-- `GATEWAY_GO_VIEWER_TOKEN` / `GATEWAY_GO_OPERATOR_TOKEN` / `GATEWAY_GO_ADMIN_TOKEN`：静态令牌；`GATEWAY_GO_API_TOKEN` 为兼容旧配置，等同 operator
-- `GATEWAY_GO_SESSION_TTL`：会话有效期，默认 `8h`
-- `GATEWAY_GO_CORS_ORIGINS`：逗号分隔的来源白名单，例如 `http://localhost:3000`。写请求和 WebSocket 只接受同源或白名单来源
-- `GATEWAY_GO_DRIVER_MODE=go`：将已覆盖的 Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、SNMP、OPC UA 通道自动路由到 Go 驱动；显式 `params.driver` 优先，可按通道灰度或回滚
+- `FB_PORT`、`FB_HOST`、`FB_DATA_DIR`、`FB_LOG_LEVEL`：同名命令行参数的缺省值
+- `FB_VIEWER_TOKEN` / `FB_OPERATOR_TOKEN` / `FB_ADMIN_TOKEN`：静态令牌；`FB_API_TOKEN` 为兼容旧配置，等同 operator
+- `FB_SESSION_TTL`：会话有效期，默认 `8h`
+- `FB_CORS_ORIGINS`：逗号分隔的来源白名单，例如 `http://localhost:3000`。写请求和 WebSocket 只接受同源或白名单来源
+- `FB_DRIVER_MODE=go`：将已覆盖的 Modbus TCP、S7、MELSEC、FINS、EtherNet/IP、SNMP、OPC UA 通道自动路由到 Go 驱动；显式 `params.driver` 优先，可按通道灰度或回滚
 
 已移除：`GATEWAY_GO_LOGIN_USERNAME`、`GATEWAY_GO_LOGIN_PASSWORD`、`GATEWAY_GO_LOGIN_PASSWORD_HASH`、`GATEWAY_GO_MUST_CHANGE_PASSWORD`。设置后不再生效，改用 `user` 子命令。另外，旧版本在未配置任何认证时会放行全部请求，现在不再这样。
 
@@ -71,19 +71,19 @@ factorybridge version [--json]
 - `POST /api/auth/password`，请求体为 `{ "currentPassword": "...", "newPassword": "..." }`
 - `GET /ws`，兼容控制台消息：连接后发送 `subscribe` 获取快照，随后接收 `tags-batch` 和 `channel-status`；发送 `write` 获取 `write-result`
 
-配置 Token 后，请求头使用 `Authorization: Bearer <token>`。兼容变量 `GATEWAY_GO_API_TOKEN` 等价于 Operator Token。权限不足返回 `403`，凭证无效返回 `401`。写入事件追加到 `<GATEWAY_GO_DATA_DIR>/audit.jsonl`，密码登录会话持久化到 `sessions.json`。`Float`/`Int32` 使用 FC16 双寄存器写入。
+配置 Token 后，请求头使用 `Authorization: Bearer <token>`。兼容变量 `FB_API_TOKEN` 等价于 Operator Token。权限不足返回 `403`，凭证无效返回 `401`。写入事件追加到 `<FB_DATA_DIR>/audit.jsonl`，密码登录会话持久化到 `sessions.json`。`Float`/`Int32` 使用 FC16 双寄存器写入。
 
-当前 Go 历史查询会将数值采样追加到 `<GATEWAY_GO_DATA_DIR>/history.jsonl`，重启后恢复最近数据；该本地日志用于迁移阶段恢复验证，生产历史存储仍需配置 TDengine writer。
+当前 Go 历史查询会将数值采样追加到 `<FB_DATA_DIR>/history.jsonl`，重启后恢复最近数据；该本地日志用于迁移阶段恢复验证，生产历史存储仍需配置 TDengine writer。
 
 WebSocket 握手支持 `Authorization: Bearer <token>`；浏览器原生 WebSocket 也可使用 `/ws?token=<token>`。启用认证后，未认证连接不能升级，写入必须先完成 `subscribe`。
 
-密码登录成功后返回随机 Session Token；推荐使用 bcrypt 哈希变量。Session 持久化到 `<GATEWAY_GO_DATA_DIR>/sessions.json`，文件只保存 Token 摘要、用户、角色和过期时间，不保存原始 Token。
+密码登录成功后返回随机 Session Token；推荐使用 bcrypt 哈希变量。Session 持久化到 `<FB_DATA_DIR>/sessions.json`，文件只保存 Token 摘要、用户、角色和过期时间，不保存原始 Token。
 
 新密码至少 12 个字符，并同时包含大写字母、小写字母、数字和特殊字符。首次改密完成前，其他受保护接口返回 `403`。
 
 认证失败默认按客户端地址限制为 5 次/分钟，超限返回 `429`；CORS 未配置白名单时不添加跨域许可头。
 
-驱动默认通过通道 `params.driver` 显式选择；设置 `GATEWAY_GO_DRIVER_MODE=go` 后，已覆盖协议可自动选择 Go 驱动：
+驱动默认通过通道 `params.driver` 显式选择；设置 `FB_DRIVER_MODE=go` 后，已覆盖协议可自动选择 Go 驱动：
 
 - `simulation`：本地周期模拟采样
 - `modbus-go`：Go Modbus TCP 驱动，仅对 `Modbus TCP` 通道生效

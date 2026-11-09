@@ -206,8 +206,8 @@ Linux systemd 单元见 `deploy/systemd/`，Windows WinSW 包装见 `deploy/wind
 | 变量 | 说明 | 默认 |
 |---|---|---|
 | `GATEWAY_PORT` | REST+WS 端口 | 8080 |
-| `TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:16041`），未设置则存储管道禁用 | — |
-| `TDENGINE_DB` / `TDENGINE_STABLE` | 目标库与超级表 | `factory_bridge` / `st_factory_equipment` |
+| `FB_TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:16041`），未设置则存储管道禁用 | — |
+| `FB_TDENGINE_DB` / `FB_TDENGINE_STABLE` | 目标库与超级表 | `factory_bridge` / `st_factory_equipment` |
 
 ### TDengine 存储与历史查询（Phase 0 已打通）
 
@@ -216,7 +216,7 @@ Linux systemd 单元见 `deploy/systemd/`，Windows WinSW 包装见 `deploy/wind
 docker run -d --name tdengine --restart unless-stopped -p 16030:6030 -p 16041:6041 tdengine/tdengine:3.3.6.13
 
 # 网关开启存储
-TDENGINE_URL=http://127.0.0.1:16041 TDENGINE_PASSWORD=<口令> pnpm dev:gateway
+FB_TDENGINE_URL=http://127.0.0.1:16041 FB_TDENGINE_PASSWORD=<口令> pnpm dev:gateway
 ```
 
 - 写入管道：SQL 批量 `INSERT INTO db.tb_x USING <STable> TAGS(...) VALUES ...`，

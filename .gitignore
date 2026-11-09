@@ -10,17 +10,11 @@ coverage/
 # gateway runtime data
 apps/gateway/data/
 apps/gateway-go/data/
-apps/gateway/raw-mqtt-probe.cjs
-apps/gateway/mqtt-probe.cjs
-apps/gateway/echo-probe.cjs
-apps/gateway/probe-result.txt
-apps/gateway/mqtt-broker.log
 
 # Playwright
 playwright-report/
 test-results/
 .pnpm-store/
-apps/gateway/service-install.log
 
 # Go gateway runtime state
 apps/gateway-go/**/auth.json

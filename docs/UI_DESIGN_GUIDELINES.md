@@ -70,7 +70,7 @@
 | BACnet/IP | `emerald-500` | `text-emerald-600 border-emerald-300 bg-emerald-50` |
 | IEC 60870-5-104 | `amber-600` | `text-amber-700 border-amber-400 bg-amber-50` |
 
-来源：`packages/shared` 的 `PROTOCOL_CONFIGS`（color/bgColor 字段），前端不得另行硬编码。
+来源：`apps/console/src/shared` 的 `PROTOCOL_CONFIGS`（color/bgColor 字段），前端不得另行硬编码。
 
 ### 2.5 图表多曲线色板（Historian 专用，8 色）
 
@@ -239,6 +239,6 @@ KPI 卡变体：`p-5`，标签行（眉题 + 右上图标 `w-4 h-4 text-slate-40
 
 1. 新页面开发前对照 §7 摘要与 §5 组件规格；不得发明新样式档位。
 2. 通用组件（Toggle、Modal、Toast、Badge、TagValue、Card、状态点）收敛到 `apps/console/src/components/`，后续抽 `packages/ui`；禁止跨页面复制粘贴组件。
-3. 协议色、图表色、语义色一律从 `@iotconnector/shared` 或本规范常量取用。
+3. 协议色、图表色、语义色一律从 `apps/console/src/shared` 或本规范常量取用。
 4. i18n：所有文案走语言资源文件（D3 决策，中文优先）；组件内禁止硬编码文案。
 5. 违反本规范的代码不予合并（review 检查项）。

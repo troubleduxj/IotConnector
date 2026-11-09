@@ -1,4 +1,5 @@
 @echo off
+rem 已废弃：Node 网关已于 2026-11-09 删除，本文件仅作历史参考；Windows 请使用 `factorybridge service install`。
 rem Factory Bridge 网关注册为 Windows 服务（需管理员权限）
 rem 前置：deploy\windows\ 下已放入 WinSW-x64.exe 并重命名为 factory-bridge-gateway.exe
 rem       factory-bridge-gateway-service.xml 中路径已按实际部署位置修改

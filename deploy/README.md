@@ -1,8 +1,8 @@
 # Factory Bridge 部署指南
 
 > 自 2026-11-07（阶段 4）起，主用运行时为 Go 网关单一可执行文件 `factorybridge`。
-> Node 网关（`apps/gateway`）已冻结，仅作历史参考，不作为部署方式。本目录下 `windows/`（WinSW）是 Node 网关的服务文件，
-> 同样冻结；`systemd/factory-bridge-gateway.service` 是 `factorybridge service install` 在 Linux 上生成内容的参考副本。
+> Node 网关（`apps/gateway`）已于 2026-11-09 删除（最后版本见 git tag `node-final`），不作为部署方式。本目录下 `windows/`（WinSW）是已删除的 Node 网关的服务文件，仅作历史参考；
+> `systemd/factory-bridge-gateway.service` 是 `factorybridge service install` 在 Linux 上生成内容的参考副本。
 > 两个平台都请直接使用 `factorybridge service install`。
 
 本文说明如何安装、配置、升级和维护 Go 网关。环境变量的完整列表见仓库根目录的 `.env.example`，本文不重复。

@@ -7,7 +7,7 @@ import {
  * IEC 60870-5-104 站端模拟器（配电自动化 RTU 风格）：
  * 监听 TCP：STARTDT 握手 → 响应总召唤（激活确认 + 单点遥信 M_SP + 浮点遥测 M_ME_NC + 激活终止）。
  * 遥测 IOA 1-4（动态模拟量），遥信 IOA 1001-1004（动态开关量，每 15s 翻转一次）。
- * 默认端口 2404。启动：pnpm --filter @iotconnector/gateway iec104-sim
+ * 默认端口 2404。启动：pnpm --filter @iotconnector/sim iec104-sim
  */
 
 const PORT = Number(process.env.IEC104_SIM_PORT ?? 2404);

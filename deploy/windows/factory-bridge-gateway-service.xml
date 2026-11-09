@@ -1,3 +1,4 @@
+<!-- 已废弃：Node 网关已于 2026-11-09 删除，本文件仅作历史参考；Windows 请使用 `factorybridge service install`。 -->
 <!--
 Factory Bridge 网关 Windows 服务包装配置（WinSW v2，.NET 4.6.1+ 单 exe，免安装）。
 WinSW 下载：https://github.com/winsw/winsw/releases （WinSW-x64.exe）

@@ -1,5 +1,7 @@
 # Factory Bridge 工业物联网边缘网关平台 — 产品需求文档（PRD）
 
+> 注：Node 网关（apps/gateway）与 packages/shared 已于 2026-11-09 删除；共享代码在 apps/console/src/shared，模拟器在 tools/sim。下文保留原计划的描述。
+
 | 项 | 内容 |
 |---|---|
 | 文档版本 | v0.1（草案，供评审讨论） |

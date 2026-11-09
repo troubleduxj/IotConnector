@@ -1,5 +1,7 @@
 # Factory Bridge Go 网关重构方案
 
+> 注：Node 网关（apps/gateway）与 packages/shared 已于 2026-11-09 删除；共享代码在 apps/console/src/shared，模拟器在 tools/sim。下文保留原计划的描述。
+
 > 文档状态：提案，可作为下一阶段技术设计与任务拆分基线
 >
 > 更新时间：2026-09-14

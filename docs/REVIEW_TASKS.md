@@ -312,6 +312,13 @@ A4、A5 随后完成：
 - A5（子任务 Haiku 实现，主会话核查）：删除 `metadata.json`；`.env.example` 改为网关实际读取的环境变量参考。核查改正了两处：数据目录默认值、outbox 超限时丢弃的是最旧的点。
 
 未完成：
-- A6 剩余：TDengine 仍默认 `root:taosdata`（compose、启动脚本、main.go 默认值）；主用网关 admin 口令需在现场更换。
-- B8 剩余：脚本子进程内存上限。
+- 主用网关 admin 口令需在现场更换。
 - 主用网关 18080 仍运行 a893f69，未包含本组修复。
+
+## 收尾记录（2026-11-09）
+
+- A6 剩余（子任务 Haiku 实现，主会话核查）：网关不再内置 TDengine 口令 `taosdata`。设置了 `TDENGINE_URL` 而未设 `TDENGINE_PASSWORD` 时拒绝启动（退出码 3），已用二进制实测。`start-go-local.ps1` 增加 `-TDenginePassword`。compose 演示栈仍沿用镜像默认口令，并注明生产必须修改。
+- B8 剩余：脚本子进程加内存上限。看门狗每 10ms 读堆占用，超过 64 MB 中断脚本（返回 "script memory limit exceeded"，丢弃该次写值）；超过 128 MB 直接退出子进程（应对单次巨大分配，中断来不及生效）。实测循环分配走中断路径，`'x'.repeat(1<<29)` 走退出路径，普通脚本不受影响。
+- E2 部分（子任务 Haiku 实现，主会话核查）：cmd/factorybridge 覆盖率 31.0% → 57.1%，scriptworker 81.6%。子任务报告的问题中，`user` 未知子命令会先打开（新建）数据库，已修复；其余为风格问题未改（envInt 直接写 stderr、migrate 中未使用的 users 变量、开发账号随机口令写入日志）。
+
+仍未做：E1 `-race`（本机无 C 编译器）、Compose 实启（Docker 未运行）、H3/H8 真实服务安装、第四组结构性改造。

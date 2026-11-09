@@ -87,6 +87,13 @@ func cmdUser(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 	sub, rest := args[0], args[1:]
+	// 先校验子命令，未知子命令不打开（也不新建）数据库。
+	switch sub {
+	case "list", "create", "passwd", "role", "disable", "enable", "unlock", "delete":
+	default:
+		fmt.Fprintf(stderr, "未知子命令 user %s\n", sub)
+		return exitUsage
+	}
 	fs := flag.NewFlagSet("user "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dataDir := fs.String("data-dir", envOr("GATEWAY_GO_DATA_DIR", defaultDataDir()), "数据目录")

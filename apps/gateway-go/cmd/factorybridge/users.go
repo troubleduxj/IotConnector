@@ -28,7 +28,7 @@ func openUserStore(ctx context.Context, dataDir string, stdout io.Writer) (*auth
 	if err != nil {
 		return nil, nil, err
 	}
-	store := auth.NewUserStore(database, auth.UserStoreOptions{SessionTTL: envDuration("GATEWAY_GO_SESSION_TTL", 0)})
+	store := auth.NewUserStore(database, auth.UserStoreOptions{SessionTTL: parseDuration(setting("sessionTTL", ""), 0)})
 	if err := migrateLegacyAuth(ctx, store, dataDir, stdout); err != nil {
 		_ = database.Close()
 		return nil, nil, err
@@ -96,7 +96,7 @@ func cmdUser(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("user "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dataDir := fs.String("data-dir", envOr("GATEWAY_GO_DATA_DIR", defaultDataDir()), "数据目录")
+	dataDir := fs.String("data-dir", setting("dataDir", defaultDataDir()), "数据目录；环境变量 FB_DATA_DIR")
 	name := fs.String("name", "", "用户名")
 	role := fs.String("role", "", "角色 viewer|operator|engineer|admin")
 	passwordStdin := fs.Bool("password-stdin", false, "从标准输入读取口令")

@@ -138,17 +138,23 @@ type runOptions struct {
 }
 
 func cmdRun(args []string, _ io.Writer, stderr io.Writer) int {
+	// 先读配置文件：其中的值作为各 flag 的默认值（优先级：命令行 > 环境变量 > 配置文件 > 默认值）。
+	if err := settings.loadConfigFile(configFilePath(args)); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitConfig
+	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dataDir := fs.String("data-dir", envOr("GATEWAY_GO_DATA_DIR", defaultDataDir()), "数据目录（config.json、auth.json 等）；环境变量 GATEWAY_GO_DATA_DIR")
-	port := fs.Int("port", envInt("GATEWAY_GO_PORT", 18080), "HTTP 端口；环境变量 GATEWAY_GO_PORT")
-	logLevel := fs.String("log-level", envOr("GATEWAY_GO_LOG_LEVEL", "info"), "日志级别 debug|info|warn|error")
-	webDir := fs.String("web-dir", envOr("GATEWAY_GO_WEB_DIR", defaultWebDir()), "控制台静态文件目录（含 index.html）；留空则只提供 API")
-	tlsCert := fs.String("tls-cert", os.Getenv("GATEWAY_GO_TLS_CERT"), "TLS 证书（PEM）；监听非回环地址时未指定则生成自签名证书")
-	tlsKey := fs.String("tls-key", os.Getenv("GATEWAY_GO_TLS_KEY"), "TLS 私钥（PEM）")
-	allowCIDR := fs.String("allow-cidr", os.Getenv("GATEWAY_GO_ALLOW_CIDRS"), "允许访问的客户端网段，逗号分隔，如 10.0.0.0/8,192.168.1.20；回环地址始终允许")
-	host := fs.String("host", envOr("GATEWAY_GO_HOST", "127.0.0.1"), "监听地址；开发模式强制 127.0.0.1")
-	dev := fs.Bool("dev", envBool("GATEWAY_GO_DEV", false), "开发模式：建开发账号、放行 localhost 来源、仅限回环地址")
+	fs.String("config", "", "运行参数配置文件（YAML）；环境变量 FB_CONFIG")
+	dataDir := fs.String("data-dir", setting("dataDir", defaultDataDir()), "数据目录（config.json、gateway.db 等）；环境变量 FB_DATA_DIR")
+	port := fs.Int("port", settingInt("port", 18080), "HTTP 端口；环境变量 FB_PORT")
+	logLevel := fs.String("log-level", setting("logLevel", "info"), "日志级别 debug|info|warn|error；环境变量 FB_LOG_LEVEL")
+	webDir := fs.String("web-dir", setting("webDir", defaultWebDir()), "控制台静态文件目录（含 index.html）；留空则只提供 API")
+	tlsCert := fs.String("tls-cert", setting("tlsCert", ""), "TLS 证书（PEM）；监听非回环地址时未指定则生成自签名证书")
+	tlsKey := fs.String("tls-key", setting("tlsKey", ""), "TLS 私钥（PEM）")
+	allowCIDR := fs.String("allow-cidr", setting("allowCIDRs", ""), "允许访问的客户端网段，逗号分隔，如 10.0.0.0/8,192.168.1.20；回环地址始终允许")
+	host := fs.String("host", setting("host", "127.0.0.1"), "监听地址；开发模式强制 127.0.0.1；环境变量 FB_HOST")
+	dev := fs.Bool("dev", parseBool(setting("dev", ""), false), "开发模式：建开发账号、放行 localhost 来源、仅限回环地址")
 	devNoAuth := fs.Bool("dev-no-auth", false, "开发模式下跳过登录，所有请求按 admin 处理（隐含 --dev）")
 	if code, done := parseFlags(fs, args); done {
 		return code

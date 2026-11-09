@@ -8,7 +8,7 @@
 param(
     [switch]$DriverModeGo,
     [string]$TDengineUrl = '',
-    [string]$TDenginePassword = $env:TDENGINE_PASSWORD,
+    [string]$TDenginePassword = $env:FB_TDENGINE_PASSWORD,
     [string]$ConsoleOrigins = 'http://localhost:3000,http://127.0.0.1:3000',
     [string]$Exe = ''
 )
@@ -28,16 +28,16 @@ if ($listener) {
 }
 if (-not (Test-Path $Exe)) { throw "Go gateway binary not found: $Exe" }
 
-$env:GATEWAY_GO_PORT = '18080'
-$env:GATEWAY_GO_CORS_ORIGINS = $ConsoleOrigins
-if ($DriverModeGo) { $env:GATEWAY_GO_DRIVER_MODE = 'go' } else { Remove-Item Env:GATEWAY_GO_DRIVER_MODE -ErrorAction SilentlyContinue }
+$env:FB_PORT = '18080'
+$env:FB_CORS_ORIGINS = $ConsoleOrigins
+if ($DriverModeGo) { $env:FB_DRIVER_MODE = 'go' } else { Remove-Item Env:FB_DRIVER_MODE -ErrorAction SilentlyContinue }
 if ($TDengineUrl) {
     if (-not $TDenginePassword) { throw 'Set -TDenginePassword or TDENGINE_PASSWORD when -TDengineUrl is given' }
-    $env:TDENGINE_URL = $TDengineUrl
-    $env:TDENGINE_PASSWORD = $TDenginePassword
+    $env:FB_TDENGINE_URL = $TDengineUrl
+    $env:FB_TDENGINE_PASSWORD = $TDenginePassword
 } else {
-    Remove-Item Env:TDENGINE_URL -ErrorAction SilentlyContinue
-    Remove-Item Env:TDENGINE_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:FB_TDENGINE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:FB_TDENGINE_PASSWORD -ErrorAction SilentlyContinue
 }
 
 # 工作目录必须是仓库根：默认数据目录按相对路径 apps\gateway-go\data 解析（A4）。

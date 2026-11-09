@@ -70,7 +70,7 @@ func resolveDataDir(dataDir string, explicit bool, log io.Writer) (string, error
 
 // dataDirFlag 解析 --data-dir 后调用：未显式指定时按需从旧目录导入。
 func dataDirFlag(fs *flag.FlagSet, value string, log io.Writer) (string, error) {
-	explicit := os.Getenv("GATEWAY_GO_DATA_DIR") != ""
+	explicit := settingSet("dataDir")
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "data-dir" {
 			explicit = true

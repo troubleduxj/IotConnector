@@ -83,7 +83,7 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 		logger.Warn("listening on a non-loopback address without --allow-cidr; any host that can reach this port can try to log in", "host", opts.host)
 	}
 
-	tdengineURL := os.Getenv("TDENGINE_URL")
+	tdengineURL := setting("tdengineURL", "")
 	tdenginePass, err := tdenginePassword()
 	if err != nil {
 		logger.Error(err.Error())
@@ -95,15 +95,15 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 	}
 	storageWriter := storage.New(storage.Config{
 		State: stateBatch, StateDB: database,
-		URL: tdengineURL, User: envOr("TDENGINE_USER", "root"), Password: tdenginePass,
-		Database: envOr("TDENGINE_DB", "factory_bridge"), SuperTable: envOr("TDENGINE_STABLE", "st_factory_equipment"),
+		URL: tdengineURL, User: setting("tdengineUser", "root"), Password: tdenginePass,
+		Database: setting("tdengineDB", "factory_bridge"), SuperTable: setting("tdengineStable", "st_factory_equipment"),
 		QueueFile: queueFile, AlarmQueueFile: func() string {
 			if queueFile == "" {
 				return ""
 			}
 			return filepath.Join(dataDir, "alarm-outbox.json")
 		}(),
-		MaxQueue: envInt("GATEWAY_GO_OUTBOX_MAX", 100000),
+		MaxQueue: settingInt("outboxMax", 100000),
 	})
 	auditLogger := audit.NewDB(database, filepath.Join(dataDir, "audit.jsonl"))
 	if opts.dev {
@@ -119,10 +119,10 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 		cfg,
 		engine,
 		api.SecurityOptions{
-			Token:          envOr("GATEWAY_GO_API_TOKEN", ""),
-			ViewerToken:    envOr("GATEWAY_GO_VIEWER_TOKEN", ""),
-			OperatorToken:  envOr("GATEWAY_GO_OPERATOR_TOKEN", ""),
-			AdminToken:     envOr("GATEWAY_GO_ADMIN_TOKEN", ""),
+			Token:          setting("apiToken", ""),
+			ViewerToken:    setting("viewerToken", ""),
+			OperatorToken:  setting("operatorToken", ""),
+			AdminToken:     setting("adminToken", ""),
 			Users:          users,
 			DevMode:        opts.dev,
 			DevNoAuth:      opts.devNoAuth,
@@ -135,7 +135,7 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 			ConfigStore:    &store,
 			Storage:        storageWriter,
 			ShadowFile:     filepath.Join(dataDir, "shadow.json"),
-			CORSOrigins:    splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
+			CORSOrigins:    splitCSV(setting("corsOrigins", "")),
 		},
 	)
 	northboundPublisher := northbound.NewDB(northbound.ConfigFromRaw(cfg.Raw["northbound"]), database, stateBatch, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
@@ -302,9 +302,9 @@ func envOr(name, fallback string) string {
 
 // tdenginePassword 返回 TDENGINE_PASSWORD。设置了 TDENGINE_URL 时必须显式提供密码，不使用内置默认值。
 func tdenginePassword() (string, error) {
-	password := os.Getenv("TDENGINE_PASSWORD")
-	if os.Getenv("TDENGINE_URL") != "" && password == "" {
-		return "", errors.New("TDENGINE_URL is set but TDENGINE_PASSWORD is empty; set the TDengine password explicitly")
+	password := setting("tdenginePassword", "")
+	if setting("tdengineURL", "") != "" && password == "" {
+		return "", errors.New("TDengine URL is set but FB_TDENGINE_PASSWORD (or TDENGINE_PASSWORD) is empty; set the TDengine password explicitly")
 	}
 	return password, nil
 }
@@ -337,7 +337,10 @@ func splitCSV(value string) []string {
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {
-	value := os.Getenv(name)
+	return parseDuration(os.Getenv(name), fallback)
+}
+
+func parseDuration(value string, fallback time.Duration) time.Duration {
 	if value == "" {
 		return fallback
 	}
@@ -349,7 +352,11 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 }
 
 func envBool(name string, fallback bool) bool {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	return parseBool(os.Getenv(name), fallback)
+}
+
+func parseBool(raw string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
 	switch value {
 	case "1", "true", "yes", "on":
 		return true

@@ -1,0 +1,51 @@
+# factorybridge 运行参数配置文件示例（H2）。
+#
+# 用法：factorybridge run --config /etc/factorybridge/factorybridge.yaml
+#       （或设置环境变量 FB_CONFIG）
+# 优先级：命令行参数 > 环境变量（FB_*）> 本文件 > 默认值。
+#
+# 本文件只放运行参数。通道、位号、告警等采集配置在数据目录的 config.json，经控制台或 API 修改。
+# 口令和令牌（FB_TDENGINE_PASSWORD、FB_*_TOKEN）与开发模式只能用环境变量设置，写进本文件会被拒绝启动。
+# 未知键同样会被拒绝，避免拼错后静默不生效。
+
+# 数据目录（gateway.db、config.json、tls/ 等）。写在这里视为显式指定，不会从旧 Node 目录复制。
+dataDir: /var/lib/factorybridge
+
+# 监听地址与端口。非回环地址强制 HTTPS。
+host: 0.0.0.0
+port: 18080
+
+# 日志级别：debug | info | warn | error
+logLevel: info
+
+# 控制台静态文件目录（含 index.html）。不写则自动查找可执行文件旁的 web/。
+# webDir: /opt/factorybridge/web
+
+# TLS 证书与私钥（PEM）。不写时，非回环监听自动生成自签名证书，存放在 <dataDir>/tls/。
+# tls:
+#   cert: /etc/factorybridge/tls/gateway.crt
+#   key: /etc/factorybridge/tls/gateway.key
+
+# 允许访问的客户端网段；回环地址始终允许。
+allowCIDRs:
+  - 10.0.0.0/8
+
+# 允许浏览器跨域访问的来源（控制台由网关同端口托管时不需要）。
+# corsOrigins:
+#   - https://console.example.com
+
+# 会话有效期（Go duration 格式），默认 8h。
+# sessionTTL: 8h
+
+# 设为 go 时，Modbus TCP、S7、MELSEC 等通道默认走 Go 驱动。
+# driverMode: go
+
+# TDengine 时序库。设置 url 后必须用环境变量 FB_TDENGINE_PASSWORD 提供口令。
+# tdengine:
+#   url: http://127.0.0.1:6041
+#   user: root
+#   database: factory_bridge
+#   superTable: st_factory_equipment
+
+# 离线缓存队列最大条目数，超过后丢弃最旧的点。
+# outboxMax: 100000

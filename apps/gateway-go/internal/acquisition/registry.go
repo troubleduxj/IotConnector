@@ -10,7 +10,7 @@ func NewFactory() DriverFactory {
 		// GATEWAY_GO_DRIVER_MODE=go enables transparent Go routing for protocols
 		// already covered by Go. Explicit params.driver always wins, preserving
 		// per-channel rollout and rollback during the Node migration.
-		if os.Getenv("GATEWAY_GO_DRIVER_MODE") == "go" && requested == "" {
+		if driverMode() == "go" && requested == "" {
 			switch channel.Protocol {
 			case "Modbus TCP":
 				requested = "modbus-go"
@@ -69,4 +69,12 @@ func NewFactory() DriverFactory {
 		}
 		return nil
 	}
+}
+
+// driverMode 读 FB_DRIVER_MODE，兼容旧名 GATEWAY_GO_DRIVER_MODE（H2）。
+func driverMode() string {
+	if value := os.Getenv("FB_DRIVER_MODE"); value != "" {
+		return value
+	}
+	return os.Getenv("GATEWAY_GO_DRIVER_MODE")
 }

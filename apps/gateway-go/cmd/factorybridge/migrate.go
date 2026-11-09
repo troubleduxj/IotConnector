@@ -28,7 +28,7 @@ var legacyFiles = []string{"auth.json", "outbox.json", "alarm-outbox.json", "his
 func cmdMigrate(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dataDir := fs.String("data-dir", envOr("GATEWAY_GO_DATA_DIR", defaultDataDir()), "数据目录")
+	dataDir := fs.String("data-dir", setting("dataDir", defaultDataDir()), "数据目录；环境变量 FB_DATA_DIR")
 	dryRun := fs.Bool("dry-run", false, "只列出待导入的文件，不修改任何内容")
 	if code, done := parseFlags(fs, args); done {
 		return code
@@ -70,7 +70,7 @@ func cmdMigrate(args []string, stdout, stderr io.Writer) int {
 
 	// 依次触发各存储的导入逻辑（与 run 共用同一实现）
 	storage.New(storage.Config{URL: "migrate://offline", State: batch, StateDB: database,
-		QueueFile: filepath.Join(*dataDir, "outbox.json"), AlarmQueueFile: filepath.Join(*dataDir, "alarm-outbox.json"), MaxQueue: envInt("GATEWAY_GO_OUTBOX_MAX", 100000)})
+		QueueFile: filepath.Join(*dataDir, "outbox.json"), AlarmQueueFile: filepath.Join(*dataDir, "alarm-outbox.json"), MaxQueue: settingInt("outboxMax", 100000)})
 	audit.NewDB(database, filepath.Join(*dataDir, "audit.jsonl"))
 	api.NewServerWithOptions(config.Config{}, acquisition.NewEngine(nil, nil, nil), api.SecurityOptions{
 		StateDB: database, State: batch,

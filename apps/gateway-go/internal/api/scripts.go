@@ -184,7 +184,8 @@ func (e *scriptEngine) run(id string) (map[string]any, error) {
 	if script == nil {
 		return nil, fmt.Errorf("script not found")
 	}
-	if os.Getenv("GATEWAY_GO_SCRIPT_INLINE") != "1" {
+	// FB_SCRIPT_INLINE，兼容旧名 GATEWAY_GO_SCRIPT_INLINE（H2）。只用于开发调试。
+	if os.Getenv("FB_SCRIPT_INLINE") != "1" && os.Getenv("GATEWAY_GO_SCRIPT_INLINE") != "1" {
 		return e.runIsolated(id, *script)
 	}
 	stat := e.getStat(id)

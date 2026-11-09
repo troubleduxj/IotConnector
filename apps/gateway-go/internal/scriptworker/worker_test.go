@@ -3,7 +3,9 @@ package scriptworker
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -94,6 +96,10 @@ func TestRunRejectsLargeRequest(t *testing.T) {
 
 // B8：脚本持续分配内存时被中断，且不执行写值。
 func TestRunInterruptsOnMemoryLimit(t *testing.T) {
+	// 调低软上限：64 MB 在负载高的机器上 1 秒内可能分配不到，会先触发超时。
+	oldSoft := maxHeapBytes
+	maxHeapBytes = heapBytes() + 16<<20
+	t.Cleanup(func() { maxHeapBytes = oldSoft; debug.SetMemoryLimit(math.MaxInt64) })
 	code := `Write("a", 1); var keep = []; for (;;) { keep.push(new Array(1000).fill("xxxxxxxxxxxxxxxx" + keep.length)); }`
 	response := runRequest(t, Request{Code: code, Tags: map[string]string{"a": "tag-a"}})
 	if response.OK || response.Error != memoryLimitMessage {

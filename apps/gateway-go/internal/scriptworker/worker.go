@@ -22,16 +22,20 @@ const (
 	maxWrites          = 50
 	maxWriteValueBytes = 4 * 1024
 
-	// 内存上限（B8）。goja 没有内存配额，由看门狗按堆占用判断：
-	// 超过 maxHeapBytes 时中断脚本；中断要等到下一条 JS 指令才生效，
-	// 单次巨大分配（如 'x'.repeat(1e9)）来不及中断，超过 hardHeapBytes 时直接退出子进程。
-	maxHeapBytes   = 64 << 20
-	hardHeapBytes  = 128 << 20
 	memoryExitCode = 3
 	heapPollEvery  = 10 * time.Millisecond
 )
 
 const memoryLimitMessage = "script memory limit exceeded"
+
+// 内存上限（B8）。goja 没有内存配额，由看门狗按堆占用判断：
+// 超过 maxHeapBytes 时中断脚本；中断要等到下一条 JS 指令才生效，
+// 单次巨大分配（如 'x'.repeat(1e9)）来不及中断，超过 hardHeapBytes 时直接退出子进程。
+// 用变量而非常量，测试可调低以免受机器速度影响。
+var (
+	maxHeapBytes  uint64 = 64 << 20
+	hardHeapBytes uint64 = 128 << 20
+)
 
 // heapBytes 返回当前堆上对象占用的字节数。
 func heapBytes() uint64 {
@@ -102,7 +106,7 @@ func Run() error {
 		return fmt.Errorf("script code exceeds %d bytes", maxCodeBytes)
 	}
 	// 让 GC 在接近上限时更积极回收，减少误判。
-	debug.SetMemoryLimit(maxHeapBytes)
+	debug.SetMemoryLimit(int64(maxHeapBytes))
 	start := time.Now()
 	runtime := goja.New()
 	outputs := []string{}

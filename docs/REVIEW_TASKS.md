@@ -142,7 +142,7 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 | H5 | ✅ 已完成（阶段 2，8ac541c）。运行模式：见下方规则 | H4 | P0 | M |
 | H6 | ✅ 已完成（阶段 4，26603e5）。发布：`build` 脚本交叉编译 `windows/amd64`、`linux/amd64`、`linux/arm64`（`CGO_ENABLED=0`，依赖 G1 选纯 Go 的 SQLite）；产出 zip/tar.gz，内含二进制、`web/`、`config.example.yaml`、文档、sha256；`version` 注入提交号 | H1、F1 | P1 | S |
 | H7 | ✅ 已完成（a206729）。文档：部署手册、快速部署步骤、安全验收说明（参考 koike `docs/`），Windows 和 Linux 各一节 | H1–H6 | P2 | M |
-| H8 | ✅ Linux 部分完成（systemd 容器实测）；Windows SCM 仍需管理员权限。CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |
+| H8 | ✅ 已完成（Linux systemd 容器 + Windows SCM 实测，2026-11-09）。CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |
 
 ### H5 运行模式规则
 
@@ -392,4 +392,6 @@ A4、A5 随后完成：
   修复后在全新卷上实测：4 个服务运行；HTTPS 登录、控制台正常，明文 HTTP 返回 400；平台 linux/amd64；无人工操作时时序库自动建库并 online；新建 IEC104 通道采到 Good 值，TDengine 写入 13 行；ProtoForge 页面可访问。另修复 IEC104 模拟器服务原用 `pnpm install` 安装整个工作区，在容器里失败，改为 `npx tsx` 直接运行。测试时端口改为 18180/18190/16141/16160，避免与主用网关冲突；8100 在 Windows 保留端口范围内不可用。
 - **H8 Linux 服务**（更正：上一版记录写"已实测"是错的，当时测试容器没起来，脚本没跑过）。现已在带 systemd 的 Debian 容器里实际执行 `service install/start/status/stop/uninstall`，结果见下方"H8 实测结果"。
 - **H8 实测结果**（带 systemd 的 Debian bookworm 容器，linux/amd64 发布包）：`service install` 生成单元文件（`User=factorybridge`，`ReadWritePaths` 为数据目录），自动创建 `factorybridge` 系统账号，数据目录属主 `factorybridge`、权限 750；`service start` 后健康检查正常，`systemctl` 显示 active，`User=factorybridge`、`ProtectSystem=strict`、`NoNewPrivileges=yes`；`kill -9` 主进程后 systemd 自动拉起新进程；`service stop` 后 inactive；`service uninstall` 删除单元文件，数据目录（`config.json`、`gateway.db`）与账号保留。
-- 仍未做：Windows 服务（需管理员权限）；E4 e2e 进 CI（需要 CI 环境）。
+- **H8 Windows 实测**（用户在管理员 PowerShell 中执行，测试实例 `fb-svctest`、端口 18280，不影响主用网关）：`service install` 注册成功，运行账号为虚拟账号 `NT SERVICEb-svctest`；`start` 后状态运行中并写出 `gateway.db`；`status` 显示 PID、命令行与账号；`stop` 后已停止；`uninstall` 后 `sc query` 返回 1060（服务不存在），数据目录保留。未测：崩溃后自动重启（代码已设置 10/30/60 秒三次重启，未在 SCM 上触发验证）。
+- **发现（未修复）**：Windows 数据目录 ACL 继承了上级目录的权限。实测 `icacls` 显示除服务账号外，`Authenticated Users` 有修改权限、`Users` 有读权限，即本机任何登录用户都能读写 `gateway.db` 和 `config.json`（含明文口令）。安装程序只追加了服务账号的授权，没有断开继承。安全清单中"只有管理员和服务账号可访问"的期望与实际不符。
+- 仍未做：E4 e2e 进 CI（需要 CI 环境）。

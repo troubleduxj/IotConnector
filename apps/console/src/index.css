@@ -1,4 +1,4 @@
 @import "tailwindcss";
 
 /* 协议色等 Tailwind 类名位于 shared 包源码中，需显式纳入扫描（否则徽章样式丢失） */
-@source "../../../packages/shared/src";
+@source "./shared";

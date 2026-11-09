@@ -386,6 +386,10 @@ A4、A5 随后完成：
 
 - **E1 `go test -race`**：在 `golang:1.26-bookworm` 容器里对全部包运行。发现一处真实数据竞争：脚本内存看门狗读的上限变量被测试改写（`internal/scriptworker`），已改为原子变量。另有内存上限用例在 -race 下先触发 1 秒超时，测试中把时限放宽到 20 秒。修复后全部包通过，0 处数据竞争。
 - **北向 MQTT**：原 broker 容器 `iotconnector-mqtt-18840` 因挂载的 `mosquitto.conf` 不存在无法启动，改用新容器 `fb-mqtt-18840`（127.0.0.1:18840）。主用网关 2 秒内自动连上，补发了离线期间排队的 30 条消息；手动 REBIRTH 后收到 NBIRTH、10 个 DBIRTH 和影子消息。
-- **Compose 实启**：用 linux/amd64 发布包构建网关镜像，与 TDengine、ProtoForge、IEC104 模拟器一起启动（测试时端口改为 18180/8100/16141/16160，避免与主用网关冲突）。4 个服务均运行，网关经 HTTPS 提供 API 与控制台，`user create` 可用，时序库连通并建库。修复：IEC104 模拟器服务原用 `pnpm install` 安装整个工作区，在容器里失败，改为 `npx tsx` 直接运行。
-- **H8 Linux 服务**：在带 systemd 的 Debian 容器里执行 `service install/start/status/stop/uninstall`。单元文件、`factorybridge` 系统账号、数据目录属主均正确；服务以非 root 运行；`kill -9` 后 5 秒内自动重启；卸载后单元文件删除、数据目录保留。
+- **Compose 实启**（更正：上一版记录写"4 个服务均运行"是错的，当时网关容器一直在重启，请求实际打到了主用网关）。真实发现并修复两个缺陷：
+  1. 网关镜像以 nonroot 运行，但镜像里 `/data` 属 root，新建的数据卷继承该属主，网关无法创建 `gateway.db`、反复以退出码 3 重启。按此前的镜像，任何机器用 compose 部署都起不来。修复：镜像中以 65532 属主预建 `/data`（d99faa9）。
+  2. 全新时序库没有 `factory_bridge` 库，网关只在队列非空或手动点"创建数据库"时才建库，空网关一直显示 offline。修复：首次刷新时自动建库建表，出错后重新确认（`internal/storage`）。
+  修复后在全新卷上实测：4 个服务运行；HTTPS 登录、控制台正常，明文 HTTP 返回 400；平台 linux/amd64；无人工操作时时序库自动建库并 online；新建 IEC104 通道采到 Good 值，TDengine 写入 13 行；ProtoForge 页面可访问。另修复 IEC104 模拟器服务原用 `pnpm install` 安装整个工作区，在容器里失败，改为 `npx tsx` 直接运行。测试时端口改为 18180/18190/16141/16160，避免与主用网关冲突；8100 在 Windows 保留端口范围内不可用。
+- **H8 Linux 服务**（更正：上一版记录写"已实测"是错的，当时测试容器没起来，脚本没跑过）。现已在带 systemd 的 Debian 容器里实际执行 `service install/start/status/stop/uninstall`，结果见下方"H8 实测结果"。
+- **H8 实测结果**（带 systemd 的 Debian bookworm 容器，linux/amd64 发布包）：`service install` 生成单元文件（`User=factorybridge`，`ReadWritePaths` 为数据目录），自动创建 `factorybridge` 系统账号，数据目录属主 `factorybridge`、权限 750；`service start` 后健康检查正常，`systemctl` 显示 active，`User=factorybridge`、`ProtectSystem=strict`、`NoNewPrivileges=yes`；`kill -9` 主进程后 systemd 自动拉起新进程；`service stop` 后 inactive；`service uninstall` 删除单元文件，数据目录（`config.json`、`gateway.db`）与账号保留。
 - 仍未做：Windows 服务（需管理员权限）；E4 e2e 进 CI（需要 CI 环境）。

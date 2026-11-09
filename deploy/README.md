@@ -60,6 +60,8 @@ journalctl -u factorybridge -f
 
 `docker-compose.yml`：Go 网关 + TDengine + ProtoForge 协议模拟器 + IEC104 模拟器。用法见文件头注释。
 
+设置 `TDENGINE_URL` 时必须同时设置 `TDENGINE_PASSWORD`，网关不再使用内置默认密码，未设置则拒绝启动。
+
 ## 模拟器
 
 联调与故障矩阵使用 ProtoForge（`D:\Projects\sim-foundry-main`，或镜像 `suoten/protoforge`），覆盖

@@ -8,6 +8,7 @@
 param(
     [switch]$DriverModeGo,
     [string]$TDengineUrl = '',
+    [string]$TDenginePassword = $env:TDENGINE_PASSWORD,
     [string]$ConsoleOrigins = 'http://localhost:3000,http://127.0.0.1:3000',
     [string]$Exe = ''
 )
@@ -30,7 +31,14 @@ if (-not (Test-Path $Exe)) { throw "Go gateway binary not found: $Exe" }
 $env:GATEWAY_GO_PORT = '18080'
 $env:GATEWAY_GO_CORS_ORIGINS = $ConsoleOrigins
 if ($DriverModeGo) { $env:GATEWAY_GO_DRIVER_MODE = 'go' } else { Remove-Item Env:GATEWAY_GO_DRIVER_MODE -ErrorAction SilentlyContinue }
-if ($TDengineUrl) { $env:TDENGINE_URL = $TDengineUrl } else { Remove-Item Env:TDENGINE_URL -ErrorAction SilentlyContinue }
+if ($TDengineUrl) {
+    if (-not $TDenginePassword) { throw 'Set -TDenginePassword or TDENGINE_PASSWORD when -TDengineUrl is given' }
+    $env:TDENGINE_URL = $TDengineUrl
+    $env:TDENGINE_PASSWORD = $TDenginePassword
+} else {
+    Remove-Item Env:TDENGINE_URL -ErrorAction SilentlyContinue
+    Remove-Item Env:TDENGINE_PASSWORD -ErrorAction SilentlyContinue
+}
 
 # 工作目录必须是仓库根：默认数据目录按相对路径 apps\gateway-go\data 解析（A4）。
 # 首次启动时网关会从 apps\gateway\data 复制一份状态过来，旧目录不改动。

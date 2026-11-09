@@ -55,6 +55,9 @@ services:
     environment:
       GATEWAY_GO_DRIVER_MODE: go
       TDENGINE_URL: http://tdengine:6041
+      # 本 compose 栈是开发/演示栈，端口只绑定 127.0.0.1，TDengine 使用其镜像默认的 root 密码（taosdata）。
+      # 生产环境必须修改 TDengine root 密码，并设置 TDENGINE_PASSWORD，不能沿用此默认值。
+      TDENGINE_PASSWORD: ${TDENGINE_PASSWORD:-taosdata}
     volumes:
       - gateway-data:/data
     ports:

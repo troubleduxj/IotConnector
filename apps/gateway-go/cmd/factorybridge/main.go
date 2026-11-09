@@ -84,13 +84,18 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 	}
 
 	tdengineURL := os.Getenv("TDENGINE_URL")
+	tdenginePass, err := tdenginePassword()
+	if err != nil {
+		logger.Error(err.Error())
+		return exitConfig
+	}
 	queueFile := ""
 	if tdengineURL != "" {
 		queueFile = filepath.Join(dataDir, "outbox.json")
 	}
 	storageWriter := storage.New(storage.Config{
 		State: stateBatch, StateDB: database,
-		URL: tdengineURL, User: envOr("TDENGINE_USER", "root"), Password: envOr("TDENGINE_PASSWORD", "taosdata"),
+		URL: tdengineURL, User: envOr("TDENGINE_USER", "root"), Password: tdenginePass,
 		Database: envOr("TDENGINE_DB", "factory_bridge"), SuperTable: envOr("TDENGINE_STABLE", "st_factory_equipment"),
 		QueueFile: queueFile, AlarmQueueFile: func() string {
 			if queueFile == "" {
@@ -295,6 +300,15 @@ func envOr(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// tdenginePassword 返回 TDENGINE_PASSWORD。设置了 TDENGINE_URL 时必须显式提供密码，不使用内置默认值。
+func tdenginePassword() (string, error) {
+	password := os.Getenv("TDENGINE_PASSWORD")
+	if os.Getenv("TDENGINE_URL") != "" && password == "" {
+		return "", errors.New("TDENGINE_URL is set but TDENGINE_PASSWORD is empty; set the TDengine password explicitly")
+	}
+	return password, nil
 }
 
 func envInt(name string, fallback int) int {

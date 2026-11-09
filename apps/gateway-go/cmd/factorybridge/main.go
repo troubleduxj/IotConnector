@@ -138,13 +138,11 @@ func runGatewayContext(ctx context.Context, opts runOptions) int {
 			CORSOrigins:    splitCSV(os.Getenv("GATEWAY_GO_CORS_ORIGINS")),
 		},
 	)
-	northboundPublisher := northbound.NewDB(northbound.Config{Enabled: boolRaw(cfg.Raw["northbound"], "enabled"), URL: stringRaw(cfg.Raw["northbound"], "url", "mqtt://127.0.0.1:1883"), Username: stringRaw(cfg.Raw["northbound"], "username", ""), Password: stringRaw(cfg.Raw["northbound"], "password", ""), GroupID: stringRaw(cfg.Raw["northbound"], "groupId", "Factory"), EdgeNodeID: stringRaw(cfg.Raw["northbound"], "edgeNodeId", "FB_Edge_GW01"), DataFlushMs: intRaw(cfg.Raw["northbound"], "dataFlushMs", 1000)}, database, stateBatch, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
+	northboundPublisher := northbound.NewDB(northbound.ConfigFromRaw(cfg.Raw["northbound"]), database, stateBatch, filepath.Join(dataDir, "northbound.json"), toAcquisitionChannels(cfg), toAcquisitionTags(cfg))
 	northboundPublisher.OnCommand = func(name string, raw any) error {
 		_ = auditLogger.Record(audit.Event{Actor: "mqtt", Action: "mqtt.cmd", Target: name, Detail: map[string]any{"value": raw}})
-		for _, tag := range toAcquisitionTags(cfg) {
-			if tag.Name != name {
-				continue
-			}
+		// 按当前点表查找（C5）：启动后新增或改名的位号也能经 MQTT 下发。
+		if tag, ok := northboundPublisher.TagByName(name); ok {
 			switch value := raw.(type) {
 			case float64:
 				err := engine.Write(context.Background(), tag.ID, acquisition.NumberValue(value))

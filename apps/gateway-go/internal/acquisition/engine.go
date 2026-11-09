@@ -3,6 +3,7 @@ package acquisition
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,6 +11,8 @@ import (
 )
 
 type Engine struct {
+	// applyMu 串行化 Apply/Reload，避免两次配置变更交错启停同一通道。
+	applyMu            sync.Mutex
 	mu                 sync.RWMutex
 	channels           []Channel
 	tags               []Tag
@@ -84,36 +87,137 @@ func (e *Engine) Start(ctx context.Context) error {
 	channels := append([]Channel(nil), e.channels...)
 	e.mu.Unlock()
 	for _, channel := range channels {
-		if !channel.Enabled {
-			e.setStatus(ChannelStatus{ID: channel.ID, State: "disabled"})
-			continue
-		}
-		if e.factory == nil {
-			e.setStatus(ChannelStatus{ID: channel.ID, State: "disabled", Detail: "no driver factory configured"})
-			continue
-		}
-		channelTags := e.tagsForChannel(channel.ID)
-		driver := e.factory(channel, channelTags, e.publish, e.setStatus)
-		if driver == nil {
-			e.setStatus(ChannelStatus{ID: channel.ID, State: "error", Detail: "driver factory returned nil"})
-			continue
-		}
-		e.mu.Lock()
-		e.drivers[channel.ID] = driver
-		e.mu.Unlock()
-		e.setStatus(ChannelStatus{ID: channel.ID, State: "connecting"})
-		if err := driver.Start(ctx); err != nil {
-			e.setStatus(ChannelStatus{ID: channel.ID, State: "error", Detail: err.Error()})
-			continue
-		}
-		e.setStatus(ChannelStatus{ID: channel.ID, State: "online"})
+		e.startChannel(ctx, channel, e.tagsForChannel(channel.ID))
 	}
 	return nil
+}
+
+// startChannel 为一个通道建驱动并启动，结果写入通道状态。
+func (e *Engine) startChannel(ctx context.Context, channel Channel, channelTags []Tag) {
+	if !channel.Enabled {
+		e.setStatus(ChannelStatus{ID: channel.ID, State: "disabled"})
+		return
+	}
+	if e.factory == nil {
+		e.setStatus(ChannelStatus{ID: channel.ID, State: "disabled", Detail: "no driver factory configured"})
+		return
+	}
+	driver := e.factory(channel, channelTags, e.publish, e.setStatus)
+	if driver == nil {
+		e.setStatus(ChannelStatus{ID: channel.ID, State: "error", Detail: "driver factory returned nil"})
+		return
+	}
+	e.mu.Lock()
+	e.drivers[channel.ID] = driver
+	e.mu.Unlock()
+	e.setStatus(ChannelStatus{ID: channel.ID, State: "connecting"})
+	if err := driver.Start(ctx); err != nil {
+		e.setStatus(ChannelStatus{ID: channel.ID, State: "error", Detail: err.Error()})
+		return
+	}
+	e.setStatus(ChannelStatus{ID: channel.ID, State: "online"})
+}
+
+// Apply 切换到新的通道与位号配置，只重启有变化的通道（C5）。
+//
+// 通道参数或其下位号有任何变化即视为变化：驱动在创建时拿到位号列表，改位号也必须重建驱动。
+// 未变化的通道保持连接与采集不中断。被删除的通道停止驱动，并清掉它的状态和位号快照。
+// 返回被停止或重启的通道 ID（含新增、删除）。
+func (e *Engine) Apply(ctx context.Context, channels []Channel, tags []Tag) ([]string, error) {
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
+
+	e.mu.RLock()
+	oldChannels := channelIndex(e.channels)
+	oldTags := tagsByChannel(e.tags)
+	runCtx := e.runCtx
+	e.mu.RUnlock()
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	newChannels := channelIndex(channels)
+	newTags := tagsByChannel(tags)
+
+	changed := map[string]bool{}
+	for id, old := range oldChannels {
+		next, ok := newChannels[id]
+		if !ok || !reflect.DeepEqual(old, next) || !reflect.DeepEqual(oldTags[id], newTags[id]) {
+			changed[id] = true
+		}
+	}
+	for id := range newChannels {
+		if _, ok := oldChannels[id]; !ok {
+			changed[id] = true
+		}
+	}
+
+	var firstErr error
+	for id := range changed {
+		e.mu.RLock()
+		driver := e.drivers[id]
+		e.mu.RUnlock()
+		if driver != nil {
+			if err := driver.Stop(ctx); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("stop channel %s: %w", id, err)
+			}
+		}
+	}
+
+	keep := make(map[string]bool, len(tags))
+	for _, tag := range tags {
+		if !changed[tag.ChannelID] {
+			keep[tag.ID] = true
+		}
+	}
+	e.mu.Lock()
+	for id := range changed {
+		delete(e.drivers, id)
+		delete(e.statuses, id)
+	}
+	// 变化通道的位号重新采集；已删除位号的快照一并清掉。
+	for tagID := range e.snapshots {
+		if !keep[tagID] {
+			delete(e.snapshots, tagID)
+		}
+	}
+	e.channels = append([]Channel(nil), channels...)
+	e.tags = append([]Tag(nil), tags...)
+	e.tagChannel = buildTagChannel(tags)
+	e.mu.Unlock()
+
+	restarted := make([]string, 0, len(changed))
+	for _, channel := range channels {
+		if changed[channel.ID] {
+			e.startChannel(runCtx, channel, newTags[channel.ID])
+		}
+	}
+	for id := range changed {
+		restarted = append(restarted, id)
+	}
+	return restarted, firstErr
+}
+
+func channelIndex(channels []Channel) map[string]Channel {
+	index := make(map[string]Channel, len(channels))
+	for _, channel := range channels {
+		index[channel.ID] = channel
+	}
+	return index
+}
+
+func tagsByChannel(tags []Tag) map[string][]Tag {
+	out := map[string][]Tag{}
+	for _, tag := range tags {
+		out[tag.ChannelID] = append(out[tag.ChannelID], tag)
+	}
+	return out
 }
 
 // Reload replaces channels and tags while keeping the engine's parent context.
 // It is used by configuration APIs so persisted edits take effect immediately.
 func (e *Engine) Reload(ctx context.Context, channels []Channel, tags []Tag) error {
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
 	if err := e.Stop(ctx); err != nil {
 		return err
 	}

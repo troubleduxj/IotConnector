@@ -8,8 +8,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/eclipse/paho.mqtt.golang"
@@ -33,8 +35,10 @@ type Status struct {
 	LastError     string `json:"lastError,omitempty"`
 }
 type Publisher struct {
-	mu        sync.Mutex
-	cfg       Config
+	mu sync.Mutex
+	// model 是当前生效的北向配置与点表，整体替换（C5），读取无需加锁。
+	model     atomic.Pointer[model]
+	reconfMu  sync.Mutex
 	stateFile string
 	// state 非空时离线队列逐条写 SQLite、序号写 kv 表（G4）；原实现每条消息、每次 seq++ 都重写整个文件
 	state     *db.Batch
@@ -42,10 +46,88 @@ type Publisher struct {
 	client    mqtt.Client
 	status    Status
 	queue     []queuedMessage
-	tags      []acquisition.Tag
-	channels  []acquisition.Channel
 	OnCommand func(string, any) error
 }
+
+type model struct {
+	cfg      Config
+	channels []acquisition.Channel
+	tags     []acquisition.Tag
+}
+
+func (p *Publisher) current() *model { return p.model.Load() }
+
+// ConfigFromRaw 从 config.json 的 northbound 节解析配置，缺省值与旧版一致。
+func ConfigFromRaw(root any) Config {
+	values, _ := root.(map[string]any)
+	str := func(key, fallback string) string {
+		if value, ok := values[key].(string); ok && value != "" {
+			return value
+		}
+		return fallback
+	}
+	enabled, _ := values["enabled"].(bool)
+	flush := 1000
+	if value, ok := values["dataFlushMs"].(float64); ok && value > 0 {
+		flush = int(value)
+	}
+	return Config{Enabled: enabled, URL: str("url", "mqtt://127.0.0.1:1883"), Username: str("username", ""), Password: str("password", ""),
+		GroupID: str("groupId", "Factory"), EdgeNodeID: str("edgeNodeId", "FB_Edge_GW01"), DataFlushMs: flush}
+}
+
+// TagByName 按名称查找当前点表中的位号，供 MQTT 下发命令使用。
+func (p *Publisher) TagByName(name string) (acquisition.Tag, bool) {
+	for _, tag := range p.current().tags {
+		if tag.Name == name {
+			return tag, true
+		}
+	}
+	return acquisition.Tag{}, false
+}
+
+// SetModel 替换通道与位号（配置变更后调用），连接不中断；点表有变化时重发 BIRTH。
+func (p *Publisher) SetModel(channels []acquisition.Channel, tags []acquisition.Tag) {
+	p.reconfMu.Lock()
+	defer p.reconfMu.Unlock()
+	old := p.current()
+	if reflect.DeepEqual(old.channels, channels) && reflect.DeepEqual(old.tags, tags) {
+		return
+	}
+	p.model.Store(&model{cfg: old.cfg, channels: channels, tags: tags})
+	if p.Status().Connected {
+		p.publishBirths()
+	}
+}
+
+// Reconfigure 应用新的北向配置（C5），不需要重启网关。
+// 连接相关字段（地址、账号、组/节点 ID、启用）变化时断开并按新配置重连；否则只替换配置。
+// 返回是否重连。
+func (p *Publisher) Reconfigure(cfg Config) bool {
+	p.reconfMu.Lock()
+	defer p.reconfMu.Unlock()
+	old := p.current()
+	if old.cfg == cfg {
+		return false
+	}
+	reconnect := connectionKey(old.cfg) != connectionKey(cfg)
+	if reconnect {
+		p.Stop()
+	}
+	p.model.Store(&model{cfg: cfg, channels: old.channels, tags: old.tags})
+	if reconnect {
+		p.Start()
+	}
+	return reconnect
+}
+
+func connectionKey(c Config) Config {
+	c.DataFlushMs = 0
+	if !c.Enabled {
+		return Config{}
+	}
+	return c
+}
+
 type queuedMessage struct {
 	id      int64
 	Topic   string `json:"topic"`
@@ -54,14 +136,16 @@ type queuedMessage struct {
 }
 
 func New(cfg Config, stateFile string, channels []acquisition.Channel, tags []acquisition.Tag) *Publisher {
-	p := &Publisher{cfg: cfg, stateFile: stateFile, channels: channels, tags: tags}
+	p := &Publisher{stateFile: stateFile}
+	p.model.Store(&model{cfg: cfg, channels: channels, tags: tags})
 	p.load()
 	return p
 }
 
 // NewDB 使用 SQLite 持久化队列与序号；库中无状态且存在旧 northbound.json 时导入一次并改名为 .migrated。
 func NewDB(cfg Config, database *db.DB, batch *db.Batch, legacyFile string, channels []acquisition.Channel, tags []acquisition.Tag) *Publisher {
-	p := &Publisher{cfg: cfg, state: batch, channels: channels, tags: tags}
+	p := &Publisher{state: batch}
+	p.model.Store(&model{cfg: cfg, channels: channels, tags: tags})
 	var raw string
 	if database.QueryRow(`SELECT value FROM kv WHERE key = 'northbound.state'`).Scan(&raw) == nil {
 		var counters struct {
@@ -139,7 +223,7 @@ func (p *Publisher) Status() Status {
 	return s
 }
 func (p *Publisher) Start() {
-	if !p.cfg.Enabled || p.cfg.URL == "" {
+	if cfg := p.current().cfg; !cfg.Enabled || cfg.URL == "" {
 		return
 	}
 	p.connect()
@@ -150,39 +234,49 @@ func (p *Publisher) Stop() {
 	p.client = nil
 	p.status.Connected = false
 	p.mu.Unlock()
-	if client != nil && client.IsConnected() {
+	if client != nil {
+		// 未连上时也要 Disconnect，否则自动重连协程会继续用旧地址重试。
 		client.Disconnect(100)
 	}
 }
 func (p *Publisher) Rebirth() { p.publishBirths() }
 
 func (p *Publisher) connect() {
+	cfg := p.current().cfg
 	p.mu.Lock()
 	p.status.BDSeq++
 	bd := p.status.BDSeq
 	p.persistLocked()
 	p.mu.Unlock()
 	will := encodePayload(uint64(time.Now().UnixMilli()), []metric{{Name: "bdSeq", Timestamp: time.Now().UnixMilli(), DataType: 9, Value: float64(bd)}}, 0)
-	brokerURL := normalizeBrokerURL(p.cfg.URL)
-	opts := mqtt.NewClientOptions().AddBroker(brokerURL).SetClientID(fmt.Sprintf("%s_%d", p.cfg.EdgeNodeID, os.Getpid())).SetCleanSession(true).SetAutoReconnect(true).SetConnectRetry(true).SetConnectRetryInterval(5 * time.Second)
-	if p.cfg.Username != "" {
-		opts.SetUsername(p.cfg.Username)
-		opts.SetPassword(p.cfg.Password)
+	brokerURL := normalizeBrokerURL(cfg.URL)
+	opts := mqtt.NewClientOptions().AddBroker(brokerURL).SetClientID(fmt.Sprintf("%s_%d", cfg.EdgeNodeID, os.Getpid())).SetCleanSession(true).SetAutoReconnect(true).SetConnectRetry(true).SetConnectRetryInterval(5 * time.Second)
+	if cfg.Username != "" {
+		opts.SetUsername(cfg.Username)
+		opts.SetPassword(cfg.Password)
 	}
-	opts.SetWill(topic(p.cfg, "NDEATH", ""), string(will), 1, false)
+	opts.SetWill(topic(cfg, "NDEATH", ""), string(will), 1, false)
 	opts.OnConnect = func(client mqtt.Client) {
 		p.mu.Lock()
-		p.client = client
+		if p.client != client { // 已被 Reconfigure/Stop 替换的旧连接
+			p.mu.Unlock()
+			client.Disconnect(0)
+			return
+		}
 		p.status.Connected = true
 		p.status.LastError = ""
 		p.mu.Unlock()
-		client.Subscribe(fmt.Sprintf("spBv1.0/%s/STATE/+", p.cfg.GroupID), 1, p.handleMessage)
-		client.Subscribe(fmt.Sprintf("spBv1.0/%s/CMD/%s/#", p.cfg.GroupID, p.cfg.EdgeNodeID), 1, p.handleMessage)
+		client.Subscribe(fmt.Sprintf("spBv1.0/%s/STATE/+", cfg.GroupID), 1, p.handleMessage)
+		client.Subscribe(fmt.Sprintf("spBv1.0/%s/CMD/%s/#", cfg.GroupID, cfg.EdgeNodeID), 1, p.handleMessage)
 		p.publishBirths()
 		p.flush()
 	}
-	opts.OnConnectionLost = func(_ mqtt.Client, err error) {
+	opts.OnConnectionLost = func(lost mqtt.Client, err error) {
 		p.mu.Lock()
+		if p.client != lost {
+			p.mu.Unlock()
+			return
+		}
 		p.status.Connected = false
 		if err != nil {
 			p.status.LastError = err.Error()
@@ -198,6 +292,10 @@ func (p *Publisher) connect() {
 		token := client.Connect()
 		if token.Wait() && token.Error() != nil {
 			p.mu.Lock()
+			if p.client != client {
+				p.mu.Unlock()
+				return
+			}
 			p.status.LastError = token.Error().Error()
 			p.status.Connected = false
 			p.mu.Unlock()
@@ -242,7 +340,8 @@ func (p *Publisher) handleMessage(_ mqtt.Client, message mqtt.Message) {
 }
 
 func (p *Publisher) PublishSample(sample acquisition.Sample) {
-	if !p.cfg.Enabled {
+	m := p.current()
+	if !m.cfg.Enabled {
 		return
 	}
 	var value any
@@ -256,7 +355,7 @@ func (p *Publisher) PublishSample(sample acquisition.Sample) {
 		return
 	}
 	var tag acquisition.Tag
-	for _, item := range p.tags {
+	for _, item := range m.tags {
 		if item.ID == sample.TagID {
 			tag = item
 			break
@@ -266,38 +365,40 @@ func (p *Publisher) PublishSample(sample acquisition.Sample) {
 		return
 	}
 	data := encodePayload(uint64(time.Now().UnixMilli()), []metric{{Name: tag.Name, Timestamp: sample.SampledAt, DataType: dataType(tag.DataType), Value: value}}, p.nextSeq())
-	p.publishOrQueue(topic(p.cfg, "DDATA", channelName(p.channels, tag.ChannelID)), data)
+	p.publishOrQueue(topic(m.cfg, "DDATA", channelName(m.channels, tag.ChannelID)), data)
 }
 
 func (p *Publisher) PublishShadow(snapshot any) {
-	if !p.cfg.Enabled {
+	cfg := p.current().cfg
+	if !cfg.Enabled {
 		return
 	}
 	payload, err := json.Marshal(map[string]any{"ts": time.Now().UnixMilli(), "shadow": snapshot})
 	if err != nil {
 		return
 	}
-	p.publishOrQueueRetained(fmt.Sprintf("%s/shadow/%s", p.cfg.GroupID, p.cfg.EdgeNodeID), payload)
+	p.publishOrQueueRetained(fmt.Sprintf("%s/shadow/%s", cfg.GroupID, cfg.EdgeNodeID), payload)
 }
 
 func (p *Publisher) publishBirths() {
-	if !p.cfg.Enabled {
+	m := p.current()
+	if !m.cfg.Enabled {
 		return
 	}
 	nb := encodePayload(uint64(time.Now().UnixMilli()), []metric{{Name: "Node Control/Rebirth", Timestamp: time.Now().UnixMilli(), DataType: 12, Value: false}, {Name: "bdSeq", Timestamp: time.Now().UnixMilli(), DataType: 9, Value: float64(p.Status().BDSeq)}}, p.nextSeq())
-	p.publishOrQueue(topic(p.cfg, "NBIRTH", ""), nb)
-	for _, channel := range p.channels {
+	p.publishOrQueue(topic(m.cfg, "NBIRTH", ""), nb)
+	for _, channel := range m.channels {
 		if !channel.Enabled {
 			continue
 		}
 		var metrics []metric
-		for _, tag := range p.tags {
+		for _, tag := range m.tags {
 			if tag.ChannelID == channel.ID {
 				metrics = append(metrics, metric{Name: tag.Name, Timestamp: time.Now().UnixMilli(), DataType: dataType(tag.DataType), Value: float64(0)})
 			}
 		}
 		if len(metrics) > 0 {
-			p.publishOrQueue(topic(p.cfg, "DBIRTH", channel.ID), encodePayload(uint64(time.Now().UnixMilli()), metrics, p.nextSeq()))
+			p.publishOrQueue(topic(m.cfg, "DBIRTH", channel.ID), encodePayload(uint64(time.Now().UnixMilli()), metrics, p.nextSeq()))
 		}
 	}
 }

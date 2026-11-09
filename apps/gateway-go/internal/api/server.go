@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math"
 	"mime"
 	"net"
@@ -957,10 +958,28 @@ func (s *Server) persistConfigLocked(update func(*config.Config)) error {
 	if err != nil {
 		return err
 	}
+	return s.applyRuntimeConfig(*next)
+}
+
+// applyRuntimeConfig 把已保存的配置应用到采集引擎和北向发布（C5）：
+// 只重启有变化的通道；北向点表随之更新，连接参数变化时重连。
+func (s *Server) applyRuntimeConfig(next config.Config) error {
+	channels, tags := engineChannels(next), engineTags(next)
+	var err error
 	if s.engine != nil {
-		return s.engine.Reload(context.Background(), engineChannels(*next), engineTags(*next))
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		var restarted []string
+		restarted, err = s.engine.Apply(ctx, channels, tags)
+		cancel()
+		if len(restarted) > 0 {
+			slog.Info("channels restarted after config change", "channels", restarted)
+		}
 	}
-	return nil
+	if s.northboundPublisher != nil {
+		s.northboundPublisher.SetModel(channels, tags)
+		s.northboundPublisher.Reconfigure(northbound.ConfigFromRaw(next.Raw["northbound"]))
+	}
+	return err
 }
 
 func engineChannels(cfg config.Config) []acquisition.Channel {

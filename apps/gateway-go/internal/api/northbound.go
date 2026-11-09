@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
+	"github.com/factorybridge/iotconnector/gateway-go/internal/northbound"
 	"net/http"
 )
 
@@ -30,6 +31,11 @@ func (s *Server) updateNorthbound(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
 		return
+	}
+	// C5：新配置立即生效，不再需要重启网关。
+	if s.northboundPublisher != nil {
+		reconnected := s.northboundPublisher.Reconfigure(northbound.ConfigFromRaw(cfg))
+		s.recordAudit(r, actor(r), "northbound.update", "northbound", map[string]any{"reconnected": reconnected})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": redactSecrets(cfg), "status": s.northboundStatus()})
 }

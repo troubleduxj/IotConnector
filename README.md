@@ -1,265 +1,205 @@
-# Factory Bridge - Enterprise IIoT Edge Gateway Console
+# Factory Bridge
 
-**Factory Bridge** 是一款面向工业物联网 (IIoT) 场景设计的企业级边缘计算网关配置与监控控制台。它将复杂的工业设备接入、现场总线协议解析、毫秒级时间片调度、数据清洗、本地时序持久化以及云端上报等底层硬核逻辑，通过极具现代感和专业度的高质感 Web UI 进行可视化呈现与全生命周期管理。
+[![CI](https://github.com/troubleduxj/IotConnector/actions/workflows/ci.yml/badge.svg)](https://github.com/troubleduxj/IotConnector/actions/workflows/ci.yml)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE)
 
-本项目不仅支持传统的工业数据监控，更深度融合了 **TDengine 超级表时序引擎**、**多协议批量聚合调度 (Read Plan)**、**跨量纲归一化趋势分析**、**Redis 实时流总线** 以及 **设备影子 (Device Shadow)** 等现代工业 4.0 与分布式边缘网关的最佳工程实践。
+Factory Bridge 是一套工业物联网（IIoT）边缘网关：一个 Go 编写的单文件网关，负责采集 PLC、仪表和楼宇设备的数据，写入时序库、上报北向 MQTT；配套一个 Web 控制台，用来配置通道和位号、查看实时值与历史曲线、管理告警、配方和边缘脚本。
+
+> **许可**：本项目仅允许个人、学习、研究等**非商业用途**，禁止商用。详见 [许可协议](#许可协议)。
 
 ---
 
-## 🏗️ 核心技术架构 (Edge-to-Cloud Pipeline)
+## 功能
+
+- **10 种南向协议**：Siemens S7、Modbus TCP、Mitsubishi MELSEC、Omron FINS、EtherNet/IP（Rockwell）、OPC UA、MQTT、SNMP、BACnet/IP、IEC 60870-5-104。全部为 Go 原生驱动。
+- **采集调度**：按通道周期轮询，相位错开启动，可一键重均衡；每通道统计收发帧数、错误、超时和平均周期延迟。
+- **位号质量**：单个位号读失败只标记该位号为 Bad，不让整个通道离线。
+- **配置热更新**：修改通道或位号只重启受影响的通道，其余通道继续采集；北向 MQTT 设置改后立即生效。
+- **时序存储**：写入 TDengine 超级表，网关断线期间点位进入本地队列，恢复后补写；首次连接自动建库建表。
+- **历史查询**：多位号同屏对比、原始值与归一化两种刻度、统计包络（最小、最大、均值、标准差），可导出 PNG、SVG、CSV。
+- **告警**：高限、低限、偏差、变化率四类规则；确认机制；Webhook、钉钉、企业微信、邮件四种通知渠道。
+- **北向 MQTT / Sparkplug B**：NBIRTH、DBIRTH、DDATA、NDEATH，离线排队后补发；设备影子同时发布 reported 与 desired 值。
+- **配方**：多套工艺参数，版本号自动递增，一键下发到控制器，下发记录可追溯。
+- **边缘脚本**：JavaScript（goja），在隔离子进程中运行；限时 1 秒、内存上限 64 MB，脚本失败时本次写值全部丢弃，连续失败 3 次自动停用。
+- **存储任务**：周期、死区、边沿、条件表达式四种触发方式。
+- **安全**：四级角色（viewer、operator、engineer、admin）、全部路由按角色授权、一次性 WebSocket 票据、登录失败锁定、审计日志；非回环地址强制 HTTPS，可设访问白名单；口令只写不读，配置备份默认不含口令。
+- **配置版本**：采集配置每次保存在 `gateway.db` 中留一个版本，可列出、导出和回退。
+
+---
+
+## 架构
 
 ```
-[工业现场设备 PLC / Sensors / Drives / Inverters / HVAC]
-   │
-   ├── Siemens S7 / Profinet (RFC1006)
-   ├── EtherNet/IP & CIP (ControlLogix / Micro800)
-   ├── Mitsubishi MELSEC (SLMP / MC 3E/1E)
-   ├── Omron FINS (CJ2 / CS1 / NJ / NX)
-   ├── OPC UA (IEC 62541 / SecureChannel)
-   ├── Modbus TCP (IEC 61158 / RTU over TCP)
-   ├── MQTT / Sparkplug B (Group/Node/Device)
-   ├── BACnet/IP (ASHRAE 135)
-   └── IEC 60870-5-104 (电力远动)
-   │
+现场设备（PLC / 仪表 / 变频器 / 楼宇 / 电力）
+   │  S7 · Modbus TCP · MELSEC · FINS · EtherNet/IP · OPC UA · MQTT · SNMP · BACnet/IP · IEC 104
    ▼
-[1. 南向多协议采集与握手测试 (Southbound Driver Layer)]
-   │
-   ▼
-[2. 毫秒级时间片调度与报文合并 (Acquisition Scheduler & Read Plan)]
-   ├── 时间片打散削峰 (Time-Slice Balancing)
-   └── 协议级 PDU / 批量字寄存器打包吞吐调优 (Modbus/S7/CIP/MC)
-   │
-   ▼
-[3. 边缘数据清洗与标度变换 (Edge Data Transform: Scale / Offset / Deadband)]
-   │
-   ▼
-[4. 实时分发 (WS 推送至控制台 + 北向 Sparkplug B 管道)]
-   │
-   ├──▶ [5. 本地高性能时序持久化 (TDengine STable Schemaless Ingestion)]
-   ├──▶ [6. 边缘脚本联动与配方控制 (Python Scripts & Recipe Engine)]
-   └──▶ [7. 北向断网续传与状态镜像 (MQTT Reliable Outbox & Device Shadow)]
+┌──────────────────────────── factorybridge（Go 单文件网关）────────────────────────────┐
+│  采集引擎（按通道调度、位号质量）                                                       │
+│     │                                                                                   │
+│     ├─▶ 实时推送（WebSocket，100 ms 合并）──────────────▶ Web 控制台（同端口托管）        │
+│     ├─▶ 时序存储（TDengine，断线排队补写）                                               │
+│     ├─▶ 告警 → 通知（Webhook / 钉钉 / 企微 / 邮件）                                       │
+│     ├─▶ 存储任务、边缘脚本（隔离子进程）、配方下发                                        │
+│     └─▶ 北向 MQTT / Sparkplug B（离线排队）与设备影子                                     │
+│                                                                                         │
+│  状态库 gateway.db（SQLite）：用户、会话、配置版本、历史、告警、审计、队列                │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
+### 目录结构
 
-## ✨ 核心功能模块与近期更新特性 (Features & Recent Updates)
-
-### 1. 🔌 多协议工业通讯矩阵 (Industrial Protocols Ecosystem)
-支持覆盖离散制造、过程控制、楼宇自控及电力电网的主流协议：
-* **Siemens Profinet / S7 (ISO-on-TCP 102)**：支持 S7-1500 / 1200 / 300 / 400 / 200 SMART，可配 Rack、Slot、连接模式 (OP/PG/Basic) 与 PDU 协商 (240/480/960 Bytes)。
-* **EtherNet/IP & CIP (ODVA CIP 44818)**：支持 Rockwell / Allen-Bradley ControlLogix、CompactLogix、Micro800，支持 CIP 路由路径 (如 `1,0`)、CPU 插槽与 Class 3 / UCMM 报文。
-* **Mitsubishi MELSEC (SLMP / MC 3E/1E 5000)**：支持 iQ-R、iQ-F (FX5U)、Q、L 系列，支持二进制/ASCII 帧格式、网络号/站号寻址。
-* **Omron FINS (9600)**：支持 CJ2 / CS1 / NJ / NX 系列，支持源/目的网络号、节点号与单元号路由。
-* **OPC UA (IEC 62541 4840)**：支持 Endpoint URL、安全策略 (None / Sign / SignAndEncrypt)、加密算法 (Basic256Sha256 / Aes128) 及 X.509/匿名认证。
-* **Modbus TCP (502)**：支持 Slave/Unit ID、32/64 位字节顺序切换 (CDAB/ABCD/DCBA/BADC)、0/1 基址偏移与最大连续寄存器批量调节。
-* **MQTT / Sparkplug B (1883/8883)**：支持工业 Sparkplug B v2.2 规范 (Group ID / Edge Node ID / Device ID)、QoS 0/1/2、TLS/SSL 及断网离线缓存。
-* **BACnet/IP (47808)**：支持楼宇与暖通自控 (HVAC/冷机)，配置 Device Instance ID、Max APDU 长度与 BBMD 注册。
-* **IEC 60870-5-104 (2404)**：支持电力电网远动通讯，配置 Common ASDU 地址、COT/IOA 字节长度与 T1/T2/T3 超时定时器。
-* **BACnet/IP (47808)**：楼宇自控 HVAC/冷机/照明/电力表，位号地址 = 对象类型:实例（AI:1/AV:3/BI:1/BV:2），
-  读 PresentValue（readPropertyMultiple 批量轮询），AV/AO/BV 支持下发；驱动以 raw dgram 实现
-  （bacstack beta 的发送端口=绑定端口，同机模拟器必然冲突）；内置模拟器
-  ProtoForge 的 BACnet 模拟器（见 `deploy/README.md`）。
-* **IEC 60870-5-104 (2404)**：电力远动/配电自动化，零依赖手写协议栈（iec104-codec：APCI I/S/U 帧 +
-  ASDU M_SP_NA/M_ME_NC/C_IC_NA 编解码）；驱动 TCP → STARTDT 激活 → 周期总召唤（cot=6）→ 按 IOA 匹配
-  位号（Bool→单点遥信、数值→浮点遥测）→ publish，S 帧确认；位号地址 = IOA:n；内置站端模拟器
-  `pnpm --filter @iotconnector/sim iec104-sim`（遥测 IOA 1-4 动态 + 遥信 IOA 1001-1004 周期翻转）。
-* **SNMP v1/v2c (161)**：UPS / PDU / 环境传感器 / 网络设备 / 能耗表轮询，位号地址为点分 OID，
-  OctetString 自动转数值/字符串；模拟用 ProtoForge 的 SNMP 模拟器。
-* **MQTT 南向采集 (1883)**：订阅型驱动——位号地址 = 订阅主题，支持「主题#字段路径」语法
-  （如 `factory/line1/status#temp` 取 JSON 字段、`factory/line1/counter#` 取原始标量），
-  多位号可共用主题各取字段；配套 aedes 完整 broker（`mqtt-dev-broker`）与发布模拟器（`mqtt-sim`）。
-* **协议辅助工具**：内置各协议标准地址语法说明表 (Address Syntax Reference)、实时通讯链路握手测试
-  （六协议分步握手 + S7 全位号批量探针 + OPC UA 订阅采样 + MQTT CONNACK/SUBACK/采样 + SNMP GET）
-  与十六进制协议诊断抓包分析器。
+| 目录 | 内容 |
+|---|---|
+| `apps/gateway-go` | Go 网关：`cmd/factorybridge`（命令行入口）与 `internal/`（采集、API、存储、北向、认证等） |
+| `apps/console` | Web 控制台：React 19、TypeScript、Vite、Tailwind CSS |
+| `tools/sim` | Modbus TCP 与 IEC 104 模拟器（开发与测试用） |
+| `e2e` | 端到端测试（Playwright）与自带测试环境 |
+| `deploy` | 部署手册、Docker 镜像、systemd 参考单元、运行参数配置示例 |
+| `docs` | 安全验收清单、评审任务记录、需求与设计文档 |
+| `scripts` | 本地门禁、发布打包、压测、故障矩阵等脚本 |
 
 ---
 
-### 2. 📈 历史时序查询与多位号比对分析 (Historian Query & Multi-Tag Analytics) —— *[全新升级]*
-针对工业现场海量历史数据检索与跨设备工艺比对需求，进行了深度重构与优化：
-* **多维度位号检索与筛选**：
-  * 支持按位号名称、所属通道、数据类型进行实时模糊检索与一键重置。
-  * 提供设备/通道快速过滤芯片 (Filter Chips)。
-  * 内置「Top 6 核心工艺参数」、「反应釜 R0021 全量点位」、「传动与电机群」一键对比预设。
-* **多位号同屏同步比对 (Multi-Tag Comparison)**：
-  * 支持最多 8 个不同设备/点位同时绘制，每个位号分配独立的高辨识度工业标准色标。
-  * 支持单个曲线独立的显示/隐藏 (Show/Hide) 切换。
-* **双模式 Y 轴尺度切换 (Scaling Modes)**：
-  * **归一化模式 (Normalized 0-100%)**：彻底解决不同量纲/量程物理量（如 pH 值 7.2 与 转速 1200 RPM、温度 35℃、电流 24A）因数值悬殊无法直观同屏对比的痛点，将各物理量动态映射至 0~100% 相对区间进行工艺相关性与扰动分析。
-  * **原始物理量模式 (Raw Engineering Values)**：保留原始物理工程单位，自适应刻度显示。
-* **灵活的时间窗口与重采样策略 (Time Window & Resampling)**：
-  * 快速预设：`15m`、`1h`、`6h`、`24h`、`7d`、`30d`。
-  * 自定义起止时间选择器：精确到分秒的时间跨度选择。
-  * 采样粒度：支持 `1s (原始采样)`、`5s 均值`、`1m 插值`、`5m 包络` 降噪与平滑。
-  * 实时动态轮询 (Live Polling)：支持一键开启/暂停秒级定时数据刷新与流式追加。
-* **曲线图片与工业报表导出 (Export Capabilities)**：
-  * **导出高清图表 PNG (Export Chart PNG)**：通过 HTML5 Canvas 高清渲染，自动合成系统标题、时间跨度元数据、对比图表及底部各点位极值统计摘要，便于直接插入质量分析与交接班报告。
-  * **导出矢量图 SVG (Export Vector SVG)**：支持矢量格式下载，适用于 SCADA 组态与工程文档。
-  * **导出 Excel / CSV 表格**：一键导出包含时间戳、Epoch 毫秒数及各点位带单位数据的标准 CSV 结构化文件。
-* **点位统计包络表 (Statistical Metrics Table)**：
-  * 实时计算并展示所选时间窗口内的：**最新值、最小值 (Min)、最大值 (Max)、平均值 ($\mu$)、标准差 ($\sigma$)、峰峰值波动范围 ($\Delta$)、通讯质量等级 (Quality)**。
+## 快速开始
 
----
+### 环境要求
 
-### 3. ⏱️ 采集调度引擎 (Acquisition Scheduler)
-* **时间片负载均衡 (Time Slice Load Balancing)**：将高频采集任务打散分配到不同毫秒级时间片中，动态重均衡 (Dynamic Rebalancing) 削峰填谷，彻底避免 CPU 和网络 I/O 尖刺。
-* **协议读计划聚合 (Read Plan Tuning)**：智能分析连续的寄存器地址，自动合并为单次批量读取报文（支持 Modbus、Siemens S7 PDU 240/480/960 Bytes、Rockwell CIP Multiple Service Packet、Mitsubishi MC 3E Bulk Words 吞吐量优化）。
-* **线程池解耦**：采集 I/O 与数据后处理线程池独立调配。
+- Go 1.26 或更高
+- Node.js 22 与 pnpm 10
+- （可选）Docker：运行 TDengine、模拟器、e2e 测试
 
----
-
-### 4. 🗄️ 数据持久化规则引擎 (Data Storage Rules)
-* **TDengine 时序整合**：采用“超级表 (STable) + 子表”架构，告别传统关系型数据库臃肿的列映射。
-* **Schemaless Ingestion (无模式写入)**：网关自动注入 `Timestamp`、`Value`，并自动打上 `Channel`、`TagName`、`BatchID` 等标签，实现千万级时序数据高效写入。
-* **灵活触发模式**：支持连续周期存储、变化量/死区存储、上升沿触发或自定义表达式逻辑。
-
----
-
-### 5. ⚙️ 系统与网络配置 (System Configuration)
-* **MQTT 断网续传 (Reliable Outbox)**：开启后，在离线状态下本地缓冲遥测数据，并在网络恢复后可靠顺序推送到云端。
-* **设备影子 (Device Shadow)**：边缘端为每位号维护 reported（采集上报）+ desired（写管道期望值）双快照，
-  不一致标记「待收敛」；REST `GET /api/shadow` 查询，同时以 retain QoS1 发布至
-  `<组ID>/shadow/<节点ID>`（订阅即得最新状态，断线入 Outbox 补传）。
-* **真实端点管理**：Web API 状态（端口/OpenAPI 清单）、TDengine 连通实测与建库、
-  诊断导出、恢复出厂（二次确认）均为真实后端操作。
-
----
-
-### 6. 🔍 在线参数诊断 (Parameter Diagnose)
-* 类似工控机/上位机的在线监视功能，支持实时读取/写入 PLC 内部寄存器与变量，用于现场工程师调试与信号点检。
-
----
-
-### 7. 📜 配方管理系统 (Recipe Management)
-* 支持建立与维护多套工艺配方（包含工艺目标值、转速、温度、浓度等参数），支持一键批量下载下发到 PLC，适用于柔性生产与多品种换线。
-* **版本管理**：参数集变更自动递增版本号（v1→v2…），仅改名称/说明不动版本；下发记录持久化（操作人/时间/成功数，最近 200 条）。
-* **导入导出/复制**：JSON 导出（位号 id+名双写，跨网关可导入）、导入（重名 409、位号按 id/名匹配、失败中文明细）、一键复制副本。
-
----
-
-### 8. 📜 边缘脚本扩展引擎 (JS 沙箱，决策 D5)
-* 内置 JavaScript 规则脚本编辑器（`node:vm` 沙箱 + 1s 超时 + 白名单 API：`Read/Write/log`），
-  触发方式支持周期 / 位号变化 / 手动；写操作脚本结束后批量下发。
-* **运行监控与崩溃自愈**：执行次数/耗时/错误统计实时展示；连续 3 次失败自动停用脚本
-  （落配置 + system 审计），修复后一键重新启用。
-
----
-
-### 9. 🆕 近期迭代摘要 (2026-09)
-
-* **存储任务**：周期 / 死区 / 边沿 / **条件表达式**（位号按名引用、白名单校验、上升沿写行）四种触发；
-  运行状态监控（写入数/近 1 分钟速率/最近写入/错误计数）。
-* **采集调度**：每通道帧级 TX/RX/错误/超时率/最近通讯/平均周期延迟；相位错开启动 + 一键重均衡。
-* **连接测试**：六协议真实分步握手；S7 全位号单 PDU 批量探针、OPC UA MonitoredItem 订阅采样探针。
-* **通道管理**：JSON 导入导出（协议参数 schema 校验 + 地址语法预校验）、点位表实时值列（值变化 400ms 高亮）、地址逐键在线校验。
-* **告警**：high/low/deviation/ROC 四类规则、确认机制、四渠道通知（Webhook/钉钉加签/企微/邮件）+ **消息模板变量**。
-* **认证安全**：会话持久化、首登强制改密、全局限速、登录失败 5 次锁定 10 分钟、审计全程落盘。
-* **工程化**：中英双语 i18n（662 键零缺失）、统一 Toast/应用内确认与输入对话框、Vitest 47 例、CI。
-
----
-
-## 🛠️ 技术栈 (Technology Stack)
-
-* **前端框架**: React 19, TypeScript, Vite（hash 路由 + 视图级懒加载分包）
-* **可视化图表与动画**: Recharts, Canvas API, Lucide React
-* **样式系统**: Tailwind CSS (现代工业级高对比度/暗色工程主题规范)
-* **工业协议概念与后端模型**:
-  * 协议栈：Siemens S7 (RFC1006), Rockwell CIP, Mitsubishi MC 3E/1E, Omron FINS, OPC UA, Modbus TCP, MQTT/Sparkplug B, BACnet/IP, IEC 104
-  * 时序存储引擎：TDengine (STable + 子表)
-  * 消息中间件：MQTT / Sparkplug B (Reliable Outbox, QoS 1)
-  * 脚本沙箱：node:vm（决策 D5）；测试：Vitest（47 例）
-
----
-
-## 🚀 快速启动 (Getting Started)
-
-> 项目为 pnpm monorepo：`apps/console`（Web 控制台）+ `apps/gateway-go`（Go 网关）+ `tools/sim`（Modbus、IEC104 模拟器）。Node 网关与 `packages/shared` 已于 2026-11-09 删除（D0-5），最后版本见 tag `node-final`。
-
-1. **安装依赖**：
-   ```bash
-   pnpm install
-   ```
-
-2. **启动 Go 网关（开发模式）与控制台**：
-   ```bash
-   pnpm dev:gateway   # Go 网关，http://127.0.0.1:18080，开发模式只监听回环地址
-   pnpm dev           # 控制台，http://localhost:3000
-   ```
-
-3. **（可选）启动协议模拟器**：Modbus TCP 与 IEC104 用 `tools/sim`，其余协议用 ProtoForge（见 `deploy/README.md` 的"模拟器"一节）：
-   ```bash
-   pnpm --filter @iotconnector/sim modbus-sim   # 默认 127.0.0.1:15020，MODBUS_SIM_PORT 可改
-   pnpm --filter @iotconnector/sim iec104-sim   # 默认 :2404，IEC104_SIM_PORT 可改
-   ```
-
-4. **访问控制台**：
-   在浏览器中打开 `http://localhost:3000`。Dashboard 顶栏徽章显示网关连接状态；"Live Equipment Status" 中的实时位号（pH/温度/压力/转速/电流）由网关推送驱动。
-
-### 端到端测试（e2e）
+### 本地开发
 
 ```bash
-pnpm e2e:docker                 # 构建 linux 发布包 → 容器里起网关与 IEC104 模拟器 → Playwright 跑测试 → 拆除
+pnpm install
+pnpm dev:gateway        # Go 网关，开发模式，http://127.0.0.1:18080（只监听回环地址）
+pnpm dev                # 控制台开发服务器，http://localhost:3000
+```
+
+开发模式会自动创建开发账号，口令打印在网关日志里；也可以设 `FB_DEV_PASSWORD` 指定。浏览器打开 `http://localhost:3000` 登录。
+
+### 启动模拟器（可选）
+
+```bash
+pnpm --filter @iotconnector/sim modbus-sim    # Modbus TCP，默认 127.0.0.1:15020
+pnpm --filter @iotconnector/sim iec104-sim    # IEC 104，默认 :2404
+```
+
+其余协议可用 [ProtoForge](https://hub.docker.com/r/suoten/protoforge) 模拟，用法见 [deploy/README.md](deploy/README.md) 的"模拟器"一节。
+
+### 启用时序存储（可选）
+
+```bash
+docker run -d --name tdengine -p 16041:6041 tdengine/tdengine:3.3.6.13
+FB_TDENGINE_URL=http://127.0.0.1:16041 FB_TDENGINE_PASSWORD=<口令> pnpm dev:gateway
+```
+
+设置了 `FB_TDENGINE_URL` 时必须同时提供口令，网关不使用内置默认口令。首次连接会自动建库建表。
+
+---
+
+## 部署
+
+发布包是单个可执行文件加控制台静态文件，网关在同一端口托管控制台。
+
+```bash
+pnpm release                     # 产出 dist/release/<版本>/ 下的 Windows 与 Linux 包
+factorybridge user create --name admin --role admin --data-dir <数据目录>    # 系统没有默认账号
+factorybridge service install --data-dir <数据目录> -- --host 0.0.0.0 --allow-cidr 10.0.0.0/8
+factorybridge service start
+```
+
+- Windows 注册为系统服务，以虚拟账号运行，数据目录只对 SYSTEM、Administrators 和服务账号开放。
+- Linux 注册为 systemd 服务，以专用系统账号运行，并启用 systemd 的沙箱选项。
+- 监听非回环地址时强制 HTTPS，未提供证书则自动生成自签名证书。
+
+完整步骤、升级、备份恢复、回滚和排错见 **[deploy/README.md](deploy/README.md)**；上线前请对照 **[docs/SECURITY_ACCEPTANCE.md](docs/SECURITY_ACCEPTANCE.md)** 逐项验收。
+
+### Docker Compose 演示栈
+
+`docker-compose.yml` 一次起网关、TDengine、ProtoForge 和 IEC 104 模拟器，仅用于演示和联调，端口只绑定在 127.0.0.1。用法见文件开头的注释。
+
+---
+
+## 命令行
+
+```
+factorybridge run       前台运行网关
+factorybridge service   安装、卸载、启停系统服务（Windows 服务或 systemd）
+factorybridge user      管理用户（create / list / passwd / role / unlock / disable / enable / delete）
+factorybridge config    查看与导出配置版本（list / export）
+factorybridge migrate   把旧 JSON 状态文件导入 gateway.db
+factorybridge version   显示版本、提交号与构建时间
+```
+
+每个命令加 `-h` 查看参数。退出码：0 成功，1 运行错误，2 参数错误，3 配置错误。
+
+## 配置
+
+运行参数的优先级：命令行参数 > 环境变量 > 配置文件 > 默认值。
+
+- **环境变量**：统一用 `FB_` 前缀，例如 `FB_PORT`、`FB_DATA_DIR`、`FB_TDENGINE_URL`。完整列表见 [.env.example](.env.example)。旧名 `GATEWAY_GO_*`、`TDENGINE_*` 本版本仍可用，启动时会提示弃用。
+- **配置文件**：`factorybridge run --config <文件>`，YAML 格式，示例见 [deploy/factorybridge.example.yaml](deploy/factorybridge.example.yaml)。口令、令牌和开发模式只能用环境变量设置。
+- **采集配置**（通道、位号、告警、脚本等）通过控制台或 API 修改，保存在数据目录的 `gateway.db` 中，`config.json` 是同步写出的镜像。
+
+## API
+
+- 所有接口可通过 `/api/v1/...` 访问，与 `/api/...` 等价。
+- 错误统一返回 `{"ok": false, "error": "<说明>", "code": "<代码>"}`。
+- 接口清单可在控制台"系统配置"里下载 OpenAPI 文档，或请求 `GET /api/system/openapi.json`。
+
+---
+
+## 开发与测试
+
+```bash
+node scripts/ci-local.mjs --quick    # 本地门禁：类型检查、单元测试、go vet、go test、go build
+pnpm test                            # 控制台单元测试（Vitest）
+cd apps/gateway-go && go test ./...  # 网关单元测试
+pnpm e2e:docker                      # 端到端测试，见下
+```
+
+### 端到端测试
+
+```bash
+pnpm e2e:docker                 # 构建 linux 发布包 → 容器里起网关与 IEC 104 模拟器 → Playwright 跑测试 → 拆除
 pnpm e2e:docker --skip-build    # 复用 dist/release 里最新的 linux/amd64 包
 pnpm e2e:docker --keep          # 测试后保留测试栈便于排查（docker compose -p fbe2e down -v 清理）
 ```
 
-只需要 Docker，不依赖本机已运行的网关、控制台或 Edge；测试账号和口令每次随机生成，测试配置在 `e2e/fixtures/config.json`。失败时的 HTML 报告、截图和 trace 在 `.tmp/e2e-report/`。CI（`.github/workflows/ci.yml` 的 `e2e` 任务）运行同一个命令。
+只需要 Docker，不依赖本机已运行的网关、控制台或浏览器。测试账号和口令每次随机生成，测试配置在 `e2e/fixtures/config.json`。失败时的 HTML 报告、截图和 trace 在 `.tmp/e2e-report/`。
 
 针对本机已运行的网关（使用系统 Edge）：`E2E_BASE_URL=http://127.0.0.1:18080 E2E_USER=<用户> E2E_PASSWORD=<口令> pnpm e2e`。
 
-### 生产部署（服务化常驻）
+### 持续集成
 
-网关支持以系统服务方式常驻（开机自启、崩溃自动拉起、优雅停机落盘）：
-Linux systemd 单元见 `deploy/systemd/`，Windows WinSW 包装见 `deploy/windows/`，
-完整步骤与健康检查/故障排查速查表见 **`deploy/README.md`**。
-演示/试点亦可使用 `docker-compose.yml` 一键栈（网关 + 控制台 nginx + TDengine + 协议模拟器）。
+[GitHub Actions](https://github.com/troubleduxj/IotConnector/actions) 在每次推送到 `main` 和每个 Pull Request 上运行两个任务：
 
-### 环境变量（网关）
+- `build`：类型检查、控制台测试与构建、`go vet`、`go test -race`、构建网关。
+- `e2e`：运行 `pnpm e2e:docker`，失败时上传测试报告。
 
-| 变量 | 说明 | 默认 |
-|---|---|---|
-| `GATEWAY_PORT` | REST+WS 端口 | 8080 |
-| `FB_TDENGINE_URL` | taosAdapter REST 地址（如 `http://127.0.0.1:16041`），未设置则存储管道禁用 | — |
-| `FB_TDENGINE_DB` / `FB_TDENGINE_STABLE` | 目标库与超级表 | `factory_bridge` / `st_factory_equipment` |
+---
 
-### TDengine 存储与历史查询（Phase 0 已打通）
+## 技术栈
 
-```bash
-# 启动 TDengine（Docker，REST 映射到宿主机 16041 —— 6041 被 VMware vmnat 占用）
-docker run -d --name tdengine --restart unless-stopped -p 16030:6030 -p 16041:6041 tdengine/tdengine:3.3.6.13
+| 部分 | 选型 |
+|---|---|
+| 网关 | Go 1.26；SQLite（modernc.org/sqlite，纯 Go）；goja（脚本）；gos7、gopcua、gosnmp、paho.mqtt 等协议库 |
+| 控制台 | React 19、TypeScript、Vite、Tailwind CSS 4、Recharts、Zustand |
+| 时序库 | TDengine 3.3（超级表 + 子表） |
+| 测试 | Go testing、Vitest、Playwright |
 
-# 网关开启存储
-FB_TDENGINE_URL=http://127.0.0.1:16041 FB_TDENGINE_PASSWORD=<口令> pnpm dev:gateway
-```
+---
 
-- 写入管道：SQL 批量 `INSERT INTO db.tb_x USING <STable> TAGS(...) VALUES ...`，
-  按位号哈希自动建子表；断线缓存（10 万点上限）恢复后补写。
-  注：TDengine 3.3.6 的 taosAdapter 已移除 schemaless REST 端点（迁往 WebSocket），
-  故采用等价的 SQL 方式，超级表/子表架构与 PRD FR-M4-03 一致。
-- 历史查询 API：`GET /api/history?tagIds=1,5,8&start=<ms>&end=<ms>&interval=<秒可选>`
-  —— 服务端窗口聚合（AVG/MIN/MAX/点数，粒度自动降采样至 ~150 点）+ 统计包络
-  （Min/Max/均值/标准差/点数），对应 PRD FR-M7-03/05。
+## 许可协议
 
+本项目采用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**。
 
-### 已知问题：gopcua 版模拟器与外部 OPC UA 栈互操作
+- ✅ 允许：个人使用、学习、研究、试验，以及慈善机构、教育机构、公共研究机构、政府机构等非营利组织使用；可以修改和分发，分发时须附带许可协议与 [NOTICE](NOTICE) 中的版权声明。
+- ❌ 禁止：任何商业用途，包括在企业生产环境中部署、作为产品或服务的一部分对外提供、用于营利目的的项目。
 
-`D:\Cursor\Project\ProDB\opcua-simulator`（gopcua v0.8.0 / v0.9.1 服务端）的 opc.tcp 端点在收到
-OPN（打开安全通道）帧后会直接断开连接——node-opcua 客户端与裸二进制协议实现均被断链，
-仅 gopcua 自家客户端与 HTTP API 可用。PoC 期间已用 node-opcua v0.9.1 重新构建验证，行为一致，
-属 gopcua server 包的互操作缺陷。当前使用 `scripts/opcua-sim-node.ts`（node-opcua 服务器，
-节点命名与 gopcua 版兼容）联调；修复 gopcua 后仅需把通道 `endpointUrl` 切回即可，驱动零改动。
+如需商业授权，请在 [Issues](https://github.com/troubleduxj/IotConnector/issues) 中联系版权人。
 
-### 北向 MQTT/Sparkplug B + Reliable Outbox（决策 D7，已实现）
+> 本协议禁止商用，因此不属于 OSI 认可的"开源许可证"，更准确的说法是"源码公开"。以上中文说明仅供理解，具体权利义务以英文原文 [LICENSE](LICENSE) 为准。
 
-- 发布器：NBIRTH/DBIRTH/DDATA/NDEATH（Will）+ seq 单调 + REBIRTH 响应；
-  手写 Sparkplug B protobuf 编码器（无第三方依赖，vitest 覆盖）。
-- Reliable Outbox：断线期间 DDATA 入持久队列（outbox.jsonl，上限 1 万条），
-  broker 恢复后按序补传；报文内保留原始采样时间戳。
-- 状态/配置：`GET|PUT /api/northbound`、`POST /api/northbound/rebirth`；System Config 页有配置卡片。
-- 验证 broker：ProtoForge 的 MQTT 模拟器，或任意 MQTT broker（如 mosquitto）。
-
-### S7 驱动选型说明
-
-PRD 原定 node-snap7（native snap7 绑定），但其在 pnpm 下需要放行构建脚本且 Windows 编译依赖
-MSVC 工具链，不利交付。已改用 **nodes7**（同作者的纯 JS S7comm 实现，零原生依赖），
-天然满足 Linux/Windows 双平台要求；若后续需要 native 性能，可在驱动接口内替换，
-引擎代码无需改动。地址语法转换：`DB301.Real10 → DB301,REAL10`、`DB301.DBX20.0 → DB301,X20.0`。
+Copyright © 2026 troubleduxj. 第三方依赖遵循各自的许可协议。

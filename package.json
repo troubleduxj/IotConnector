@@ -1,6 +1,7 @@
 {
   "name": "iotconnector",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "version": "0.1.0",
   "description": "Factory Bridge - IIoT Edge Gateway Platform (console + gateway runtime)",
   "scripts": {

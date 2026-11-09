@@ -1,0 +1,16 @@
+Required Notice: Copyright (c) 2026 troubleduxj (https://github.com/troubleduxj/IotConnector)
+
+Factory Bridge (IotConnector) is licensed under the PolyForm Noncommercial
+License 1.0.0. See the LICENSE file for the full terms.
+
+Personal, educational, research and other noncommercial use is permitted.
+Any commercial use requires a separate written license from the copyright
+holder; open an issue at https://github.com/troubleduxj/IotConnector/issues
+to ask.
+
+本项目以 PolyForm Noncommercial License 1.0.0 授权，完整条款见 LICENSE 文件。
+允许个人、学习、研究等非商业用途的使用、修改与分发；任何商业用途须另行取得
+版权人的书面授权，可在上述 Issues 页面联系。中文说明仅供参考，以英文许可原文为准。
+
+Third-party components keep their own licenses; see the dependency manifests
+(apps/gateway-go/go.mod, package.json, pnpm-lock.yaml).

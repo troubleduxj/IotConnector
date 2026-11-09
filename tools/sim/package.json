@@ -1,6 +1,7 @@
 {
   "name": "@iotconnector/sim",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "version": "0.1.0",
   "type": "module",
   "description": "开发与故障测试用的协议模拟器（Modbus TCP、IEC 60870-5-104）。ProtoForge 覆盖其余协议。",

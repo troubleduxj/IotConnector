@@ -83,7 +83,7 @@
 | E1 | ✅ 已完成（2026-11-09，Docker Linux 容器）。本机无 gcc，`go test -race` 从未运行 | CI（Linux）加 `-race` | P0 | S |
 | E2 | 部分完成（cmd 57%、api 62%，全量路由×角色矩阵 4defa80）。Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
 | E3 | ✅ 已完成（阶段 1–3 随附：esc_test、outbox 重启/导入测试、concurrency_test）。无 `esc`/SQL、outbox 崩溃恢复、并发改配置测试 | 针对 C1/C2/C4 补测试 | P1 | S |
-| E4 | e2e 仅 87 行，依赖本机已启动服务且绑定 Edge，进不了 CI | e2e 自带启动（Go + 模拟器 + 静态控制台），CI 用 Chromium | P2 | M |
+| E4 | ✅ 已完成（2026-11-09，本机 Docker 实测；GitHub CI 待推送后验证）。e2e 仅 87 行，依赖本机已启动服务且绑定 Edge，进不了 CI | e2e 自带启动（Go + 模拟器 + 静态控制台），CI 用 Chromium | P2 | M |
 
 ## F. 部署形态（参考 koike-gateway；Q2 已决定，CLI 与跨平台见 H 组）
 
@@ -397,4 +397,5 @@ A4、A5 随后完成：
   - 修复（`cmd/factorybridge/acl_windows.go`）：安装时分两步执行 icacls：先在目录本身断开继承、只显式授予 SYSTEM 与 Administrators（完全控制）和服务账号（修改）；再对已有子项 `/reset`，改为继承收紧后的目录权限。用 SID 指定内置组，不受系统语言影响。
   - 分两步是实测得出的：一次调用里同时 `/inheritance:r` 与 `/T` 会把已有文件的 ACL 清空，连服务账号也打不开 `gateway.db`。
   - 新增 Windows 测试（无需管理员）：在临时目录上验证目录不再继承、已有文件与子目录文件只剩三条且仍可读、新建文件只继承三条、空目录不报错。管理员复验（真实服务 `fb-svctest`，6853086）：数据目录与 `gateway.db` 均只有 `NT SERVICEb-svctest`、`BUILTIN\Administrators`、`NT AUTHORITY\SYSTEM` 三条，目录条目不带 `(I)`；以本机普通账号（未提权）列目录、读 `gateway.db`、写入新文件均被拒绝；卸载后 `sc query` 返回 1060，数据目录保留。
-- 仍未做：E4 e2e 进 CI（需要 CI 环境）。
+- **E4 e2e 自带环境**：新增 `pnpm e2e:docker`（`scripts/e2e-docker.mjs` + `e2e/docker-compose.e2e.yml`）。构建 linux 发布包 → 容器里起网关与 IEC104 模拟器 → 装入 `e2e/fixtures/config.json`（S7 与 IEC104 两个通道，不含口令）→ 创建随机口令的测试账号 → 用 Playwright 官方镜像（Chromium）跑 e2e → 拆除。不依赖本机已运行的服务或 Edge；`playwright.config.ts` 在 `E2E_BROWSER=chromium` 时用镜像自带浏览器，否则仍用系统 Edge。本机实测 3 个用例全部通过（驱动灰度切换、登录→调度→Bool 历史、登录失败提示），无残留容器。
+- **CI**：`.github/workflows/ci.yml` 新增 `e2e` 任务运行同一命令，失败时上传 `.tmp/e2e-report`；构建任务改为 `go test -race`。仓库远程设为 `https://github.com/troubleduxj/IotConnector.git`，尚未推送，GitHub 上的 CI 结果待推送后确认。

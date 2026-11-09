@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 2,
+  "channels": [
+    {
+      "id": "s7-01",
+      "name": "R0021_S7_1500",
+      "protocol": "Siemens Profinet",
+      "host": "127.0.0.1",
+      "port": 10102,
+      "enabled": true,
+      "pollIntervalMs": 500,
+      "params": {
+        "pduSize": 480,
+        "rack": 0,
+        "s7Model": "S7-1500",
+        "slot": 1
+      }
+    },
+    {
+      "id": "ch_1788837034253",
+      "name": "IEC104_Substation_01",
+      "protocol": "IEC 60870-5-104",
+      "host": "127.0.0.1",
+      "port": 12404,
+      "enabled": true,
+      "pollIntervalMs": 3000,
+      "params": {
+        "commonAddress": 1,
+        "kValue": 12
+      }
+    }
+  ],
+  "tags": [
+    {
+      "id": "1",
+      "channelId": "s7-01",
+      "name": "R0021.pH",
+      "address": "DB301.Real10",
+      "dataType": "Float",
+      "unit": "pH",
+      "scale": 1,
+      "offset": 0,
+      "engMin": 0,
+      "engMax": 14
+    },
+    {
+      "id": "2",
+      "channelId": "s7-01",
+      "name": "R0021.Temperature",
+      "address": "DB301.Real14",
+      "dataType": "Float",
+      "unit": "°C",
+      "scale": 1,
+      "offset": 0,
+      "engMin": 20,
+      "engMax": 50
+    },
+    {
+      "id": "3",
+      "channelId": "s7-01",
+      "name": "R0021.Pressure",
+      "address": "DB301.Real18",
+      "dataType": "Float",
+      "unit": "bar",
+      "scale": 1,
+      "offset": 0,
+      "engMin": 0,
+      "engMax": 3
+    },
+    {
+      "id": "4",
+      "channelId": "s7-01",
+      "name": "R0021.alm1",
+      "address": "DB301.DBX20.0",
+      "dataType": "Bool",
+      "unit": "",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_0",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.UaVoltage",
+      "address": "IOA:1",
+      "dataType": "Float",
+      "unit": "kV",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_1",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.IaCurrent",
+      "address": "IOA:2",
+      "dataType": "Float",
+      "unit": "A",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_2",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.ActivePower",
+      "address": "IOA:3",
+      "dataType": "Float",
+      "unit": "MW",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_3",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.Frequency",
+      "address": "IOA:4",
+      "dataType": "Float",
+      "unit": "Hz",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_4",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.CB1Closed",
+      "address": "IOA:1001",
+      "dataType": "Bool",
+      "unit": "",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_5",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.CB2Closed",
+      "address": "IOA:1002",
+      "dataType": "Bool",
+      "unit": "",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_6",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.ProtTripped",
+      "address": "IOA:1003",
+      "dataType": "Bool",
+      "unit": "",
+      "scale": 1,
+      "offset": 0
+    },
+    {
+      "id": "tg_1788837034253_7",
+      "channelId": "ch_1788837034253",
+      "name": "SUB.LocalRemote",
+      "address": "IOA:1004",
+      "dataType": "Bool",
+      "unit": "",
+      "scale": 1,
+      "offset": 0
+    }
+  ],
+  "northbound": {
+    "enabled": false
+  },
+  "alarms": [],
+  "scripts": [],
+  "storageTasks": [],
+  "recipes": []
+}

@@ -1,0 +1,64 @@
+# E2E 测试栈（E4）：网关 + IEC104 模拟器 + Playwright，全部在容器里运行，不依赖本机已启动的服务。
+#
+# 用法（仓库根目录）：
+#   pnpm e2e:docker            构建并运行，结束后拆除
+# 直接使用 compose 时需先产出 linux 发布包并设置 FB_PKG（见 scripts/e2e-docker.mjs）。
+#
+# 网关读取 e2e/fixtures/config.json（2 个通道：s7-01 与 IEC104 变电站），以开发模式外的普通模式运行，
+# 测试账号由 e2e-docker.mjs 用 `user create` 建立。网关监听 127.0.0.1，模拟器与浏览器共享其网络栈，
+# 因此通道配置里的 127.0.0.1:12404 与浏览器访问的 http://127.0.0.1:18080 都无需改写。
+
+name: fbe2e
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PKG: ${FB_PKG:?set FB_PKG to the linux release package directory}
+    # 只监听回环地址：走明文 HTTP，浏览器与模拟器经共享网络栈访问。
+    command: ["run", "--data-dir", "/data", "--host", "127.0.0.1", "--port", "18080"]
+    environment:
+      FB_DRIVER_MODE: go
+    volumes:
+      - e2e-data:/data
+    healthcheck:
+      test: ["CMD", "/opt/factorybridge/factorybridge", "version"]
+      interval: 2s
+      retries: 10
+
+  iec104-sim:
+    image: node:22-alpine
+    working_dir: /workspace/tools/sim
+    volumes:
+      - ..:/workspace:ro
+    network_mode: "service:gateway"
+    command: sh -c "IEC104_SIM_PORT=12404 npx --yes tsx@4 iec104-sim.ts"
+    depends_on:
+      gateway:
+        condition: service_started
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    working_dir: /workspace
+    network_mode: "service:gateway"
+    environment:
+      E2E_BASE_URL: http://127.0.0.1:18080
+      E2E_USER: ${E2E_USER:-e2e-admin}
+      E2E_PASSWORD: ${E2E_PASSWORD:?set E2E_PASSWORD}
+      E2E_BROWSER: chromium
+      CI: "true"
+    volumes:
+      - ..:/src:ro
+      - ../.tmp/e2e-report:/report
+    # 源码只读挂载，拷到容器内再装依赖：避免 Windows 宿主的 node_modules 混进 Linux 容器。
+    command: >
+      sh -c "mkdir -p /workspace && cd /src && cp -r package.json playwright.config.ts e2e /workspace/ &&
+             cd /workspace && npm install --no-save --no-audit --no-fund @playwright/test@1.63.0 >/dev/null &&
+             npx playwright test --reporter=list,html --output=/report/results; code=$$?;
+             cp -r playwright-report /report/html 2>/dev/null; exit $$code"
+    profiles: ["test"]
+
+volumes:
+  e2e-data:

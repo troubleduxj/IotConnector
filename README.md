@@ -194,6 +194,18 @@
 4. **访问控制台**：
    在浏览器中打开 `http://localhost:3000`。Dashboard 顶栏徽章显示网关连接状态；"Live Equipment Status" 中的实时位号（pH/温度/压力/转速/电流）由网关推送驱动。
 
+### 端到端测试（e2e）
+
+```bash
+pnpm e2e:docker                 # 构建 linux 发布包 → 容器里起网关与 IEC104 模拟器 → Playwright 跑测试 → 拆除
+pnpm e2e:docker --skip-build    # 复用 dist/release 里最新的 linux/amd64 包
+pnpm e2e:docker --keep          # 测试后保留测试栈便于排查（docker compose -p fbe2e down -v 清理）
+```
+
+只需要 Docker，不依赖本机已运行的网关、控制台或 Edge；测试账号和口令每次随机生成，测试配置在 `e2e/fixtures/config.json`。失败时的 HTML 报告、截图和 trace 在 `.tmp/e2e-report/`。CI（`.github/workflows/ci.yml` 的 `e2e` 任务）运行同一个命令。
+
+针对本机已运行的网关（使用系统 Edge）：`E2E_BASE_URL=http://127.0.0.1:18080 E2E_USER=<用户> E2E_PASSWORD=<口令> pnpm e2e`。
+
 ### 生产部署（服务化常驻）
 
 网关支持以系统服务方式常驻（开机自启、崩溃自动拉起、优雅停机落盘）：

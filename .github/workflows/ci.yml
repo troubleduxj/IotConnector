@@ -25,9 +25,40 @@ jobs:
       - run: pnpm -r typecheck
       - run: pnpm test
       - run: pnpm --filter @iotconnector/console build
-      - run: go test ./...
-        working-directory: apps/gateway-go
       - run: go vet ./...
         working-directory: apps/gateway-go
+      # -race 需要 cgo；GitHub 的 Ubuntu 镜像自带 gcc（E1）。
+      - run: go test -race -count=1 ./...
+        working-directory: apps/gateway-go
+        env:
+          CGO_ENABLED: "1"
       - run: go build ./cmd/factorybridge
         working-directory: apps/gateway-go
+
+  # E4：自带环境的端到端测试。网关、IEC104 模拟器与 Playwright 全部在容器里运行，
+  # 不依赖预先启动的服务；与本机 `pnpm e2e:docker` 是同一个脚本。
+  e2e:
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/gateway-go/go.mod
+          cache-dependency-path: apps/gateway-go/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm e2e:docker
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-report
+          path: .tmp/e2e-report
+          retention-days: 7

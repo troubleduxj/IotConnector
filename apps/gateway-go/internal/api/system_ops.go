@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/factorybridge/iotconnector/gateway-go/internal/config"
@@ -32,15 +34,29 @@ func (s *Server) configBackup(w http.ResponseWriter, r *http.Request) {
 	raw["channels"] = channelsOrEmpty(cfg.Channels)
 	raw["tags"] = tagsOrEmpty(cfg.Tags)
 
+	// 默认不导出口令（口令只写不读，与各配置页一致）：敏感字段置空并带 <key>Set 标记。
+	// 迁移到另一台网关需要完整备份时显式加 ?includeSecrets=1，该操作单独记审计。
+	includeSecrets := r.URL.Query().Get("includeSecrets") == "1"
+	var exported any = raw
+	if !includeSecrets {
+		var generic map[string]any
+		if err := roundTripJSON(raw, &generic); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		exported = redactSecrets(generic)
+	}
+
 	channels := len(cfg.Channels)
 	tags := len(cfg.Tags)
-	s.recordAudit(r, actor(r), "system.config-backup", "config", map[string]any{"channels": channels, "tags": tags})
+	s.recordAudit(r, actor(r), "system.config-backup", "config", map[string]any{"channels": channels, "tags": tags, "includeSecrets": includeSecrets})
 
 	w.Header().Set("Content-Disposition", `attachment; filename="factorybridge-config.json"`)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"format":     configBackupFormat,
-		"exportedAt": time.Now().UTC().Format(time.RFC3339),
-		"config":     raw,
+		"format":         configBackupFormat,
+		"exportedAt":     time.Now().UTC().Format(time.RFC3339),
+		"secretsOmitted": !includeSecrets,
+		"config":         exported,
 	})
 }
 
@@ -57,6 +73,25 @@ func (s *Server) configRestore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "body.format 必须为 factorybridge-config@1 且含 config"})
 		return
 	}
+	// 备份默认不含口令：文件里为空的敏感字段沿用本机当前值（通道按 ID 对应），
+	// 本机也没有的列在响应 secretsMissing 里，需在界面重新填写。
+	var current map[string]any
+	{
+		cfg := s.cfg()
+		snapshot := config.DeepCopyMap(cfg.Raw)
+		if snapshot == nil {
+			snapshot = map[string]any{}
+		}
+		snapshot["channels"] = channelsOrEmpty(cfg.Channels)
+		snapshot["tags"] = tagsOrEmpty(cfg.Tags)
+		if err := roundTripJSON(snapshot, &current); err != nil {
+			current = map[string]any{}
+		}
+	}
+	var secretsMissing []string
+	restoreSecrets(body.Config, current, "", &secretsMissing)
+	sort.Strings(secretsMissing)
+
 	rawChannels, okChannels := body.Config["channels"].([]any)
 	rawTags, okTags := body.Config["tags"].([]any)
 	if !okChannels || !okTags {
@@ -92,8 +127,8 @@ func (s *Server) configRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	s.resyncDependentEngines()
 
-	s.recordAudit(r, actor(r), "system.config-restore", "config", map[string]any{"channels": len(channels), "tags": len(tags)})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "counts": map[string]any{"channels": len(channels), "tags": len(tags)}})
+	s.recordAudit(r, actor(r), "system.config-restore", "config", map[string]any{"channels": len(channels), "tags": len(tags), "secretsMissing": len(secretsMissing)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "counts": map[string]any{"channels": len(channels), "tags": len(tags)}, "secretsMissing": nonNilStrings(secretsMissing)})
 }
 
 func (s *Server) factoryReset(w http.ResponseWriter, r *http.Request) {
@@ -234,4 +269,79 @@ func tagsOrEmpty(tags []domain.Tag) []domain.Tag {
 		return []domain.Tag{}
 	}
 	return tags
+}
+
+// restoreSecrets 原地处理待恢复的配置：去掉 <key>Set 标记；敏感字段为空时取 current 同一路径的值。
+// 数组元素带 id 时按 id 对应（通道、位号），否则按下标。仍为空、且备份标记"原本已设置"的，记入 missing。
+func restoreSecrets(incoming, current map[string]any, path string, missing *[]string) {
+	for key, value := range incoming {
+		if strings.HasSuffix(key, "Set") && isSecretKey(strings.TrimSuffix(key, "Set")) {
+			continue
+		}
+		child := key
+		if path != "" {
+			child = path + "." + key
+		}
+		if isSecretKey(key) {
+			if text, _ := value.(string); text != "" {
+				continue
+			}
+			if existing, ok := current[key].(string); ok && existing != "" {
+				incoming[key] = existing
+				continue
+			}
+			if wasSet, _ := incoming[key+"Set"].(bool); wasSet {
+				*missing = append(*missing, child)
+			}
+			continue
+		}
+		switch typed := value.(type) {
+		case map[string]any:
+			next, _ := current[key].(map[string]any)
+			if next == nil {
+				next = map[string]any{}
+			}
+			restoreSecrets(typed, next, child, missing)
+		case []any:
+			old, _ := current[key].([]any)
+			byID := map[string]map[string]any{}
+			for _, item := range old {
+				if m, ok := item.(map[string]any); ok {
+					if id, ok := m["id"].(string); ok && id != "" {
+						byID[id] = m
+					}
+				}
+			}
+			for i, item := range typed {
+				m, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				var match map[string]any
+				label := fmt.Sprintf("%s[%d]", child, i)
+				if id, ok := m["id"].(string); ok && id != "" {
+					match = byID[id]
+					label = fmt.Sprintf("%s[%s]", child, id)
+				} else if i < len(old) {
+					match, _ = old[i].(map[string]any)
+				}
+				if match == nil {
+					match = map[string]any{}
+				}
+				restoreSecrets(m, match, label, missing)
+			}
+		}
+	}
+	for key := range incoming {
+		if strings.HasSuffix(key, "Set") && isSecretKey(strings.TrimSuffix(key, "Set")) {
+			delete(incoming, key)
+		}
+	}
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }

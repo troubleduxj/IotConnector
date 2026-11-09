@@ -245,8 +245,9 @@ Docker Compose 演示栈（`docker-compose.yml`）中，`TDENGINE_PASSWORD` 默�
 文件名 `factorybridge-config.json`，格式为 `factorybridge-config@1`，包含 `schemaVersion`、`channels`、`tags` 和配置的其它部分。
 不包含 `users`。它不包含用户、会话、历史、告警、审计和待发送队列。对应的恢复接口是 `POST /api/system/config-restore`（需要 admin 权限）。
 
-注意：`config.json` 和配置备份文件中的口令（如北向 MQTT 密码、通知邮箱密码、钉钉密钥）是明文。网关只在 `GET` 响应中隐藏这些字段，
-配置备份接口没有做同样的脱敏。备份文件和数据目录副本要按口令材料保管，权限只开放给运维人员。
+配置备份默认不含口令（北向 MQTT 密码、通知邮箱密码、钉钉密钥与 webhook 地址、通道口令等）：这些字段为空，并带 `<字段>Set` 标记说明原本已设置。在同一台网关上恢复时沿用本机现有口令；恢复到另一台网关时，响应里的 `secretsMissing` 列出需要重新填写的项，控制台恢复后会提示。
+迁移到新网关、确需连同口令一起备份时，用 `GET /api/system/config-backup?includeSecrets=1`（需要 admin 权限，审计日志记录 `includeSecrets`）。这样的文件要按口令材料保管。
+`config.json` 本身仍以明文保存口令，数据目录的权限只开放给网关服务账号和运维人员。
 
 ### 备份操作
 

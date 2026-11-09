@@ -85,8 +85,9 @@ func TestConfigBackupReturnsFormatChannelsTagsAndHeader(t *testing.T) {
 		t.Fatal("backup config must not contain users")
 	}
 	northbound, _ := out.Config["northbound"].(map[string]any)
-	if northbound["password"] != "nb-secret-123" {
-		t.Fatalf("northbound password should be included in backup, got %v", northbound)
+	// 默认备份不含口令，只标记已设置（见 backup_secrets_test.go）。
+	if northbound["password"] != "" || northbound["passwordSet"] != true {
+		t.Fatalf("northbound password should be omitted from the default backup, got %v", northbound)
 	}
 }
 

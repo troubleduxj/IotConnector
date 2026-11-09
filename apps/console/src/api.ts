@@ -832,9 +832,17 @@ export async function downloadConfigBackup(): Promise<void> {
 }
 
 /** B6 全量配置恢复（admin）：整体替换并同步引擎 */
-export async function restoreConfigBackup(bundle: unknown): Promise<{ counts?: { channels: number; tags: number } }> {
+export async function restoreConfigBackup(
+  bundle: unknown,
+): Promise<{ counts?: { channels: number; tags: number }; secretsMissing?: string[] }> {
   const res = await apiFetch('/api/system/config-restore', jsonPost(bundle));
-  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; counts?: { channels: number; tags: number } };
+  const body = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    counts?: { channels: number; tags: number };
+    // 备份默认不含口令；本机也没有的口令列在这里，需重新填写。
+    secretsMissing?: string[];
+  };
   if (!res.ok || body.ok !== true) throw new Error(body.error ?? 'restore failed');
   return body;
 }

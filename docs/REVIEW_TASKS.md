@@ -340,5 +340,11 @@ A4、A5 随后完成：
 
 - F5：`/api/v1/...` 与 `/api/...` 指向同一组处理函数（在鉴权、白名单、CORS 之前改写路径，权限一致），响应头 `API-Version: 1`。所有 `/api` 错误响应统一为 `{"ok":false,"error":"…","code":"…"}`：原有 `error` 文字不变（控制台照旧读取），按状态码补 `code`，原有额外字段保留；ServeMux 的纯文本 404/405 改写为 JSON。OpenAPI 文档增加 `Error` 结构。隔离网关实测：错误登录、无令牌、未知路径、405、参数错误、跨站来源都返回统一格式，成功响应不变，控制台页面正常。
 - H7（子任务 Haiku 编写，主会话核查）：`deploy/README.md` 扩展为完整部署手册；新增 `docs/SECURITY_ACCEPTANCE.md` 安全验收清单。核查了文中所有 API 路径、命令行参数和环境变量均存在于代码；改正 3 处：明文 HTTP 访问 HTTPS 端口实测返回 400；会话默认 8 小时；脚本自动禁用的表现。
-- 待办（核查时发现）：配置备份接口 `GET /api/system/config-backup` 导出的口令（北向、通知等）是明文，未脱敏。手册与清单已注明按口令材料保管。
+- 配置备份口令（核查时发现，随后修复）：见下节。
 - 待办：`deploy/systemd/factory-bridge-gateway.service` 仍是 Node 网关的单元文件，应删除或改为 `factorybridge service install` 生成的内容。
+
+## 配置备份不再导出口令（2026-11-09）
+
+- `GET /api/system/config-backup` 默认把口令类字段置空并加 `<字段>Set` 标记（与各配置页"只写不读"一致），响应带 `secretsOmitted: true`。需要完整迁移时显式加 `?includeSecrets=1`，审计日志记录该参数。
+- `POST /api/system/config-restore`：文件里为空的口令沿用本机当前值（通道、位号按 ID 对应）；本机也没有、但备份标记原本已设置的，列在响应 `secretsMissing` 中，控制台恢复后提示需重新填写。`<字段>Set` 标记不写入配置。
+- 测试 5 个新用例（默认不泄露、显式包含、同机恢复保留口令、新网关列出缺失项、完整备份以文件为准）。隔离网关实测：北向口令写入后，默认备份不含该口令，完整备份含；用默认备份恢复后口令仍在，`passwordSet` 未写入 config.json。

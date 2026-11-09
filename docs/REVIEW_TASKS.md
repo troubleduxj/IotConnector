@@ -40,7 +40,7 @@
 | C2 | ✅ 已修复（阶段 1，91bba6e）。`config.Raw` map 被采样/告警协程无锁读、API 加锁写，会触发 Go 致命错误使进程退出；`onSample` 无锁遍历 `config.Tags` | `store.go:70-72`、`scripts.go:125`、`notifications.go:75`、`server.go:151,170,835` | 配置改为不可变快照（atomic.Pointer），修改时写时复制；CI 跑 `-race` | P0 | M |
 | C3 | ✅ 已完成（阶段 3，16a5fb1）。每个样本同步写盘：history 每点 fsync 且不轮转；outbox 每次入队重写整个队列（最多 10 万点）；shadow、northbound 状态同样 | `monitoring.go:72-78`、`tdengine.go:232,410-433`、`shadow.go:69`、`publisher.go:226` | 批量刷盘（按时间/条数）；history 轮转；outbox 改追加分段 | P1 | M |
 | C4 | ✅ 已完成（阶段 3，16a5fb1）。outbox 分段先删旧再写新，中间崩溃丢数据；northbound/shadow/password 写入非原子或无 fsync | `tdengine.go:417-420`、`publisher.go:337`、`shadow.go:162`、`password.go:140` | 统一使用"临时文件 + fsync + rename"工具函数 | P1 | S |
-| C5 | 改配置先改内存再保存，失败不回滚；每次改通道/位号重启全部驱动且持锁；北向发布器和 CMD 处理只认启动时配置 | `server.go:834-845`、`engine.go:114`、`main.go:90,93` | 保存成功后再切换快照；按通道增量重载；北向订阅配置变更 | P1 | M |
+| C5 | ✅ 已完成（8b7fe20）。改配置先改内存再保存，失败不回滚；每次改通道/位号重启全部驱动且持锁；北向发布器和 CMD 处理只认启动时配置 | `server.go:834-845`、`engine.go:114`、`main.go:90,93` | 保存成功后再切换快照；按通道增量重载；北向订阅配置变更 | P1 | M |
 | C6 | ✅ 已完成（f9b0e9b）。Patch 接口可改写 `id`/`channelId`，跳过端口和通道校验 | `server.go:568-569,772-773` | 禁止修改主键字段；更新后重新跑校验 | P1 | S |
 | C7 | ✅ 已完成（e30583f，100ms 合并，新增丢弃计数指标）。WS 每个样本单独发一条消息；客户端缓冲（32）满时静默丢弃 | `server.go:176`、`websocket.go:75-78` | 按 50–100 ms 合并批次；记录丢弃计数 | P1 | S |
 | C8 | ✅ 已完成（94d202c、21bc203、8d4d7ac）。单个 Modbus 位号出错导致整个通道 offline | `acquisition/modbus.go:99-101` | 位号级质量码，通道状态只反映连接 | P1 | S |
@@ -81,7 +81,7 @@
 | ID | 问题 | 建议动作 | 优先级 | 工作量 |
 |---|---|---|---|---|
 | E1 | 本机无 gcc，`go test -race` 从未运行 | CI（Linux）加 `-race` | P0 | S |
-| E2 | Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
+| E2 | 部分完成（cmd 57%、api 51%，见 2026-11-09 记录）。Go 无路由级 RBAC 测试；config 包、cmd 无测试；api 覆盖率 27% | 表驱动 RBAC 矩阵测试（每条路由 × 每个角色） | P1 | M |
 | E3 | ✅ 已完成（阶段 1–3 随附：esc_test、outbox 重启/导入测试、concurrency_test）。无 `esc`/SQL、outbox 崩溃恢复、并发改配置测试 | 针对 C1/C2/C4 补测试 | P1 | S |
 | E4 | e2e 仅 87 行，依赖本机已启动服务且绑定 Edge，进不了 CI | e2e 自带启动（Go + 模拟器 + 静态控制台），CI 用 Chromium | P2 | M |
 
@@ -93,7 +93,7 @@
 | F2 | ✅ 已完成（阶段 4，68f3e94）。监听地址写死 `127.0.0.1`，只有 HTTP | 监听地址可配置；HTTPS（企业证书 / 自签名回退）；客户端网段白名单 | P1 | M |
 | F3 | ✅ 已完成（阶段 4，26603e5）。没有发布包 | 由 H6 覆盖：Windows/Linux 两套发布包 | P1 | S |
 | F4 | ✅ 已完成（阶段 2，8ac541c）。有默认账号 | 由 H4、H5 覆盖：生产模式无默认账号，用 `user create` 或初始化码创建首个管理员 | P1 | M |
-| F5 | API 无版本、错误格式不统一 | `/api/v1` + 统一错误体 `{error,message,requestId}`；保留 `/api` 兼容期 | P2 | M |
+| F5 | ✅ 已完成（f91f68b）。API 无版本、错误格式不统一 | `/api/v1` + 统一错误体 `{error,message,requestId}`；保留 `/api` 兼容期 | P2 | M |
 | F6 | API 与告警/脚本调度耦合在 `api.Server` 中 | 抽出运行时接口（参考 koike `Runtime`），关闭管理 API 时采集、告警、北向照常运行 | P2 | L |
 
 **依赖关系：F1/F2 必须在 B1–B5 之后。** 在默认拒绝的鉴权落地前把监听地址放开到 `0.0.0.0`，等于把 PLC 写入口暴露到全网段。
@@ -141,7 +141,7 @@ G2–G4 完成后，C3 和 C4 关闭。C2（配置改为不可变快照）不依
 | H4 | ✅ 已完成（阶段 2，8ac541c）。认证体系：多用户 + 角色（viewer / operator / engineer / admin，与控制台已有的 `engineer` 对齐）；口令用 argon2id 或 bcrypt，加口令策略；访问令牌短期有效 + 刷新令牌轮换；API Key 最高只能是 operator；密钥文件放 `secrets/`，Windows 用 DPAPI 加密，Linux 用 0600 权限；统一鉴权中间件（合并 B7） | B1–B5、G1 | P0 | L |
 | H5 | ✅ 已完成（阶段 2，8ac541c）。运行模式：见下方规则 | H4 | P0 | M |
 | H6 | ✅ 已完成（阶段 4，26603e5）。发布：`build` 脚本交叉编译 `windows/amd64`、`linux/amd64`、`linux/arm64`（`CGO_ENABLED=0`，依赖 G1 选纯 Go 的 SQLite）；产出 zip/tar.gz，内含二进制、`web/`、`config.example.yaml`、文档、sha256；`version` 注入提交号 | H1、F1 | P1 | S |
-| H7 | 文档：部署手册、快速部署步骤、安全验收说明（参考 koike `docs/`），Windows 和 Linux 各一节 | H1–H6 | P2 | M |
+| H7 | ✅ 已完成（a206729）。文档：部署手册、快速部署步骤、安全验收说明（参考 koike `docs/`），Windows 和 Linux 各一节 | H1–H6 | P2 | M |
 | H8 | CLI 测试：命令解析表驱动测试；`service` 在两个平台各做一次安装、启动、卸载的冒烟测试 | H1–H3 | P2 | S |
 
 ### H5 运行模式规则

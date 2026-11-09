@@ -1,40 +1,35 @@
-# Factory Bridge 网关 systemd 服务单元（Linux）
-# 安装：
-#   1. 按实际路径修改 User= 与各 /opt/factory-bridge 路径
-#   2. sudo cp deploy/systemd/factory-bridge-gateway.service /etc/systemd/system/
-#   3. sudo systemctl daemon-reload
-#   4. sudo systemctl enable --now factory-bridge-gateway
-# 查看状态/日志：systemctl status factory-bridge-gateway · journalctl -u factory-bridge-gateway -f
-
+# 本文件仅作参考，内容为 factorybridge service install 生成的单元（Linux，默认服务名 factorybridge、运行账号 factorybridge）。
+# 推荐做法：sudo factorybridge service install --data-dir /var/lib/factorybridge -- --host 0.0.0.0 --allow-cidr 10.0.0.0/8
+#   该命令把单元写入 /etc/systemd/system/factorybridge.service（见 apps/gateway-go/cmd/factorybridge/service_linux.go 的 unitPath）。
+# 若手工安装，请按实际路径调整 ExecStart、ReadWritePaths，然后执行 systemctl daemon-reload 与 systemctl enable --now factorybridge。
+# 由 factorybridge service install 生成；修改参数请 uninstall 后重新 install
 [Unit]
-Description=Factory Bridge IIoT Edge Gateway
-Documentation=file:///opt/factory-bridge/README.md
-After=network-online.target docker.service
+Description=FactoryBridge IIoT edge gateway (factorybridge)
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-# 运行账号建议使用非 root 专用账号；data/ 目录（配置/审计/会话/影子持久化）需对其可写
-User=fbridge
-Group=fbridge
-# 注意：持久化目录 data/ 按 process.cwd() 解析，WorkingDirectory 必须指向 apps/gateway
-WorkingDirectory=/opt/factory-bridge/apps/gateway
-Environment=NODE_ENV=production
-Environment=GATEWAY_PORT=8080
-Environment=TDENGINE_URL=http://127.0.0.1:16041
-Environment=TDENGINE_DB=factory_bridge
-# node --import tsx：生产环境以 tsx 加载器直接运行 TypeScript 入口（与 pnpm start 等价，免去构建步骤）
-ExecStart=/usr/bin/node --import tsx src/index.ts
-Restart=always
+User=factorybridge
+Group=factorybridge
+ExecStart="/opt/factorybridge/factorybridge" "run" "--data-dir" "/var/lib/factorybridge" "--host" "0.0.0.0" "--allow-cidr" "10.0.0.0/8"
+Restart=on-failure
 RestartSec=5
-# 崩溃退避；网关自身已对 TDengine/MQTT 不可达做降级，正常情况只在外部强杀时退出
 StartLimitIntervalSec=60
 StartLimitBurst=5
 KillSignal=SIGINT
-TimeoutStopSec=15
+TimeoutStopSec=20
 NoNewPrivileges=true
-ProtectSystem=full
-ReadWritePaths=/opt/factory-bridge/apps/gateway/data
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths="/var/lib/factorybridge"
+# 监听 1024 以下端口（如 443）时需要；默认端口 18080 用不到
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target

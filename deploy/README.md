@@ -136,8 +136,7 @@ cd D:\FactoryBridge\factorybridge-<版本>-windows-amd64
 
 ## Linux 安装
 
-Linux 上使用 `factorybridge service install` 注册 systemd 服务。不要使用 `deploy/systemd/factory-bridge-gateway.service`，
-那是 Node 网关的单元文件，已冻结。
+Linux 上使用 `factorybridge service install` 注册 systemd 服务；`deploy/systemd/factory-bridge-gateway.service` 是该命令生成内容的参考副本，手工安装时可以以它为起点。
 
 ```bash
 sudo ./factorybridge user create --name admin --role admin --data-dir /var/lib/factorybridge
